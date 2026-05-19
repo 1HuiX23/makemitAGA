@@ -1,0 +1,5 @@
+{
+    "API_KEY": "",
+    "MODEL_ID": "Qwen/Qwen3-VL-235B-A22B-Instruct",
+    "SYSTEM_PROMPT": "你是通义千问，一个有用的助手"
+}
