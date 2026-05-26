@@ -1,4 +1,4 @@
-﻿/*
+/*
  * [文件说明]: 对话与交互的核心钩子 (say, look, goto, anim)
  * 
  * [分析过程]:
@@ -32,6 +32,7 @@ using HarmonyLib;
 using MakemitAGA.Connection;
 using MakemitAGA.Dialogue;
 using MakemitAGA.World;
+using MakemitAGA.Mita_self.Mita_tools;
 using UnityEngine;
 using UnityEngine.AI;
 
@@ -135,6 +136,36 @@ namespace MakemitAGA.Mita_self
                 return false;
             }
 
+            if (command.Equals("create_test_cube", StringComparison.OrdinalIgnoreCase))
+            {
+                CreateTestObject.CreateTestCubes();
+                return false;
+            }
+
+            if (IsSitCommand(command))
+            {
+                string targetName = ParseSitCommandArgument(command);
+                if (string.IsNullOrWhiteSpace(targetName))
+                {
+                    ConsoleMain.ConsolePrintGame("用法: sit(TestChair_High)");
+                    return false;
+                }
+
+                Mita_sit.Sit(targetName);
+                return false;
+            }
+
+            if (command.Equals("reset_mita", StringComparison.OrdinalIgnoreCase))
+            {
+                // reset_mita 对应测试阶段的 F8 恢复逻辑。
+                // Mita_sit.UnlockAndResume() 内部会根据当前状态决定：
+                // 1. 如果正在走向座椅/准备入座：取消动作并恢复原生状态；
+                // 2. 如果已经坐稳：执行完整起身流程，然后还原 Animator / FinalIK / NavMeshAgent / 控制权锁；
+                // 3. 如果没有坐姿会话：EnsureInstance 后不会破坏当前状态，只会尝试做轻量恢复。
+                Mita_sit.UnlockAndResume();
+                return false;
+            }
+
             if (command.StartsWith("faceid ", StringComparison.OrdinalIgnoreCase))
             {
                 if (int.TryParse(command.Substring(7).Trim(), out int id))
@@ -144,6 +175,13 @@ namespace MakemitAGA.Mita_self
 
             if (command.Equals("come", StringComparison.OrdinalIgnoreCase))
             {
+                // 如果当前由 Mita_sit 接管坐姿，先走完整起身/还原流程，再恢复原生跟随。
+                if (Mita_sit.HasActiveSession)
+                {
+                    Mita_sit.UnlockAndResume();
+                    return false;
+                }
+
                 IsAIControllingMovement = false;
                 Plugin.Runner.StartCoroutine(ResumeFollowPlayer().WrapToIl2Cpp());
                 return false;
@@ -154,13 +192,6 @@ namespace MakemitAGA.Mita_self
                 string targetName = command.Substring(5).Trim();
                 IsAIControllingMovement = true;
                 Plugin.Runner.StartCoroutine(WalkToObj(targetName).WrapToIl2Cpp());
-                return false;
-            }
-
-            if (command.StartsWith("test_sit ", StringComparison.OrdinalIgnoreCase))
-            {
-                string targetName = command.Substring(9).Trim();
-                Plugin.Runner.StartCoroutine(InteractionManager.PerformSit(targetName).WrapToIl2Cpp());
                 return false;
             }
 
@@ -289,6 +320,33 @@ namespace MakemitAGA.Mita_self
             }
 
             return true;
+        }
+
+        private static bool IsSitCommand(string command)
+        {
+            if (string.IsNullOrWhiteSpace(command)) return false;
+            return command.Equals("sit", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("sit ", StringComparison.OrdinalIgnoreCase)
+                || command.StartsWith("sit(", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string ParseSitCommandArgument(string command)
+        {
+            if (string.IsNullOrWhiteSpace(command)) return string.Empty;
+
+            string trimmed = command.Trim();
+
+            // 支持 sit(TargetName) / sit("Target Name") / sit TargetName 三种格式。
+            if (trimmed.StartsWith("sit(", StringComparison.OrdinalIgnoreCase) && trimmed.EndsWith(")"))
+            {
+                string inner = trimmed.Substring(4, trimmed.Length - 5).Trim();
+                return inner.Trim('"', '\'');
+            }
+
+            if (trimmed.StartsWith("sit ", StringComparison.OrdinalIgnoreCase))
+                return trimmed.Substring(4).Trim().Trim('"', '\'');
+
+            return string.Empty;
         }
 
         // ----------------------------------------------------------------

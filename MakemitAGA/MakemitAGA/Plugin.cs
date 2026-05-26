@@ -1,4 +1,4 @@
-﻿/*
+/*
  * [文件说明]: 插件主入口与生命周期管理
  * 
  * [分析过程]:
@@ -19,6 +19,7 @@ using BepInEx;
 using BepInEx.Logging;
 using HarmonyLib;
 using MakemitAGA.Mita_self;
+using MakemitAGA.Mita_self.Mita_tools;
 using MakemitAGA.World;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -45,6 +46,10 @@ namespace MakemitAGA
             // 挂载协程运行器
             Runner = this.AddComponent<MainThreadRunner>();
 
+            // 只注册 Mita_sit 的 IL2CPP 类型，不在 Load 阶段立刻 AddComponent。
+            // 组件会在第一次执行 sit(...) 时懒加载，避免插件加载期因自定义 MonoBehaviour 泛型 AddComponent 失败而整包加载失败。
+            Mita_sit.EnsureIl2CppTypeRegistered();
+
             // 启动后端
             StartBackendServer();
 
@@ -54,6 +59,7 @@ namespace MakemitAGA
             harmony.PatchAll(typeof(DialoguePatches));
             harmony.PatchAll(typeof(Patch_Location3WalkToToilet));
             harmony.PatchAll(typeof(Patch_AnimatorFunctions));
+            harmony.PatchAll(typeof(MitaSitOwnershipPatches));
             harmony.PatchAll(typeof(ClothesPatch));
 
         }

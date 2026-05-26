@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2D Grounding 坐标验证工具</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f4f9;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            max-width: 800px;
+            width: 100%;
+        }
+        h2 { text-align: center; color: #333; }
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #eee;
+        }
+        .input-group {
+            display: flex;
+            flex-direction: column;
+        }
+        label {
+            font-size: 0.9em;
+            margin-bottom: 5px;
+            color: #666;
+        }
+        input[type="number"], select, input[type="file"] {
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        .canvas-container {
+            position: relative;
+            width: 100%;
+            overflow: auto;
+            border: 2px dashed #ccc;
+            min-height: 300px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: #fafafa;
+        }
+        canvas {
+            max-width: 100%;
+            display: block;
+        }
+        .hint {
+            font-size: 0.8em;
+            color: #888;
+            margin-top: 5px;
+        }
+        button {
+            grid-column: span 2;
+            padding: 10px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1em;
+        }
+        button:hover { background-color: #0056b3; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>坐标验证工具</h2>
+    
+    <div class="controls">
+        <div class="input-group">
+            <label>1. 上传图片</label>
+            <input type="file" id="imageInput" accept="image/*">
+        </div>
+        
+        <div class="input-group">
+            <label>坐标格式</label>
+            <select id="formatSelect">
+                <option value="xywh">[x_min, y_min, width, height] (起始点+宽高)</option>
+                <option value="xyxy">[x_min, y_min, x_max, y_max] (左上+右下)</option>
+                <option value="center">[x_center, y_center, width, height] (中心点+宽高)</option>
+            </select>
+        </div>
+
+        <div class="input-group">
+            <label>Val 1 (X / X_min / X_center)</label>
+            <input type="number" id="val1" step="0.01" value="0.02">
+        </div>
+        <div class="input-group">
+            <label>Val 2 (Y / Y_min / Y_center)</label>
+            <input type="number" id="val2" step="0.01" value="0.03">
+        </div>
+        <div class="input-group">
+            <label>Val 3 (Width / X_max)</label>
+            <input type="number" id="val3" step="0.01" value="0.15">
+        </div>
+        <div class="input-group">
+            <label>Val 4 (Height / Y_max)</label>
+            <input type="number" id="val4" step="0.01" value="0.18">
+        </div>
+
+        <button onclick="drawBox()">绘制验证框</button>
+    </div>
+
+    <div class="canvas-container">
+        <canvas id="canvas"></canvas>
+        <p id="placeholder-text" style="color:#aaa;">请上传图片...</p>
+    </div>
+    <div class="hint">提示：归一化坐标范围通常在 0.0 到 1.0 之间。</div>
+</div>
+
+<script>
+    const imageInput = document.getElementById('imageInput');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    let originalImage = null;
+
+    imageInput.addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(event) {
+            originalImage = new Image();
+            originalImage.onload = function() {
+                canvas.width = originalImage.width;
+                canvas.height = originalImage.height;
+                ctx.drawImage(originalImage, 0, 0);
+                document.getElementById('placeholder-text').style.display = 'none';
+                // 自动绘制一次
+                drawBox();
+            }
+            originalImage.src = event.target.result;
+        }
+        reader.readAsDataURL(file);
+    });
+
+    function drawBox() {
+        if (!originalImage) {
+            alert("请先上传图片");
+            return;
+        }
+
+        // 重新绘制图片以清除旧框
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(originalImage, 0, 0);
+
+        const v1 = parseFloat(document.getElementById('val1').value);
+        const v2 = parseFloat(document.getElementById('val2').value);
+        const v3 = parseFloat(document.getElementById('val3').value);
+        const v4 = parseFloat(document.getElementById('val4').value);
+        const format = document.getElementById('formatSelect').value;
+
+        let x, y, w, h;
+        const imgW = canvas.width;
+        const imgH = canvas.height;
+
+        if (format === 'xywh') {
+            // [x_min, y_min, width, height]
+            x = v1 * imgW;
+            y = v2 * imgH;
+            w = v3 * imgW;
+            h = v4 * imgH;
+        } else if (format === 'xyxy') {
+            // [x_min, y_min, x_max, y_max]
+            x = v1 * imgW;
+            y = v2 * imgH;
+            w = (v3 - v1) * imgW;
+            h = (v4 - v2) * imgH;
+        } else if (format === 'center') {
+            // [x_center, y_center, width, height]
+            x = (v1 - v3 / 2) * imgW;
+            y = (v2 - v4 / 2) * imgH;
+            w = v3 * imgW;
+            h = v4 * imgH;
+        }
+
+        // 绘制红色框
+        ctx.strokeStyle = 'red';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(x, y, w, h);
+
+        // 绘制半透明填充
+        ctx.fillStyle = 'rgba(255, 0, 0, 0.2)';
+        ctx.fillRect(x, y, w, h);
+        
+        // 绘制中心点或角点标记
+        ctx.fillStyle = 'red';
+        ctx.beginPath();
+        ctx.arc(x, y, 4, 0, 2 * Math.PI);
+        ctx.fill();
+    }
+</script>
+
+</body>
+</html>
