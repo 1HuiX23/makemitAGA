@@ -12,6 +12,7 @@ using Il2CppInterop.Runtime.Runtime;
 using RootMotion.FinalIK;
 using UnityEngine;
 using UnityEngine.AI;
+using UnityEngine.SceneManagement;
 
 namespace MakemitAGA.Mita_self.Mita_tools
 {
@@ -47,9 +48,21 @@ namespace MakemitAGA.Mita_self.Mita_tools
         private static Mita_sit _instance;
         private static bool _il2CppTypeRegistered;
 
+        // v0.9.1 bridge fix:
+        // Mita_sit 挂在 Plugin.Runner / DontDestroyOnLoad runner 上，可能跨菜单/章节场景存活。
+        // 所以必须在场景切换时强制清掉坐姿锁、IK 引用、动作控制权，避免旧 Mita 的状态污染新场景。
+        private static bool _sceneHooksRegistered;
+        private static int _lastSceneCleanupFrame = -1;
+
+        // v0.9.1:
+        // IL2CPP 下 SceneManager.activeSceneChanged += 方法组 / UnityAction 构造都会遇到委托绑定问题。
+        // 因此不用事件注册，改为 Update() 中轮询当前 active scene。
+        private static int _lastActiveSceneHandle = int.MinValue;
+        private static string _lastActiveSceneName = "";
+
         /// <summary>
         /// 把 Mita_sit 注册为 IL2CPP 可创建的自定义 MonoBehaviour。
-        /// 不能直接对未注册的插件类型调用 GameObject.AddComponent&lt;T&gt;，否则 IL2CPP 泛型缓存可能在加载阶段抛空引用。
+        /// 不能直接对未注册的插件类型调用 GameObject.AddComponent<T>，否则 IL2CPP 泛型缓存可能在加载阶段抛空引用。
         /// </summary>
         public static bool EnsureIl2CppTypeRegistered()
         {
@@ -79,7 +92,7 @@ namespace MakemitAGA.Mita_self.Mita_tools
 
         /// <summary>
         /// 使用非泛型 AddComponent(Type) 创建 Mita_sit。
-        /// 这样可以绕开 IL2CPP 下 GameObject.AddComponent&lt;T&gt; 对插件自定义类型的泛型 MethodInfoStore 初始化问题。
+        /// 这样可以绕开 IL2CPP 下 GameObject.AddComponent<T> 对插件自定义类型的泛型 MethodInfoStore 初始化问题。
         /// </summary>
         private static Mita_sit AddMitaSitComponent(GameObject host)
         {
@@ -401,6 +414,143 @@ namespace MakemitAGA.Mita_self.Mita_tools
         {
             _instance = this;
             InitializeICalls();
+            RegisterSceneHooksOnce();
+        }
+
+        private static void RegisterSceneHooksOnce()
+        {
+            if (_sceneHooksRegistered) return;
+            _sceneHooksRegistered = true;
+
+            try
+            {
+                Scene scene = SceneManager.GetActiveScene();
+                _lastActiveSceneHandle = scene.handle;
+                _lastActiveSceneName = scene.name ?? "";
+
+                Plugin.Logger?.LogWarning("Mita_sit scene watcher initialized: " + _lastActiveSceneName + " / " + _lastActiveSceneHandle);
+            }
+            catch (Exception e)
+            {
+                Plugin.Logger?.LogWarning("Mita_sit 初始化场景轮询失败: " + e.GetType().Name + " / " + e.Message);
+            }
+        }
+
+        private void PollSceneChanged()
+        {
+            if (!_sceneHooksRegistered)
+                RegisterSceneHooksOnce();
+
+            try
+            {
+                Scene scene = SceneManager.GetActiveScene();
+
+                int handle = scene.handle;
+                string name = scene.name ?? "";
+
+                bool changed =
+                    handle != _lastActiveSceneHandle ||
+                    !string.Equals(name, _lastActiveSceneName, StringComparison.Ordinal);
+
+                if (!changed)
+                    return;
+
+                string oldName = _lastActiveSceneName;
+                int oldHandle = _lastActiveSceneHandle;
+
+                _lastActiveSceneHandle = handle;
+                _lastActiveSceneName = name;
+
+                HardResetForSceneChange(
+                    "active scene changed by polling: " +
+                    oldName + "/" + oldHandle +
+                    " -> " +
+                    name + "/" + handle);
+            }
+            catch (Exception e)
+            {
+                LogWarn("Mita_sit scene polling failed: " + e.GetType().Name + " / " + e.Message);
+            }
+        }
+
+        private bool IsCurrentMitaStillValid()
+        {
+            try
+            {
+                if (_mitaScript == null) return false;
+                if (_mitaScript.gameObject == null) return false;
+                if (!_mitaScript.gameObject.activeInHierarchy) return false;
+
+                if (_mitaAvatar == null) return false;
+                if (!_mitaAvatar.activeInHierarchy) return false;
+
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void HardResetForSceneChange(string reason)
+        {
+            if (_lastSceneCleanupFrame == Time.frameCount)
+                return;
+
+            _lastSceneCleanupFrame = Time.frameCount;
+
+            try
+            {
+                LogWarn("Mita_sit scene cleanup: " + reason);
+
+                StopCurrentActionRoutine();
+
+                _isSittingLocked = false;
+                _leftFootIkWeight = 0f;
+                _rightFootIkWeight = 0f;
+
+                if (_hasBackup)
+                    RestoreOriginalState();
+
+                HideDebugSpheres();
+                ResetSitRuntimeFlags();
+
+                ClearSceneObjectRefs();
+                ClearStaticActionControl();
+            }
+            catch (Exception e)
+            {
+                LogWarn("Mita_sit scene cleanup failed: " + e.GetType().Name + " / " + e.Message);
+                ClearSceneObjectRefs();
+                ClearStaticActionControl();
+            }
+        }
+
+        private void ClearSceneObjectRefs()
+        {
+            _mitaAvatar = null;
+            _mitaScript = null;
+            _animator = null;
+            _navAgent = null;
+            _fbbik = null;
+
+            _animFuncScript = null;
+            _unitStepScript = null;
+
+            _originalBodyTarget = null;
+            _originalLHandTarget = null;
+            _originalRHandTarget = null;
+            _originalLFootTarget = null;
+            _originalRFootTarget = null;
+
+            _leftFootEffectorAnchor = null;
+            _rightFootEffectorAnchor = null;
+            _leftKneeBendAnchor = null;
+            _rightKneeBendAnchor = null;
+
+            _hasBackup = false;
+            _hasStandExitPose = false;
+            _lastWalkArrived = false;
         }
 
         private void OnDisable()
@@ -417,6 +567,26 @@ namespace MakemitAGA.Mita_self.Mita_tools
         {
             // 主项目中不监听测试快捷键。
             // 控制台命令由 DialoguePatches.InterceptCommand 分发到本组件。
+            //
+            // v0.9.1:
+            // IL2CPP 下 SceneManager 事件注册会出现 UnityAction<IntPtr> 委托绑定问题。
+            // 所以这里改用轮询检测场景变化；一旦返回菜单/切换章节，就清理旧 Mita 坐姿锁和动作控制权。
+            PollSceneChanged();
+
+            // 坐姿锁定期间持续刷新动作控制权，防止原生 follow / magnet 抢回；
+            // 但必须先确认当前 Mita 仍然属于当前场景，否则返回菜单/继续游戏后会污染原始逻辑。
+            if (_isSittingLocked)
+            {
+                if (!IsCurrentMitaStillValid())
+                {
+                    HardResetForSceneChange("sitting locked but current Mita is invalid");
+                    return;
+                }
+
+                PulseMovementOwnership(false);
+                return;
+            }
+
             CheckActionControlWatchdog();
         }
 
@@ -430,6 +600,10 @@ namespace MakemitAGA.Mita_self.Mita_tools
 
             try
             {
+                // v0.9.1:
+                // Animator / 原生脚本 / LookAtIK 都跑完后仍然刷新所有权，确保长期坐姿期间不会被 follow 抢回。
+                PulseMovementOwnership(false);
+
                 _mitaAvatar.transform.position = new Vector3(_lockedRootPos.x, _currentRootY, _lockedRootPos.z);
                 _mitaAvatar.transform.rotation = _lockedRootRot;
 
@@ -1096,6 +1270,26 @@ namespace MakemitAGA.Mita_self.Mita_tools
         {
             if (!s_actionControlActive) return false;
 
+            if (s_controlledMita == null)
+            {
+                ClearStaticActionControl();
+                return false;
+            }
+
+            try
+            {
+                if (s_controlledMita.gameObject == null || !s_controlledMita.gameObject.activeInHierarchy)
+                {
+                    ClearStaticActionControl();
+                    return false;
+                }
+            }
+            catch
+            {
+                ClearStaticActionControl();
+                return false;
+            }
+
             if (s_actionControlExpiresAt > 0f && Time.realtimeSinceStartup > s_actionControlExpiresAt)
             {
                 ClearStaticActionControl();
@@ -1117,6 +1311,16 @@ namespace MakemitAGA.Mita_self.Mita_tools
         private void CheckActionControlWatchdog()
         {
             if (!s_actionControlActive) return;
+
+            // v0.9.1:
+            // 坐姿锁定期间，watchdog 只续期，不释放。
+            // 真正释放必须通过 UnlockAndResume / 场景清理 / ForceRestore。
+            if (_isSittingLocked && s_controlOwner == this)
+            {
+                s_actionControlExpiresAt = Time.realtimeSinceStartup + ActionControlTimeout;
+                return;
+            }
+
             if (s_actionControlExpiresAt <= 0f || Time.realtimeSinceStartup <= s_actionControlExpiresAt) return;
 
             LogWarn("Action control watchdog expired. Force releasing movement ownership lock.");
@@ -1130,18 +1334,30 @@ namespace MakemitAGA.Mita_self.Mita_tools
         private static bool IsControlledMita(MitaPerson instance)
         {
             if (instance == null) return false;
-            if (s_controlledMita == null) return true;
+
+            if (s_controlledMita == null)
+            {
+                ClearStaticActionControl();
+                return false;
+            }
 
             try
             {
                 if (instance == s_controlledMita) return true;
+
                 if (instance.gameObject != null && s_controlledMita.gameObject != null)
                     return instance.gameObject == s_controlledMita.gameObject;
             }
-            catch { }
+            catch
+            {
+                ClearStaticActionControl();
+                return false;
+            }
 
-            // MiSide 主场景通常只有一个 MitaPerson。比较失败时宁可保守阻断，避免她被原生 Follow 抢回。
-            return true;
+            // v0.9.1:
+            // 旧版这里返回 true，跨场景时会误阻断新 Mita 的原生 follow / action。
+            // 现在不同实例一律不阻断。
+            return false;
         }
 
         private void AcquireActionControl()
@@ -1297,6 +1513,47 @@ namespace MakemitAGA.Mita_self.Mita_tools
             _hasBackup = true;
         }
 
+        private bool IsUsableAnimatorController(RuntimeAnimatorController controller, string context)
+        {
+            if (controller == null)
+                return false;
+
+            try
+            {
+                AnimatorOverrideController overrideController = controller as AnimatorOverrideController;
+                if (overrideController == null)
+                    return true;
+
+                RuntimeAnimatorController baseController = overrideController.runtimeAnimatorController;
+                if (baseController != null)
+                    return true;
+
+                // Unity 会在给 Animator.runtimeAnimatorController 赋值时输出：
+                // Could not set Runtime Animator Controller. The controller is an AnimatorOverrideController with no AnimatorController to override.
+                // 这里提前过滤掉这种无 base controller 的 AnimatorOverrideController，避免污染 BepInEx 控制台。
+                LogWarn("Skip invalid AnimatorOverrideController with no base controller. context=" + context + ", name=" + controller.name);
+                return false;
+            }
+            catch (Exception e)
+            {
+                LogWarn("Animator controller validation failed. context=" + context + ", error=" + e.GetType().Name + " / " + e.Message);
+                return false;
+            }
+        }
+
+        private RuntimeAnimatorController SelectSafeSitController()
+        {
+            if (IsUsableAnimatorController(_sitController, "sitController"))
+                return _sitController;
+
+            // 坐姿主要由 IK 锁定和 root pose 维持；如果动作包里的 OverrideController 缺 base，
+            // 不要强行赋给 Animator。保持/回退到原始 controller 更安全。
+            if (IsUsableAnimatorController(_originalController, "originalControllerFallback"))
+                return _originalController;
+
+            return null;
+        }
+
         private void HijackAnimationAndIK()
         {
             LockNavAgentForManualPose();
@@ -1307,13 +1564,13 @@ namespace MakemitAGA.Mita_self.Mita_tools
 
             if (_animator != null)
             {
-                RuntimeAnimatorController controllerToUse = _sitController;
+                RuntimeAnimatorController controllerToUse = SelectSafeSitController();
 
-                // 用 OverrideController 包一层，减少 Avatar/Controller 直接替换的不确定性。
-                if (!(_sitController is AnimatorOverrideController))
-                    controllerToUse = new AnimatorOverrideController(_sitController);
+                if (controllerToUse != null)
+                    _animator.runtimeAnimatorController = controllerToUse;
+                else
+                    LogWarn("No usable sit/original animator controller. Keep current Animator.runtimeAnimatorController unchanged.");
 
-                _animator.runtimeAnimatorController = controllerToUse;
                 _animator.applyRootMotion = false;
                 _animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
                 _animator.enabled = true;
@@ -2072,11 +2329,13 @@ namespace MakemitAGA.Mita_self.Mita_tools
                 return false;
             }
 
-            IntPtr pathPtr = IL2CPP.ManagedStringToIl2Cpp(abPath);
-            _bundlePtr = _loadFromFileFunc(pathPtr, 0, 0);
-            if (_bundlePtr == IntPtr.Zero)
+            // v0.9.1 integration:
+            // mita_actions 同时包含 Mita_sit controller 和 TopSurface depth shader/material。
+            // Unity 同一进程不能重复 LoadFromFile 同一个 AssetBundle，所以这里与 TopSurfaceSeatProxy
+            // 共用 ICallAssetBundleLoader 的 bundle pointer，避免“same AssetBundle already loaded”。
+            if (!ICallAssetBundleLoader.TryGetBundlePointer(abPath, out _bundlePtr))
             {
-                LogWarn("LoadFromFile_Internal returned zero pointer.");
+                LogWarn("Cannot get shared AssetBundle pointer: " + abPath);
                 return false;
             }
 
@@ -2088,9 +2347,16 @@ namespace MakemitAGA.Mita_self.Mita_tools
                 IntPtr assetPtr = _loadAssetFunc(_bundlePtr, namePtr, typePtr);
                 if (assetPtr == IntPtr.Zero) continue;
 
-                _sitController = Il2CppObjectPool.Get<RuntimeAnimatorController>(assetPtr);
-                if (_sitController != null)
+                RuntimeAnimatorController candidate = Il2CppObjectPool.Get<RuntimeAnimatorController>(assetPtr);
+                if (candidate != null)
                 {
+                    if (!IsUsableAnimatorController(candidate, "bundleAsset:" + assetName))
+                    {
+                        LogWarn("Skip unusable sit controller asset: " + assetName + " / " + candidate.name);
+                        continue;
+                    }
+
+                    _sitController = candidate;
                     _isLoaded = true;
                     LogInfo("Sit controller loaded: " + assetName + " / " + _sitController.name);
                     return true;

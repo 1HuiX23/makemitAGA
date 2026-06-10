@@ -382,7 +382,10 @@
     <Compile Include="Mita_self\InteractionManager.cs" />
     <Compile Include="Mita_self\MitaVisionManager.cs" />
     <Compile Include="Mita_self\Mita_tools\CreateTestObject.cs" />
+    <Compile Include="Mita_self\Mita_tools\Il2CppAssetBundleLoader.cs" />
     <Compile Include="Mita_self\Mita_tools\Mita_sit.cs" />
+    <Compile Include="Mita_self\Mita_tools\TopSurfaceSeatProxyPlugin.cs" />
+    <Compile Include="Mita_self\Mita_tools\TopSurfaceSeatProxyRuntime.cs" />
     <Compile Include="Mita_self\ObjectDetector.cs" />
     <Compile Include="Plugin.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

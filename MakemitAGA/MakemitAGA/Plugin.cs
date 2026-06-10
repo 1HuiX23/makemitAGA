@@ -55,6 +55,7 @@ namespace MakemitAGA
 
             // 应用补丁
             var harmony = new Harmony("com.yourname.miside.freedialogue");
+            TopSurfaceSeatProxyIntegration.Init(Logger, harmony);
             harmony.PatchAll(typeof(VisionPatches));
             harmony.PatchAll(typeof(DialoguePatches));
             harmony.PatchAll(typeof(Patch_Location3WalkToToilet));
