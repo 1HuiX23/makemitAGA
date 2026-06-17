@@ -1,211 +1,458 @@
+import base64
 import json
-import logging
-from http.server import BaseHTTPRequestHandler, HTTPServer
-import requests
-import urllib.parse
 import os
-import base64 # 用于将图片文件编码为 base64
+import socket
+import sys
+import threading
+import traceback
+from datetime import datetime
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
-# --- 配置文件处理 ---
-CONFIG_FILE_PATH = "config.json"
-
-def load_config():
-    """加载配置文件，如果不存在则创建模板"""
-    if not os.path.exists(CONFIG_FILE_PATH):
-        print(f"配置文件 '{CONFIG_FILE_PATH}' 不存在，正在创建模板...")
-        default_config = {
-            "API_KEY": "YOUR_MODELSCOPE_ACCESS_TOKEN_HERE",
-            "MODEL_ID": "Qwen/QVQ-72B-Preview",
-            "SYSTEM_PROMPT": ""
-        }
-        with open(CONFIG_FILE_PATH, 'w', encoding='utf-8') as f:
-            json.dump(default_config, f, ensure_ascii=False, indent=4)
-        print(f"已创建 '{CONFIG_FILE_PATH}' 模板。请编辑此文件，填入你的 API_KEY, MODEL_ID 和 SYSTEM_PROMPT，然后重新启动服务器。")
-        return None # 表示需要用户先配置
-    else:
-        try:
-            with open(CONFIG_FILE_PATH, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-            # 验证必要字段是否存在
-            required_keys = ['API_KEY', 'MODEL_ID', 'SYSTEM_PROMPT']
-            for key in required_keys:
-                if key not in config:
-                    print(f"错误：'{CONFIG_FILE_PATH}' 文件缺少必要的 '{key}' 字段。请检查文件格式。")
-                    return None
-            print(f"成功加载配置文件 '{CONFIG_FILE_PATH}'。")
-            return config
-        except json.JSONDecodeError as e:
-            print(f"错误：'{CONFIG_FILE_PATH}' 文件格式不是有效的 JSON。{e}")
-            return None
-        except Exception as e:
-            print(f"读取配置文件时发生错误: {e}")
-            return None
-
-# 加载配置
-config = load_config()
-
-# 如果配置加载失败或缺失，退出程序
-if not config:
-    exit(1)
-
-# 从配置文件读取
-API_KEY = config["API_KEY"]
-MODEL_ID = config["MODEL_ID"]
-SYSTEM_PROMPT = config["SYSTEM_PROMPT"] # 从配置文件加载
-
-# 检查 API_KEY 是否为默认值，给出警告
-if API_KEY == "YOUR_MODELSCOPE_ACCESS_TOKEN_HERE":
-    print("警告：API_KEY 仍然是默认值 'YOUR_MODELSCOPE_ACCESS_TOKEN_HERE'。请更新 config.json 文件。")
-    exit(1)
-
-# 检查 MODEL_ID 是否为默认值（可选警告）
-if MODEL_ID == "Qwen/QVQ-72B-Preview":
-    print("提示：MODEL_ID 为默认值 'Qwen/QVQ-72B-Preview'。如需更换，请更新 config.json 文件。")
-
-# --- 定义全局常量 ---
-BASE_URL = "https://api-inference.modelscope.cn/v1/chat/completions"  # API 地址
-
-# 全局变量存储聊天历史
-chat_history = []
-
-# 初始化聊天历史，加入 System Prompt (从配置文件加载)
-chat_history.append({
-    "role": "system",
-    "content": SYSTEM_PROMPT # 使用配置文件中的 SYSTEM_PROMPT
-})
-
-print("System Prompt 已从配置文件加载。")
-
-class RequestHandler(BaseHTTPRequestHandler):
-    def do_POST(self):
-        content_length = int(self.headers['Content-Length'])
-        post_data = self.rfile.read(content_length).decode('utf-8')
-
-        print(f"收到请求: {post_data}")
-
-        # --- 检查 cache.jpg 是否存在 ---
-        cache_img_path = "cache.jpg" # 定义图片路径
-        img_exists = os.path.isfile(cache_img_path) # 检查文件是否存在
-        img_base64_str = None # 存储纯 base64 字符串
-        if img_exists:
-             try:
-                 # 读取图片文件并编码为 base64
-                 with open(cache_img_path, "rb") as img_file:
-                     img_base64_bytes = img_file.read()
-                     img_base64_str = base64.b64encode(img_base64_bytes).decode('utf-8')
-                 print(f"检测到图片: {cache_img_path}，已准备上传。")
-             except Exception as e:
-                 print(f"读取图片文件时出错: {e}")
-                 # 如果读取失败，当作图片不存在处理
-                 img_exists = False
-                 img_base64_str = None
-        else:
-             print(f"未找到图片: {cache_img_path}，仅发送文本。")
+import requests
 
 
-        # --- 构建发送给 API 的消息 ---
-        if img_exists and img_base64_str:
-            # 构建包含图片和文本的消息
-            # 使用标准的 data URL 格式: image/<format>;base64,<base64_string>
-            full_data_url = f"data:image/jpeg;base64,{img_base64_str}"
-            user_message_for_api = [
-                {
-                    "type": "image_url",
-                    "image_url": {"url": full_data_url} # <-- 成功的关键：使用 image/jpeg;base64,...
-                },
-                {
-                    "type": "text",
-                    "text": post_data # 使用收到的文本
-                }
-            ]
-        else:
-            # 仅包含文本的消息
-            user_message_for_api = post_data
+# ======================================================================================
+# MiSide Online AI API Server v2.1
+# ======================================================================================
+# v2.1 关键修复：
+#
+# 1. 正确识别 Nuitka --onefile。
+#    PyInstaller 常用 sys.frozen，但 Nuitka 不保证提供这个标记。
+#    旧版在 Nuitka onefile 下可能把 BASE_DIR 指向临时解包目录，导致找不到
+#    plugins/config.json，程序创建临时模板后立即退出，最终 C# 只能看到
+#    “localhost:8080 积极拒绝连接”。
+#
+# 2. 所有 config/cache/log 路径都固定为“实际 OnlineAIApiServer.exe 所在目录”。
+#
+# 3. 启动阶段无论成功或失败都写：
+#       backend_boot.log
+#       backend_startup_error.txt
+#
+# 4. 保持 v2.0 协议：
+#       POST /
+#       Content-Type: text/plain
+#       X-MiSide-Include-Image
+#       GET /health
+#       原样返回 tool_call
+# ======================================================================================
 
-        # 将构建好的消息（可能是字符串或列表）添加到聊天历史
-        chat_history.append({"role": "user", "content": user_message_for_api})
 
-        # 构建 API 请求体
-        payload = {
-            "model": MODEL_ID, # 从配置文件加载
-            "messages": chat_history,
-            "stream": False,  # 设置为 False 获取完整回复
-            "max_tokens": 4096
-        }
+def is_nuitka_compiled() -> bool:
+    return "__compiled__" in globals()
 
-        headers = {
-            "Authorization": f"Bearer {API_KEY}", # 从配置文件加载
-            "User-Agent": "OnlineAIApiServer/1.0",
-            "Content-Type": "application/json"
-        }
 
-        try:
-            # 发送请求到 ModelScope API
-            response = requests.post(BASE_URL, headers=headers, json=payload)
+def application_base_dir() -> Path:
+    # Nuitka onefile 下，__file__ 常常指向临时展开目录；
+    # sys.argv[0] / sys.executable 才指向用户真正启动的 exe。
+    if is_nuitka_compiled() or getattr(sys, "frozen", False):
+        candidates = [
+            Path(sys.argv[0]).resolve() if sys.argv else None,
+            Path(sys.executable).resolve() if sys.executable else None,
+        ]
+        for candidate in candidates:
+            if candidate is not None and candidate.suffix.lower() == ".exe":
+                return candidate.parent
 
-            if response.status_code == 200:
-                api_response = response.json()
+    return Path(__file__).resolve().parent
 
-                if 'choices' in api_response and len(api_response['choices']) > 0:
-                    ai_reply = api_response['choices'][0].get('message', {}).get('content', '')
 
-                    # 将 AI 回复添加到聊天历史
-                    chat_history.append({"role": "assistant", "content": ai_reply})
+BASE_DIR = application_base_dir()
+CONFIG_PATH = BASE_DIR / "config.json"
+CACHE_IMAGE_PATH = BASE_DIR / "cache.jpg"
+LAST_PROMPT_PATH = BASE_DIR / "backend_last_prompt.txt"
+LAST_REPLY_PATH = BASE_DIR / "backend_last_reply.txt"
+LAST_ERROR_PATH = BASE_DIR / "backend_last_error.txt"
+BOOT_LOG_PATH = BASE_DIR / "backend_boot.log"
+STARTUP_ERROR_PATH = BASE_DIR / "backend_startup_error.txt"
 
-                    # 清理回复（移除换行符等，以防闪退）
-                    # 参考 C# 版本的正则表达式逻辑，这里用 Python 的 re 模块实现类似效果
-                    import re
-                    # 正则表达式匹配需要保留的字符：中文、英文字母、数字、空白符、常见标点
-                    pattern = r'[^\u4e00-\u9fff\w\s，。！？；：""''（）\[\]{}\-_]'
-                    clean_reply = re.sub(pattern, '', ai_reply).strip() # 先过滤，再去除首尾空格
-                    clean_reply = clean_reply.replace("\n", "").replace("\r", "") # 再移除换行符
-                    clean_reply = clean_reply.strip() # 最后再 strip 一次
+DEFAULT_BASE_URL = "https://api-inference.modelscope.cn/v1/chat/completions"
 
-                    print(f"发送回复: {clean_reply}")
+CONFIG = None
+API_KEY = ""
+MODEL_ID = ""
+SYSTEM_PROMPT = ""
+BASE_URL = DEFAULT_BASE_URL
+MAX_TOKENS = 512
+TEMPERATURE = 0.1
+CONNECT_TIMEOUT = 20.0
+READ_TIMEOUT = 240.0
 
-                    # 发送响应
-                    self.send_response(200)
-                    self.send_header('Content-type', 'text/plain; charset=utf-8')
-                    self.end_headers()
-                    self.wfile.write(clean_reply.encode('utf-8'))
-                else:
-                    print("API 响应中没有有效内容或选择。")
-                    error_msg = "Error: No valid response from API."
-                    self.send_error(502, error_msg) # Bad Gateway
-            else:
-                print(f"API 请求失败，状态码: {response.status_code}, 内容: {response.text}")
-                error_msg = "Error: Failed to get response from API."
-                self.send_error(502, error_msg) # Bad Gateway
+REQUEST_LOCK = threading.Lock()
 
-        except requests.exceptions.RequestException as e:
-            print(f"请求 API 时发生错误: {e}")
-            error_msg = "Error: Failed to connect to API."
-            self.send_error(500, error_msg) # Internal Server Error
-        except Exception as e:
-            print(f"处理请求时发生未知错误: {e}")
-            error_msg = "Error: An unexpected error occurred."
-            self.send_error(500, error_msg) # Internal Server Error
 
-    def log_message(self, format, *args):
-        # 重写日志方法，抑制默认的访问日志输出到控制台
-        # 如需详细日志，可以使用 logging 模块
+def timestamp() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def append_boot_log(message: str) -> None:
+    text = f"[{timestamp()}] {message}"
+    print(text, flush=True)
+    try:
+        with BOOT_LOG_PATH.open("a", encoding="utf-8") as f:
+            f.write(text + "\n")
+    except Exception:
         pass
 
 
-def run_server(server_class=HTTPServer, handler_class=RequestHandler, port=8080):
-    server_address = ('localhost', port)
-    httpd = server_class(server_address, handler_class)
-    print(f"AI服务器已在 http://localhost:{port} 启动，等待来自游戏的请求...")
-    print(f"注意：若存在 'cache.jpg'，每次请求将携带此图片。")
+def safe_write(path: Path, text: str) -> None:
     try:
-        httpd.serve_forever()
+        path.write_text(text or "", encoding="utf-8")
+    except Exception:
+        pass
+
+
+def load_config() -> dict:
+    if not CONFIG_PATH.exists():
+        template = {
+            "API_KEY": "YOUR_MODELSCOPE_ACCESS_TOKEN_HERE",
+            "MODEL_ID": "Qwen/QVQ-72B-Preview",
+            "SYSTEM_PROMPT": "",
+            "BASE_URL": DEFAULT_BASE_URL,
+            "MAX_TOKENS": 512,
+            "TEMPERATURE": 0.1,
+            "CONNECT_TIMEOUT_SECONDS": 20,
+            "READ_TIMEOUT_SECONDS": 240,
+        }
+
+        CONFIG_PATH.write_text(
+            json.dumps(template, ensure_ascii=False, indent=4),
+            encoding="utf-8",
+        )
+
+        raise RuntimeError(
+            f"config.json 不存在，已在 EXE 目录创建模板：{CONFIG_PATH}。"
+            "请填写 API_KEY 后重新启动游戏或执行 vt_backend_restart。"
+        )
+
+    config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+
+    for key in ("API_KEY", "MODEL_ID", "SYSTEM_PROMPT"):
+        if key not in config:
+            raise RuntimeError(f"config.json 缺少字段：{key}")
+
+    if config["API_KEY"] == "YOUR_MODELSCOPE_ACCESS_TOKEN_HERE":
+        raise RuntimeError(
+            f"API_KEY 仍是模板值，请编辑：{CONFIG_PATH}"
+        )
+
+    return config
+
+
+def initialize_config() -> None:
+    global CONFIG
+    global API_KEY
+    global MODEL_ID
+    global SYSTEM_PROMPT
+    global BASE_URL
+    global MAX_TOKENS
+    global TEMPERATURE
+    global CONNECT_TIMEOUT
+    global READ_TIMEOUT
+
+    CONFIG = load_config()
+    API_KEY = CONFIG["API_KEY"]
+    MODEL_ID = CONFIG["MODEL_ID"]
+    SYSTEM_PROMPT = CONFIG.get("SYSTEM_PROMPT", "")
+    BASE_URL = CONFIG.get("BASE_URL", DEFAULT_BASE_URL)
+    MAX_TOKENS = int(CONFIG.get("MAX_TOKENS", 512))
+    TEMPERATURE = float(CONFIG.get("TEMPERATURE", 0.1))
+    CONNECT_TIMEOUT = float(CONFIG.get("CONNECT_TIMEOUT_SECONDS", 20))
+    READ_TIMEOUT = float(CONFIG.get("READ_TIMEOUT_SECONDS", 240))
+
+
+def clean_transport_text(text: str) -> str:
+    # 只清除 NUL，保留 < > / , . 与换行。
+    return (text or "").replace("\x00", "").strip()
+
+
+def extract_assistant_content(api_response: dict) -> str:
+    choices = api_response.get("choices") or []
+    if not choices:
+        raise ValueError("API response has no choices")
+
+    message = choices[0].get("message") or {}
+    content = message.get("content", "")
+
+    if isinstance(content, str):
+        return content
+
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+            elif isinstance(item, str):
+                parts.append(item)
+        return "".join(parts)
+
+    return str(content or "")
+
+
+class RequestHandler(BaseHTTPRequestHandler):
+    server_version = "MiSideOnlineAI/2.1"
+
+    def do_GET(self):
+        if self.path.rstrip("/") == "/health":
+            body = json.dumps(
+                {
+                    "ok": True,
+                    "version": "2.1",
+                    "model": MODEL_ID,
+                    "base_dir": str(BASE_DIR),
+                    "config_path": str(CONFIG_PATH),
+                    "cache_path": str(CACHE_IMAGE_PATH),
+                    "cache_exists": CACHE_IMAGE_PATH.is_file(),
+                    "nuitka": is_nuitka_compiled(),
+                },
+                ensure_ascii=False,
+            )
+            self._write_response(
+                200,
+                body,
+                "application/json; charset=utf-8",
+            )
+            return
+
+        self._write_response(404, "not found")
+
+    def do_POST(self):
+        request_id = self.headers.get("X-MiSide-Request-Id", "?")
+        run_id = self.headers.get("X-MiSide-Run-Id", "?")
+        state = self.headers.get("X-MiSide-State", "")
+        protocol = self.headers.get("X-MiSide-Protocol", "legacy")
+        include_image = (
+            self.headers.get("X-MiSide-Include-Image", "0") == "1"
+        )
+
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            prompt = self.rfile.read(length).decode("utf-8")
+        except Exception as exc:
+            self._write_response(400, f"invalid request body: {exc}")
+            return
+
+        safe_write(LAST_PROMPT_PATH, prompt)
+        safe_write(LAST_ERROR_PATH, "")
+
+        append_boot_log(
+            f"[request run={run_id} id={request_id}] "
+            f"protocol={protocol} state={state} "
+            f"include_image={include_image} prompt_chars={len(prompt)}"
+        )
+
+        try:
+            user_content = self._build_user_content(
+                prompt,
+                include_image,
+            )
+
+            messages = []
+            if SYSTEM_PROMPT.strip():
+                messages.append(
+                    {"role": "system", "content": SYSTEM_PROMPT}
+                )
+            messages.append(
+                {"role": "user", "content": user_content}
+            )
+
+            payload = {
+                "model": MODEL_ID,
+                "messages": messages,
+                "stream": False,
+                "max_tokens": MAX_TOKENS,
+                "temperature": TEMPERATURE,
+            }
+
+            headers = {
+                "Authorization": f"Bearer {API_KEY}",
+                "User-Agent": "MiSideOnlineAI/2.1",
+                "Content-Type": "application/json",
+            }
+
+            with REQUEST_LOCK:
+                response = requests.post(
+                    BASE_URL,
+                    headers=headers,
+                    json=payload,
+                    timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
+                )
+
+            append_boot_log(
+                f"[request run={run_id} id={request_id}] "
+                f"upstream_status={response.status_code} "
+                f"response_bytes={len(response.content)}"
+            )
+
+            if response.status_code != 200:
+                detail = response.text[:4000]
+                error = (
+                    f"upstream HTTP {response.status_code}: {detail}"
+                )
+                safe_write(LAST_ERROR_PATH, error)
+                self._write_response(502, error)
+                return
+
+            data = response.json()
+            reply = clean_transport_text(
+                extract_assistant_content(data)
+            )
+
+            if not reply:
+                raise ValueError(
+                    "upstream returned empty assistant content"
+                )
+
+            safe_write(LAST_REPLY_PATH, reply)
+            append_boot_log(
+                f"[request run={run_id} id={request_id}] "
+                f"reply_chars={len(reply)}"
+            )
+            append_boot_log(f"[assistant] {reply}")
+
+            self._write_response(200, reply)
+
+        except requests.RequestException as exc:
+            error = (
+                f"upstream request exception: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            safe_write(LAST_ERROR_PATH, error)
+            append_boot_log(error)
+            self._write_response(502, error)
+
+        except Exception as exc:
+            error = (
+                f"backend exception: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            safe_write(
+                LAST_ERROR_PATH,
+                error + "\n" + traceback.format_exc(),
+            )
+            append_boot_log(error)
+            append_boot_log(traceback.format_exc())
+            self._write_response(500, error)
+
+    def _build_user_content(
+        self,
+        prompt: str,
+        include_image: bool,
+    ):
+        if not include_image:
+            append_boot_log("image: disabled by request header")
+            return prompt
+
+        if not CACHE_IMAGE_PATH.is_file():
+            raise FileNotFoundError(
+                "X-MiSide-Include-Image=1 but cache.jpg "
+                f"does not exist: {CACHE_IMAGE_PATH}"
+            )
+
+        image_bytes = CACHE_IMAGE_PATH.read_bytes()
+        image_b64 = base64.b64encode(
+            image_bytes
+        ).decode("ascii")
+
+        data_url = (
+            "data:image/jpeg;base64," + image_b64
+        )
+
+        append_boot_log(
+            f"image: {CACHE_IMAGE_PATH} "
+            f"bytes={len(image_bytes)}"
+        )
+
+        return [
+            {
+                "type": "image_url",
+                "image_url": {"url": data_url},
+            },
+            {
+                "type": "text",
+                "text": prompt,
+            },
+        ]
+
+    def _write_response(
+        self,
+        status: int,
+        body: str,
+        content_type: str = "text/plain; charset=utf-8",
+    ) -> None:
+        data = (body or "").encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def log_message(self, fmt, *args):
+        pass
+
+
+def run_server(port: int = 8080) -> None:
+    address = ("127.0.0.1", port)
+
+    append_boot_log("=" * 80)
+    append_boot_log("MiSide Online AI API Server v2.1")
+    append_boot_log(f"argv0: {sys.argv[0] if sys.argv else '<none>'}")
+    append_boot_log(f"sys.executable: {sys.executable}")
+    append_boot_log(f"__file__: {__file__}")
+    append_boot_log(
+        f"nuitka_compiled: {is_nuitka_compiled()}"
+    )
+    append_boot_log(f"base_dir: {BASE_DIR}")
+    append_boot_log(f"config: {CONFIG_PATH}")
+    append_boot_log(f"cache: {CACHE_IMAGE_PATH}")
+    append_boot_log(f"listen: http://127.0.0.1:{port}")
+    append_boot_log(
+        f"health: http://127.0.0.1:{port}/health"
+    )
+    append_boot_log(f"model: {MODEL_ID}")
+    append_boot_log("stateless mode: ON")
+    append_boot_log("reply punctuation filtering: OFF")
+    append_boot_log("=" * 80)
+
+    server = ThreadingHTTPServer(
+        address,
+        RequestHandler,
+    )
+
+    safe_write(STARTUP_ERROR_PATH, "")
+    append_boot_log("SERVER_READY")
+
+    try:
+        server.serve_forever()
     except KeyboardInterrupt:
-        print("\n服务器关闭。")
-        httpd.shutdown()
+        append_boot_log("server stopping...")
+    finally:
+        server.server_close()
 
 
-if __name__ == '__main__':
-    # 可选：配置 logging 以便更灵活地管理日志
-    # logging.basicConfig(level=logging.INFO)
-    run_server()
-    #nuitka --onefile --output-filename=OnlineAIApiServer.exe online_api_server.py
+def main() -> int:
+    try:
+        safe_write(STARTUP_ERROR_PATH, "")
+        append_boot_log("process starting")
+        initialize_config()
+        run_server()
+        return 0
+
+    except Exception as exc:
+        error = (
+            f"startup exception: "
+            f"{type(exc).__name__}: {exc}\n"
+            f"{traceback.format_exc()}"
+        )
+
+        safe_write(STARTUP_ERROR_PATH, error)
+        append_boot_log(error)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
