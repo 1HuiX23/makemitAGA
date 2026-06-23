@@ -1,3 +1,10 @@
+/*
+ * Mita_sit.cs
+ *
+ * 米塔坐下动作执行器。正式 Seat VLM 路径接收 World.SeatPose：
+ * 走到已经验证的 FloorPoint，面向 OutwardDirection，并在连续 SeatActionProxy 上执行动画/IK。
+ * 旧 sit(name) 入口仍保留用于兼容和手动调试。
+ */
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -8,11 +15,14 @@ using BepInEx.Unity.IL2CPP.Utils.Collections;
 using HarmonyLib;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.Injection;
+using Il2CppInterop.Runtime.Attributes;
 using Il2CppInterop.Runtime.Runtime;
 using RootMotion.FinalIK;
 using UnityEngine;
 using UnityEngine.AI;
 using UnityEngine.SceneManagement;
+
+using MakemitAGA.World;
 
 namespace MakemitAGA.Mita_self.Mita_tools
 {
@@ -170,6 +180,32 @@ namespace MakemitAGA.Mita_self.Mita_tools
             }
 
             inst.StartSitSequenceByName(objectNamePart);
+        }
+
+        /// <summary>
+        /// Seat VLM 正式入口：使用已经验证过的 SeatPose 和连续 Action Proxy 入座。
+        /// 这条路径不会重新猜测目标物体的最高面，也不会直接依赖整张稀疏分析网格。
+        /// </summary>
+        public static void Sit(SeatPose pose)
+        {
+            Mita_sit inst = EnsureInstance();
+
+            if (inst == null)
+            {
+                ConsoleMain.ConsolePrintGame(
+                    "<color=red>Mita_sit 初始化失败。</color>");
+                return;
+            }
+
+            if (pose == null ||
+                pose.ActionProxy == null)
+            {
+                ConsoleMain.ConsolePrintGame(
+                    "<color=red>SeatPose 或 ActionProxy 无效。</color>");
+                return;
+            }
+
+            inst.StartSitSequence(pose);
         }
 
         /// <summary>
@@ -428,7 +464,7 @@ namespace MakemitAGA.Mita_self.Mita_tools
                 _lastActiveSceneHandle = scene.handle;
                 _lastActiveSceneName = scene.name ?? "";
 
-                Plugin.Logger?.LogWarning("Mita_sit scene watcher initialized: " + _lastActiveSceneName + " / " + _lastActiveSceneHandle);
+                Plugin.Logger?.LogInfo("Mita_sit scene watcher initialized: " + _lastActiveSceneName + " / " + _lastActiveSceneHandle);
             }
             catch (Exception e)
             {
@@ -636,6 +672,31 @@ namespace MakemitAGA.Mita_self.Mita_tools
         /// </summary>
         public void StartSitSequence(GameObject chair)
         {
+            StartSitSequenceInternal(chair, null);
+        }
+
+        /// <summary>
+        /// 使用 World/SeatActionProxy.cs 生成的明确坐姿数据。
+        /// </summary>
+        [HideFromIl2Cpp]
+        public void StartSitSequence(SeatPose pose)
+        {
+            if (pose == null || pose.ActionProxy == null)
+            {
+                LogWarn("StartSitSequence(SeatPose) failed: pose/action proxy is null.");
+                return;
+            }
+
+            StartSitSequenceInternal(
+                pose.ActionProxy,
+                pose);
+        }
+
+        [HideFromIl2Cpp]
+        private void StartSitSequenceInternal(
+            GameObject chair,
+            SeatPose pose)
+        {
             if (chair == null)
             {
                 LogWarn("StartSitSequence failed: target chair is null. Create or pass a valid GameObject first.");
@@ -658,9 +719,17 @@ namespace MakemitAGA.Mita_self.Mita_tools
             StopCurrentActionRoutine();
 
             if (_isSittingLocked)
-                _actionRoutine = StartCoroutine(TransitionToNewSit(chair).WrapToIl2Cpp());
+            {
+                _actionRoutine = StartCoroutine(
+                    TransitionToNewSit(chair, pose)
+                        .WrapToIl2Cpp());
+            }
             else
-                _actionRoutine = StartCoroutine(SitRoutine(chair.transform).WrapToIl2Cpp());
+            {
+                _actionRoutine = StartCoroutine(
+                    SitRoutine(chair.transform, pose)
+                        .WrapToIl2Cpp());
+            }
         }
 
         /// <summary>
@@ -701,17 +770,21 @@ namespace MakemitAGA.Mita_self.Mita_tools
             _actionRoutine = StartCoroutine(UnlockRoutine(true).WrapToIl2Cpp());
         }
 
-        private IEnumerator TransitionToNewSit(GameObject newChair)
+        [HideFromIl2Cpp]
+        private IEnumerator TransitionToNewSit(
+            GameObject newChair,
+            SeatPose pose)
         {
             yield return UnlockRoutine(false);
             yield return new WaitForSeconds(0.25f);
-            yield return SitRoutine(newChair.transform);
+            yield return SitRoutine(newChair.transform, pose);
         }
 
         // ============================================================================================
         // 主流程：定位 -> 走到停靠点 -> 对齐 -> 接管动画/IK -> 环境测量 -> 坐下锁定
         // ============================================================================================
-        private IEnumerator SitRoutine(Transform target)
+        [HideFromIl2Cpp]
+        private IEnumerator SitRoutine(Transform target, SeatPose explicitPose)
         {
             if (target == null) yield break;
             if (!ResolveMitaReferences()) yield break;
@@ -719,7 +792,7 @@ namespace MakemitAGA.Mita_self.Mita_tools
             AcquireActionControl();
             CaptureOriginalState();
 
-            SeatProbe seat = BuildSeatProbe(target);
+            SeatProbe seat = BuildSeatProbe(target, explicitPose);
             Vector3 finalSitRootPos = seat.SitRootPosition;
             Quaternion finalSitRootRot = seat.DockRotation;
 
@@ -728,8 +801,19 @@ namespace MakemitAGA.Mita_self.Mita_tools
             Vector3 approachPoint = seat.ApproachPosition;
             approachPoint.y = _mitaAvatar.transform.position.y;
             NavMeshHit navHit;
-            if (NavMesh.SamplePosition(approachPoint, out navHit, 1.2f, -1))
+            float navSampleRadius =
+                explicitPose != null
+                    ? 0.35f
+                    : 1.2f;
+
+            if (NavMesh.SamplePosition(
+                approachPoint,
+                out navHit,
+                navSampleRadius,
+                -1))
+            {
                 approachPoint = navHit.position;
+            }
 
             yield return WalkToDockPoint(approachPoint);
 
@@ -848,6 +932,7 @@ namespace MakemitAGA.Mita_self.Mita_tools
                 + ", rightSupport=" + rightFoot.HasSupport);
         }
 
+        [HideFromIl2Cpp]
         private IEnumerator WalkToDockPoint(Vector3 dockPoint)
         {
             _lastWalkArrived = false;
@@ -921,6 +1006,7 @@ namespace MakemitAGA.Mita_self.Mita_tools
                 LogWarn("Native walk timed out or was interrupted before reaching dock point.");
         }
 
+        [HideFromIl2Cpp]
         private IEnumerator ManualApproachToDockPoint(Vector3 dockPoint)
         {
             if (_mitaAvatar == null) yield break;
@@ -965,6 +1051,7 @@ namespace MakemitAGA.Mita_self.Mita_tools
                 LogWarn("Manual approach also failed to reach dock point within timeout.");
         }
 
+        [HideFromIl2Cpp]
         private IEnumerator AlignRotationOnly(Quaternion rootRot, float duration)
         {
             if (_mitaAvatar == null) yield break;
@@ -991,6 +1078,7 @@ namespace MakemitAGA.Mita_self.Mita_tools
         // ============================================================================================
         // 解锁与还原
         // ============================================================================================
+        [HideFromIl2Cpp]
         private IEnumerator UnlockRoutine(bool resumeFollowPlayer)
         {
             float startL = _leftFootIkWeight;
@@ -1734,6 +1822,8 @@ namespace MakemitAGA.Mita_self.Mita_tools
             public Vector3 SitRootPosition;
             public Quaternion DockRotation;
             public float HalfDepth;
+            public bool HasExplicitSeatY;
+            public float ExplicitSeatY;
         }
 
         private struct FootProbeResult
@@ -1742,10 +1832,51 @@ namespace MakemitAGA.Mita_self.Mita_tools
             public bool HasSupport;
         }
 
-        private SeatProbe BuildSeatProbe(Transform target)
+        [HideFromIl2Cpp]
+        private SeatProbe BuildSeatProbe(
+            Transform target,
+            SeatPose explicitPose)
         {
             SeatProbe probe = new SeatProbe();
             probe.Bounds = CalculateBounds(target.gameObject, out probe.HasBounds);
+
+            if (explicitPose != null &&
+                explicitPose.ActionProxy == target.gameObject)
+            {
+                Vector3 outward = Flatten(
+                    explicitPose.OutwardDirection);
+
+                if (outward.sqrMagnitude < 0.0001f)
+                    outward = Flatten(target.forward);
+
+                if (outward.sqrMagnitude < 0.0001f)
+                    outward = Vector3.forward;
+
+                outward.Normalize();
+
+                probe.HalfDepth = Mathf.Max(
+                    0.12f,
+                    explicitPose.SupportDepth * 0.5f);
+
+                // FloorPoint 已经通过 NavMesh、身体、走廊和腿部空间验证，
+                // 所以动作层优先直接采用，不再重新猜测家具哪一边是外侧。
+                probe.ApproachPosition =
+                    explicitPose.FloorPoint;
+
+                // Action Proxy 的中心在 VLM 座点，略向外偏移可以避免根节点坐得过深。
+                probe.SitRootPosition =
+                    explicitPose.WorldSeatPoint +
+                    outward * 0.03f;
+
+                probe.DockRotation =
+                    explicitPose.SeatRotation;
+
+                probe.HasExplicitSeatY = true;
+                probe.ExplicitSeatY =
+                    explicitPose.WorldSeatPoint.y;
+
+                return probe;
+            }
 
             Vector3 forward = Flatten(target.forward);
             if (forward.sqrMagnitude < 0.0001f) forward = Flatten(_mitaAvatar.transform.forward);
@@ -1767,7 +1898,10 @@ namespace MakemitAGA.Mita_self.Mita_tools
 
         private float ProbeSeatY(Transform target, SeatProbe probe)
         {
-            // 座面只允许来自目标物体自身/子物体 Collider。
+            if (probe.HasExplicitSeatY)
+                return probe.ExplicitSeatY;
+
+            // 旧 sit(name) 兼容路径：座面只允许来自目标物体自身/子物体 Collider。
             // 使用最终坐姿 root 附近的多点采样，并选择“较低的可坐上表面”，避免沙发扶手/靠背被当成座面。
             bool hit;
             Vector3 seatPoint = RaycastBestSeatSurface(target.gameObject, probe, out hit);
@@ -2163,6 +2297,7 @@ namespace MakemitAGA.Mita_self.Mita_tools
             return root + Vector3.up * 0.48f + side * (left ? -0.13f : 0.13f);
         }
 
+        [HideFromIl2Cpp]
         private object GetLegChain(bool left)
         {
             try
@@ -2173,6 +2308,7 @@ namespace MakemitAGA.Mita_self.Mita_tools
             catch { return null; }
         }
 
+        [HideFromIl2Cpp]
         private object GetLegBendConstraint(bool left)
         {
             object chain = GetLegChain(left);
@@ -2218,6 +2354,7 @@ namespace MakemitAGA.Mita_self.Mita_tools
             SetMemberValue(bend, "weight", weight);
         }
 
+        [HideFromIl2Cpp]
         private object GetMemberValue(object obj, string memberName)
         {
             if (obj == null) return null;
@@ -2236,6 +2373,7 @@ namespace MakemitAGA.Mita_self.Mita_tools
             return null;
         }
 
+        [HideFromIl2Cpp]
         private void SetMemberValue(object obj, string memberName, object value)
         {
             if (obj == null) return;

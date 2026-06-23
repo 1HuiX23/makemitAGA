@@ -1,4 +1,4 @@
-﻿/*
+/*
  * [模块名称]: 环境与特效管理器 (EnvironmentManager)
  * [版本]: v1.2 (Final Stable)
  * 

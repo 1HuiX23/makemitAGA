@@ -1,21 +1,106 @@
-﻿using UnityEngine;
+using UnityEngine;
 using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices; // 新增：用于 Marshal
+using System.Reflection;
 using BepInEx;
 using Il2CppInterop.Runtime;
 using HarmonyLib;
 
 namespace MakemitAGA.Mita_self
 {
-    // 拦截补丁 (保持)
-    [HarmonyPatch("Location3WalkToToilet", "LateUpdate")]
-    public static class Patch_Location3WalkToToilet { public static bool Prefix() { return !InteractionManager.IsInteracting; } }
+    // 这两个游戏类型原先使用 [HarmonyPatch("类型名", "方法名")]。
+    // Harmony 会为字符串类型名枚举 Assembly-CSharp.GetTypes()；MiSide 的 OptionValue
+    // interop 类型会在该枚举中抛 ReflectionTypeLoadException，形成四条无害但刺眼的 Warning。
+    //
+    // 现在使用程序集限定名 Type.GetType(...) 精确解析，不再枚举整个 Assembly-CSharp。
+    [HarmonyPatch]
+    public static class Patch_Location3WalkToToilet
+    {
+        private static Type ResolveTargetType()
+            => Type.GetType(
+                "Location3WalkToToilet, Assembly-CSharp",
+                false);
 
-    [HarmonyPatch("Animator_FunctionsOverride", "Update")]
-    public static class Patch_AnimatorFunctions { public static bool Prefix() { return !InteractionManager.IsInteracting; } }
+        [HarmonyPrepare]
+        public static bool Prepare()
+        {
+            bool found =
+                ResolveTargetType() != null;
+
+            if (!found)
+            {
+                Plugin.Logger?.LogWarning(
+                    "[Harmony] Location3WalkToToilet type not found; patch skipped.");
+            }
+
+            return found;
+        }
+
+        [HarmonyTargetMethod]
+        public static MethodBase TargetMethod()
+        {
+            Type type =
+                ResolveTargetType();
+
+            return type == null
+                ? null
+                : AccessTools.Method(
+                    type,
+                    "LateUpdate");
+        }
+
+        [HarmonyPrefix]
+        public static bool Prefix()
+        {
+            return !InteractionManager.IsInteracting;
+        }
+    }
+
+    [HarmonyPatch]
+    public static class Patch_AnimatorFunctions
+    {
+        private static Type ResolveTargetType()
+            => Type.GetType(
+                "Animator_FunctionsOverride, Assembly-CSharp",
+                false);
+
+        [HarmonyPrepare]
+        public static bool Prepare()
+        {
+            bool found =
+                ResolveTargetType() != null;
+
+            if (!found)
+            {
+                Plugin.Logger?.LogWarning(
+                    "[Harmony] Animator_FunctionsOverride type not found; patch skipped.");
+            }
+
+            return found;
+        }
+
+        [HarmonyTargetMethod]
+        public static MethodBase TargetMethod()
+        {
+            Type type =
+                ResolveTargetType();
+
+            return type == null
+                ? null
+                : AccessTools.Method(
+                    type,
+                    "Update");
+        }
+
+        [HarmonyPrefix]
+        public static bool Prefix()
+        {
+            return !InteractionManager.IsInteracting;
+        }
+    }
 
     public static class InteractionManager
     {

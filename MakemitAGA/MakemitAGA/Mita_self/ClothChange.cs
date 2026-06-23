@@ -1,4 +1,4 @@
-﻿/*
+/*
  * [模块名称]: 米塔换装与光标管理系统 (Cloth & Cursor System)
  * [文件路径]: MakemitAGA/Mita_self/ClothChange.cs
  * [功能描述]: 
@@ -15,7 +15,8 @@ using System.Linq;
 using System.Reflection;
 using System.Text.Json;              // 引入 .NET 6 原生 JSON 库 (不需要额外 DLL)
 using System.Text.Json.Serialization;// 用于控制 JSON 字段的读写行为
-using HarmonyLib;                    // 用于 Hook 游戏方法
+using HarmonyLib;
+using BepInEx;                    // 用于 Hook 游戏方法
 using UnityEngine;                   // Unity 核心 API
 using Il2CppInterop.Runtime;         // IL2CPP 互操作库 (处理 Type 转换)
 
@@ -32,6 +33,17 @@ namespace MakemitAGA.Mita_self
         [JsonInclude] public string API_KEY = "";
         [JsonInclude] public string MODEL_ID = "";
         [JsonInclude] public string SYSTEM_PROMPT = "我们的默认提示词";
+        [JsonInclude] public string BASE_URL = "https://api-inference.modelscope.cn/v1/chat/completions";
+        [JsonInclude] public int MAX_TOKENS = 512;
+        [JsonInclude] public float TEMPERATURE = 0.1f;
+        [JsonInclude] public int CONNECT_TIMEOUT_SECONDS = 20;
+        [JsonInclude] public int READ_TIMEOUT_SECONDS = 240;
+
+        // 后端文件调试开关：
+        // false（默认）= plugins 目录不生成 backend_*.txt / backend_*.log；
+        // true          = 所有启动、Prompt、Reply、异常合并写入 backend_debug.txt。
+        // BepInEx 控制台中的实时后端交互日志不受此开关影响。
+        [JsonInclude] public bool WRITE_BACKEND_DEBUG_FILE = false;
 
         // --- Mod 专属字段 ---
         [JsonInclude] public string CurrentOutfitId = "Original";   // 当前衣服的内部ID
@@ -80,10 +92,25 @@ namespace MakemitAGA.Mita_self
         private static SharedConfig _configData = new SharedConfig(); // 内存中的配置数据
 
         // --- 路径助手 ---
-        // 获取当前 DLL 所在的目录 (BepInEx/plugins/MakemitAGA/)
-        private static string AssemblyDirectory => Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-        // 拼接出配置文件的完整路径
-        private static string ConfigPath => Path.Combine(AssemblyDirectory, "config.json");
+        // 用户明确使用 plugins/config.json 作为共享配置。
+        // 旧整合版曾迁移到 BepInEx/config/MakemitAGA.json；这里保留一次性反向迁移，
+        // 避免升级后丢失 API_KEY、模型参数或换装状态。
+        private static string AssemblyDirectory =>
+            Path.GetDirectoryName(
+                Assembly.GetExecutingAssembly().Location);
+
+        private static string ConfigPath =>
+            Path.Combine(
+                AssemblyDirectory,
+                "config.json");
+
+        private static string PreviousConfigPath =>
+            Path.Combine(
+                Paths.ConfigPath,
+                "MakemitAGA.json");
+
+        public static string ConfigPathForBackend =>
+            ConfigPath;
         // 获取游戏原生存档路径 (C:/Users/xxx/AppData/LocalLow/AIHASTO/MiSideFull/Save/Clothes)
         // 这是判断玩家是否合法解锁衣服的关键文件
         private static string GameSavePath => Path.Combine(Application.persistentDataPath, "Save", "Clothes");
@@ -284,19 +311,64 @@ namespace MakemitAGA.Mita_self
         // ==================================================================================
         private static void LoadConfigFromJson()
         {
-            if (File.Exists(ConfigPath))
+            string sourcePath = ConfigPath;
+
+            // v0.2.2 兼容：
+            // 如果 plugins/config.json 尚不存在，而上一版的
+            // BepInEx/config/MakemitAGA.json 存在，则读取旧文件并迁回 plugins。
+            if (!File.Exists(sourcePath) &&
+                File.Exists(PreviousConfigPath))
+            {
+                sourcePath = PreviousConfigPath;
+            }
+
+            if (File.Exists(sourcePath))
             {
                 try
                 {
-                    string json = File.ReadAllText(ConfigPath);
-                    // 允许注释，允许字段，容错率高
-                    var options = new JsonSerializerOptions { ReadCommentHandling = JsonCommentHandling.Skip, IncludeFields = true };
-                    _configData = JsonSerializer.Deserialize<SharedConfig>(json, options);
-                    if (_configData == null) _configData = new SharedConfig();
+                    string json = File.ReadAllText(sourcePath);
+                    var options = new JsonSerializerOptions
+                    {
+                        ReadCommentHandling = JsonCommentHandling.Skip,
+                        IncludeFields = true
+                    };
+
+                    _configData =
+                        JsonSerializer.Deserialize<SharedConfig>(
+                            json,
+                            options);
+
+                    if (_configData == null)
+                        _configData = new SharedConfig();
+
+                    if (!string.Equals(
+                        sourcePath,
+                        ConfigPath,
+                        StringComparison.OrdinalIgnoreCase))
+                    {
+                        Plugin.Logger?.LogInfo(
+                            "[ClothChange] config migrated back to " +
+                            ConfigPath);
+                    }
+
+                    // 即使已有 config.json，也重新序列化一次：
+                    // 这样升级后会自动补上 WRITE_BACKEND_DEBUG_FILE=false。
+                    SaveConfigToJson();
                 }
-                catch { }
+                catch (Exception e)
+                {
+                    Plugin.Logger?.LogWarning(
+                        "[ClothChange] config read failed; using defaults: " +
+                        e.Message);
+
+                    _configData = new SharedConfig();
+                    SaveConfigToJson();
+                }
             }
-            else { SaveConfigToJson(); } // 文件不存在则创建默认的
+            else
+            {
+                SaveConfigToJson();
+            }
         }
 
         private static void SaveConfigToJson()

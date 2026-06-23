@@ -1,4 +1,4 @@
-﻿/*
+/*
  * [文件说明]: 视觉系统的 Harmony 钩子
  * 
  * [分析过程]:
@@ -19,6 +19,10 @@ namespace MakemitAGA.Mita_self
         public static void HookMitaUpdate(MitaPerson __instance)
         {
             MitaVisionManager.UpdateMita(__instance);
+
+            // Seat VLM 使用独立冻结相机，避免干扰原有 look 指令的相机生命周期。
+            Mita_tools.SeatVlmVisionManager.UpdateMita(__instance);
+            Mita_tools.SeatSurfaceVlmPreviewManager.UpdateMita(__instance);
         }
     }
 }

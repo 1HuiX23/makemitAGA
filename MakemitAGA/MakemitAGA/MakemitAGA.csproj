@@ -375,6 +375,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Connection\AIConversationManager.cs" />
+    <Compile Include="Connection\SeatVlmAIClient.cs" />
     <Compile Include="Mita_self\ClothChange.cs" />
     <Compile Include="Mita_self\DialoguePatches.cs" />
     <Compile Include="Mita_self\EmotionController.cs" />
@@ -384,6 +385,14 @@
     <Compile Include="Mita_self\Mita_tools\CreateTestObject.cs" />
     <Compile Include="Mita_self\Mita_tools\Il2CppAssetBundleLoader.cs" />
     <Compile Include="Mita_self\Mita_tools\Mita_sit.cs" />
+    <Compile Include="Mita_self\Mita_tools\SeatSurfaceVlmPreviewManager.cs" />
+    <Compile Include="Mita_self\Mita_tools\SeatVlmConfig.cs" />
+    <Compile Include="Mita_self\Mita_tools\SeatVlmController.cs" />
+    <Compile Include="Mita_self\Mita_tools\SeatVlmDebugVisuals.cs" />
+    <Compile Include="Mita_self\Mita_tools\SeatVlmIntegration.cs" />
+    <Compile Include="Mita_self\Mita_tools\SeatVlmObjectDetector.cs" />
+    <Compile Include="Mita_self\Mita_tools\SeatVlmTargetPointSelector.cs" />
+    <Compile Include="Mita_self\Mita_tools\SeatVlmVisionManager.cs" />
     <Compile Include="Mita_self\Mita_tools\TopSurfaceSeatProxyPlugin.cs" />
     <Compile Include="Mita_self\Mita_tools\TopSurfaceSeatProxyRuntime.cs" />
     <Compile Include="Mita_self\ObjectDetector.cs" />
@@ -391,6 +400,14 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Mita_self\VisionPatches.cs" />
     <Compile Include="World\EnvironmentManager.cs" />
+    <Compile Include="World\SeatActionProxy.cs" />
+    <Compile Include="World\SeatSurfaceAnalysisMesh.cs" />
+    <Compile Include="World\SeatSurfaceNavigation.cs" />
+    <Compile Include="World\SeatSurfaceScanCapture.cs" />
+    <Compile Include="World\SeatSurfaceSceneQuery.cs" />
+    <Compile Include="World\SeatSurfaceSeatability.cs" />
+    <Compile Include="World\SeatSurfaceSelectionLifecycle.cs" />
+    <Compile Include="World\SeatSurfaceVisualization.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="app.config" />

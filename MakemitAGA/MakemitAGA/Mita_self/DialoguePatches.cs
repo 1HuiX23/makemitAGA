@@ -103,7 +103,11 @@ namespace MakemitAGA.Mita_self
         [HarmonyPrefix]
         public static bool InterceptCommand(string code)
         {
-            string command = code.Trim();
+            string command = (code ?? "").Trim();
+
+            // Seat VLM 正式命令优先分发，避免再注册第二个 Console Command Prefix。
+            if (SeatVlmIntegration.TryHandleConsoleCommand(command))
+                return false;
 
             // --- 基础对话指令 ---
             if (command.StartsWith("say ", StringComparison.OrdinalIgnoreCase))
@@ -362,7 +366,7 @@ namespace MakemitAGA.Mita_self
                 yield return null;
 
                 string visionPrompt = $"请给出当前视角中【{input}】的位置。请只返回 JSON 格式的坐标数组 [x1, y1, x2, y2]，不要返回任何其他文字。";
-                var task = AIConversationManager.GetResponseAsync(visionPrompt);
+                var task = AIConversationManager.GetResponseAsync(visionPrompt, true);
                 while (!task.IsCompleted) { yield return null; }
                 string response = task.Result;
 
@@ -398,7 +402,7 @@ namespace MakemitAGA.Mita_self
             else
             {
                 ConsoleMain.ConsolePrintGame("Mita正在思考...");
-                var task = AIConversationManager.GetResponseAsync(input);
+                var task = AIConversationManager.GetResponseAsync(input, false);
                 while (!task.IsCompleted) { yield return null; }
                 string aiResponse = task.Result;
                 ConsoleMain.ConsolePrintGame($"Mita: {aiResponse}");

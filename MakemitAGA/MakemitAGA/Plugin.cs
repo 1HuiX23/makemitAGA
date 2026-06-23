@@ -1,4 +1,9 @@
 /*
+ * Plugin.cs
+ * 主入口：初始化现有 MakemitAGA 模块、正式 Seat VLM、Mita_sit 与本地后端。
+ * 后端标准输出/错误被转发到 BepInEx 控制台，不在 plugins 目录创建日志文本。
+ */
+/*
  * [文件说明]: 插件主入口与生命周期管理
  * 
  * [分析过程]:
@@ -13,8 +18,10 @@
  * 4. KillBackend(): 游戏退出时自动杀掉 Python 进程。
  * 5. 加载所有 Harmony 补丁类。
  */
+using System;
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 using BepInEx;
 using BepInEx.Logging;
 using HarmonyLib;
@@ -26,19 +33,22 @@ using UnityEngine.SceneManagement;
 
 namespace MakemitAGA
 {
-    [BepInPlugin("com.yourname.miside.freedialogue", "Miside AI Modular", "0.1.0")]
+    [BepInPlugin("com.yourname.miside.freedialogue", "Miside AI Modular", "0.2.2")]
     public class Plugin : BepInEx.Unity.IL2CPP.BasePlugin
     {
         internal static ManualLogSource Logger;
+        internal static Plugin Instance;
         public static MainThreadRunner Runner { get; private set; }
         private Process _backendProcess;
+        private bool _backendExitReported;
 
         public override void Load()
         {
             Logger = Log;
+            Instance = this;
             try { System.Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { }
 
-            Logger.LogInfo("Miside AI 模块化重构版已启动!");
+            Logger.LogInfo("Miside AI Modular 0.2.2（日志与警告清理版）已启动!");
 
             ClothChange.Init();
             // 当任何一个场景加载完毕时，都会触发 OnSceneLoaded
@@ -55,7 +65,7 @@ namespace MakemitAGA
 
             // 应用补丁
             var harmony = new Harmony("com.yourname.miside.freedialogue");
-            TopSurfaceSeatProxyIntegration.Init(Logger, harmony);
+            SeatVlmIntegration.Init(Logger, harmony);
             harmony.PatchAll(typeof(VisionPatches));
             harmony.PatchAll(typeof(DialoguePatches));
             harmony.PatchAll(typeof(Patch_Location3WalkToToilet));
@@ -70,6 +80,8 @@ namespace MakemitAGA
             // 每次场景加载，旧的物体肯定被销毁了。
             // 必须先清理静态引用，防止 EnvironmentManager 拿着前朝的剑斩本朝的官。
             EnvironmentManager.ClearState();
+            SeatVlmIntegration.ResetForSceneChange(
+                "sceneLoaded: " + scene.name + " / " + scene.handle);
 
             // 然后重新初始化，抓取当前场景的新物体
             EnvironmentManager.Init();
@@ -77,6 +89,7 @@ namespace MakemitAGA
 
         public override bool Unload()
         {
+            SeatVlmIntegration.Shutdown();
             KillBackend();
             return true;
         }
@@ -86,31 +99,227 @@ namespace MakemitAGA
             KillBackend();
         }
 
-        private void StartBackendServer()
+        internal void StartBackendServer()
         {
-            string exePath = Path.Combine(Paths.PluginPath, "OnlineAIApiServer.exe");
-            if (!File.Exists(exePath)) return;
+            // 清理 v2.1 后端遗留的五个分散诊断文件。
+            // 新后端仅在 config.json 的 WRITE_BACKEND_DEBUG_FILE=true 时
+            // 使用一个 backend_debug.txt。
+            CleanupLegacyBackendDiagnosticFiles();
+
+            string exePath =
+                Path.Combine(
+                    Paths.PluginPath,
+                    "OnlineAIApiServer.exe");
+
+            if (!File.Exists(exePath))
+            {
+                Logger.LogWarning(
+                    "[Backend] 未找到：" +
+                    exePath);
+                return;
+            }
 
             try
             {
-                ProcessStartInfo startInfo = new ProcessStartInfo();
-                startInfo.FileName = exePath;
-                startInfo.WorkingDirectory = Paths.PluginPath;
-                startInfo.UseShellExecute = true;
-                _backendProcess = Process.Start(startInfo);
-                Logger.LogInfo("Python后端已启动。");
+                if (_backendProcess != null &&
+                    !_backendProcess.HasExited)
+                {
+                    return;
+                }
             }
-            catch (System.Exception e) { Logger.LogError($"后端启动失败: {e.Message}"); }
+            catch
+            {
+                _backendProcess = null;
+            }
+
+            try
+            {
+                _backendExitReported = false;
+
+                ProcessStartInfo startInfo =
+                    new ProcessStartInfo();
+
+                startInfo.FileName = exePath;
+                startInfo.WorkingDirectory =
+                    Paths.PluginPath;
+                startInfo.UseShellExecute = false;
+                startInfo.CreateNoWindow = true;
+                startInfo.RedirectStandardOutput = true;
+                startInfo.RedirectStandardError = true;
+                startInfo.StandardOutputEncoding = Encoding.UTF8;
+                startInfo.StandardErrorEncoding = Encoding.UTF8;
+
+                // 后端与换装系统共享 plugins/config.json。
+                // WRITE_BACKEND_DEBUG_FILE 默认 false；开启后仅生成一个 backend_debug.txt。
+                // stdout/stderr 始终实时转发到 BepInEx 控制台。
+                startInfo.Environment[
+                    "MISIDE_CONFIG_PATH"] =
+                    ClothChange.ConfigPathForBackend;
+
+                startInfo.Environment[
+                    "MISIDE_CACHE_PATH"] =
+                    Path.Combine(
+                        Paths.PluginPath,
+                        "cache.jpg");
+
+                _backendProcess =
+                    new Process
+                    {
+                        StartInfo = startInfo,
+                        EnableRaisingEvents = true
+                    };
+
+                _backendProcess.OutputDataReceived +=
+                    delegate (object sender, DataReceivedEventArgs e)
+                    {
+                        if (!string.IsNullOrEmpty(e.Data))
+                            Logger?.LogInfo("[Backend] " + e.Data);
+                    };
+
+                _backendProcess.ErrorDataReceived +=
+                    delegate (object sender, DataReceivedEventArgs e)
+                    {
+                        if (!string.IsNullOrEmpty(e.Data))
+                            Logger?.LogError("[Backend] " + e.Data);
+                    };
+
+                _backendProcess.Start();
+                _backendProcess.BeginOutputReadLine();
+                _backendProcess.BeginErrorReadLine();
+
+                Logger.LogInfo(
+                    "Python后端已启动。pid=" +
+                    _backendProcess.Id);
+            }
+            catch (Exception e)
+            {
+                Logger.LogError(
+                    "后端启动失败: " +
+                    e.Message);
+            }
+        }
+
+        internal void RestartBackendServer()
+        {
+            KillBackend();
+            StartBackendServer();
+        }
+
+        internal string GetBackendStatus()
+        {
+            if (_backendProcess == null)
+                return "backend=<null>";
+
+            try
+            {
+                return _backendProcess.HasExited
+                    ? "backend=exited code=" +
+                      _backendProcess.ExitCode
+                    : "backend=running pid=" +
+                      _backendProcess.Id;
+            }
+            catch (Exception e)
+            {
+                return "backend=status-error " +
+                       e.Message;
+            }
+        }
+
+        internal void PollBackendProcess()
+        {
+            if (_backendProcess == null ||
+                _backendExitReported)
+            {
+                return;
+            }
+
+            try
+            {
+                if (!_backendProcess.HasExited)
+                    return;
+
+                _backendExitReported = true;
+                Logger.LogError(
+                    "[Backend] 进程提前退出" +
+                    " | exitCode=" +
+                    _backendProcess.ExitCode);
+            }
+            catch { }
+        }
+
+        private static void CleanupLegacyBackendDiagnosticFiles()
+        {
+            string[] legacyNames =
+            {
+                "backend_boot.log",
+                "backend_last_prompt.txt",
+                "backend_last_reply.txt",
+                "backend_last_error.txt",
+                "backend_startup_error.txt"
+            };
+
+            int deleted = 0;
+
+            for (int i = 0;
+                 i < legacyNames.Length;
+                 i++)
+            {
+                try
+                {
+                    string path =
+                        Path.Combine(
+                            Paths.PluginPath,
+                            legacyNames[i]);
+
+                    if (!File.Exists(path))
+                        continue;
+
+                    File.Delete(path);
+                    deleted++;
+                }
+                catch (Exception e)
+                {
+                    Logger?.LogWarning(
+                        "[Backend] 无法删除旧诊断文件 " +
+                        legacyNames[i] +
+                        "：" +
+                        e.Message);
+                }
+            }
+
+            if (deleted > 0)
+            {
+                Logger?.LogInfo(
+                    "[Backend] 已清理旧版分散诊断文件：" +
+                    deleted);
+            }
         }
 
         private void KillBackend()
         {
-            if (_backendProcess != null && !_backendProcess.HasExited)
-                try { _backendProcess.Kill(); } catch { }
+            if (_backendProcess != null)
+            {
+                try
+                {
+                    if (!_backendProcess.HasExited)
+                        _backendProcess.Kill();
+                }
+                catch { }
+            }
+
+            _backendProcess = null;
+            _backendExitReported = false;
         }
     }
 
-    public class MainThreadRunner : MonoBehaviour { }
+    public class MainThreadRunner : MonoBehaviour
+    {
+        private void Update()
+        {
+            Plugin.Instance?.PollBackendProcess();
+            SeatVlmController.Tick();
+        }
+    }
 }
 
 /*
@@ -151,7 +360,14 @@ namespace MakemitAGA
      逻辑：先检查进程是否存在且未退出，然后尝试 Kill。使用 try-catch 包裹是为了防止进程已经结束时报错导致游戏崩溃。
 
 4. 辅助类定义：
-   - public class MainThreadRunner : MonoBehaviour { }
+   - public class MainThreadRunner : MonoBehaviour
+    {
+        private void Update()
+        {
+            Plugin.Instance?.PollBackendProcess();
+            SeatVlmController.Tick();
+        }
+    }
      作用：定义一个空的 MonoBehaviour 类。
      意义：虽然它里面没有代码，但只有继承了 MonoBehaviour 的组件才能使用 StartCoroutine（开启协程）。我们需要利用它作为载体，把异步的网络回调代码“拉回”到 Unity 的主线程循环中执行。
 
