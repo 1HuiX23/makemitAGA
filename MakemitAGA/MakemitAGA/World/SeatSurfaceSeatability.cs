@@ -75,7 +75,8 @@ namespace MakemitAGA.World
             Bounds targetBounds,
             HeightfieldStats heightfield,
             SeatabilityStats result,
-            int serial)
+            int serial,
+            bool manualDebugTest = false)
         {
             float floorY;
 
@@ -113,8 +114,12 @@ namespace MakemitAGA.World
             {
                 for (int x = 0; x < MeshGrid; x++)
                 {
-                    if (serial != _scanSerial)
+                    if (IsSeatabilityAnalysisCancelled(
+                        serial,
+                        manualDebugTest))
+                    {
                         yield break;
+                    }
 
                     if (heightfield.surfaceMask[x, z])
                     {
@@ -216,7 +221,9 @@ namespace MakemitAGA.World
                 }
             }
 
-            _scanStage = "ActionAnalysis";
+            if (!manualDebugTest)
+                _scanStage = "ActionAnalysis";
+
             processedThisFrame = 0;
 
             // Second pass: expensive edge, floor, NavMesh and clearance checks.
@@ -224,8 +231,12 @@ namespace MakemitAGA.World
             {
                 for (int x = 0; x < MeshGrid; x++)
                 {
-                    if (serial != _scanSerial)
+                    if (IsSeatabilityAnalysisCancelled(
+                        serial,
+                        manualDebugTest))
+                    {
                         yield break;
+                    }
 
                     if (result.validSeatCenters[x, z])
                     {
@@ -324,6 +335,16 @@ namespace MakemitAGA.World
                     "General height classification ignored the height limit, " +
                     "while action-valid points still required their own outside floor.");
             }
+        }
+
+
+        private static bool IsSeatabilityAnalysisCancelled(
+            int serial,
+            bool manualDebugTest)
+        {
+            return manualDebugTest
+                ? serial != _manualDebugScanSerial
+                : serial != _scanSerial;
         }
 
         private static void CountActionReject(

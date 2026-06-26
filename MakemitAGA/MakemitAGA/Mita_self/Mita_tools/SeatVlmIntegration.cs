@@ -5,6 +5,7 @@
  *
  * 正式主项目入口：
  *   - 解析 svt_start <目标>、svt_status、svt_cancel、svt_clear、debug_svt；
+ *   - 提供 debug_svt_test(name)、debug_svt_mesh(name)、svt_test_clear 手动演示入口；
  *   - 统一管理场景切换、调试可见性和临时展示清理；
  *   - svt_start 没有默认目标，缺少参数只显示用法；
  *   - svt_clear 永远保留分析 Collider 与动作 Action Proxy Collider。
@@ -43,7 +44,9 @@ namespace MakemitAGA.Mita_self.Mita_tools
             log?.LogInfo(
                 "[SeatVLM] integrated production pipeline ready." +
                 " Commands: svt_start <target>, svt_status, svt_cancel, " +
-                "svt_clear, debug_svt, svt_backend_status, svt_backend_restart.");
+                "svt_clear, debug_svt, debug_svt_test(name), " +
+                "debug_svt_mesh(name), svt_test_clear, " +
+                "svt_backend_status, svt_backend_restart.");
         }
 
         public static bool TryHandleConsoleCommand(
@@ -107,6 +110,65 @@ namespace MakemitAGA.Mita_self.Mita_tools
                 ClearTransientArtifacts("svt_clear", false);
                 Print(
                     "Seat VLM 临时展示已清理；分析 Collider 与动作代理 Collider 已保留。");
+                return true;
+            }
+
+            string manualTarget;
+            bool isManualCommand;
+
+            TryParseNamedArgumentCommand(
+                command,
+                "debug_svt_test",
+                out isManualCommand,
+                out manualTarget);
+
+            if (isManualCommand)
+            {
+                if (string.IsNullOrWhiteSpace(manualTarget))
+                {
+                    Print(
+                        "<color=yellow>用法：debug_svt_test(物体真实名称)</color>");
+                    return true;
+                }
+
+                SeatSurfaceAnalysisRuntime
+                    .RunManualDebugTestByName(
+                        manualTarget,
+                        false,
+                        "console-debug_svt_test");
+                return true;
+            }
+
+            TryParseNamedArgumentCommand(
+                command,
+                "debug_svt_mesh",
+                out isManualCommand,
+                out manualTarget);
+
+            if (isManualCommand)
+            {
+                if (string.IsNullOrWhiteSpace(manualTarget))
+                {
+                    Print(
+                        "<color=yellow>用法：debug_svt_mesh(物体真实名称)</color>");
+                    return true;
+                }
+
+                SeatSurfaceAnalysisRuntime
+                    .RunManualDebugTestByName(
+                        manualTarget,
+                        true,
+                        "console-debug_svt_mesh");
+                return true;
+            }
+
+            if (command.Equals(
+                "svt_test_clear",
+                StringComparison.OrdinalIgnoreCase))
+            {
+                SeatSurfaceAnalysisRuntime
+                    .ClearManualDebugTest(
+                        "console-svt_test_clear");
                 return true;
             }
 
@@ -212,6 +274,9 @@ namespace MakemitAGA.Mita_self.Mita_tools
             SeatVlmDebugVisuals.ClearAll();
             SeatSurfaceVlmPreviewManager.CancelAndClear();
             SeatSurfaceAnalysisRuntime.ClearAll();
+            SeatSurfaceAnalysisRuntime.ClearManualDebugTest(
+                "scene-change:" + reason,
+                false);
             SeatActionProxyRuntime.ClearAll();
             SetDebugVisible(false);
         }
@@ -225,6 +290,9 @@ namespace MakemitAGA.Mita_self.Mita_tools
                 SeatVlmDebugVisuals.ClearAll();
                 SeatSurfaceVlmPreviewManager.CancelAndClear();
                 SeatSurfaceAnalysisRuntime.ClearAll();
+                SeatSurfaceAnalysisRuntime.ClearManualDebugTest(
+                    "plugin-unload",
+                    false);
                 SeatActionProxyRuntime.ClearAll();
             }
             catch { }
@@ -274,6 +342,70 @@ namespace MakemitAGA.Mita_self.Mita_tools
                 target = command.Substring(
                     10,
                     command.Length - 11)
+                    .Trim()
+                    .Trim('"', '\'');
+            }
+        }
+
+
+        private static void TryParseNamedArgumentCommand(
+            string command,
+            string commandName,
+            out bool isCommand,
+            out string target)
+        {
+            isCommand = false;
+            target = null;
+
+            if (string.IsNullOrWhiteSpace(command) ||
+                string.IsNullOrWhiteSpace(commandName))
+            {
+                return;
+            }
+
+            if (command.Equals(
+                commandName,
+                StringComparison.OrdinalIgnoreCase))
+            {
+                isCommand = true;
+                return;
+            }
+
+            string spacePrefix =
+                commandName + " ";
+
+            if (command.StartsWith(
+                spacePrefix,
+                StringComparison.OrdinalIgnoreCase))
+            {
+                isCommand = true;
+                target = command.Substring(
+                    spacePrefix.Length)
+                    .Trim()
+                    .Trim('"', '\'');
+                return;
+            }
+
+            string functionPrefix =
+                commandName + "(";
+
+            if (command.StartsWith(
+                functionPrefix,
+                StringComparison.OrdinalIgnoreCase))
+            {
+                isCommand = true;
+
+                if (!command.EndsWith(
+                    ")",
+                    StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                target = command.Substring(
+                    functionPrefix.Length,
+                    command.Length -
+                    functionPrefix.Length - 1)
                     .Trim()
                     .Trim('"', '\'');
             }

@@ -1,7 +1,7 @@
 # MakemitAGA 项目架构与维护手册
 
-> 文档对应版本：**Miside AI Modular 0.2.2 / Seat VLM 正式整合版**  
-> 文档修订日期：**2026-06-23**  
+> 文档对应版本：**Miside AI Modular 0.2.2 / Seat VLM 正式整合版 + SVT 手动对象演示补丁**  
+> 文档修订日期：**2026-06-27**  
 > 目标环境：**MiSideFull / Unity 2021.3.35f1 / Windows x64 / IL2CPP / BepInEx 6**  
 > 文档用途：在项目继续扩大之前，为后续开发者提供一份“先读这个就能继续工作”的源码地图。
 
@@ -36,6 +36,25 @@ svt_start <目标>
 → 自动清理临时可视化
 ```
 
+本次修订加入了**独立于正式 Seat VLM 的手动物体演示流程**：
+
+```text
+debug_svt_test(真实对象名)
+→ 按真实名称选择最近的活动对象
+→ 执行与正式流程一致的顶视深度扫描和座面分类
+→ 显示青/绿/红/橙/紫分析网格
+→ 不连接 VLM，不调用 Mita_sit，不覆盖正式分析结果
+
+debug_svt_mesh(真实对象名)
+→ 只显示来自 SeatSurface_ProxyMeshCollider 几何的青色完整高度图
+
+svt_test_clear
+→ 只清理手动测试展示
+→ 不影响 svt_start、正式分析 Collider 或 SeatActionProxy
+```
+
+该功能由新增的 `World/SeatSurfaceManualDebugTest.cs` 承担，并使用独立对象列表、Renderer 列表和扫描序号管理生命周期。
+
 ---
 
 # 1. 项目的一分钟总览
@@ -48,8 +67,10 @@ flowchart TD
     A --> C[本地 AI 后端]
     B --> D[旧 say/look/goto/anim 功能]
     B --> E[Seat VLM 正式状态机]
+    B --> K[SVT 手动物体演示命令]
     E --> F[视觉截图与 Unity 对象识别]
     E --> G[World 座面分析层]
+    K --> G
     G --> H[SeatPose + SeatActionProxy]
     H --> I[Mita_sit 动作执行层]
     B --> J[换装 / 情绪 / 环境 / 交互模块]
@@ -63,7 +84,7 @@ flowchart TD
 | 通信层 | `Connection/`、`BackendSource/` | HTTP、健康检查、流式读取、模型请求 |
 | 命令与游戏钩子层 | `DialoguePatches.cs`、`VisionPatches.cs`、`SeatVlmIntegration.cs` | 控制台命令分发、Harmony 拦截 |
 | 感知与选择层 | `SeatVlmVisionManager`、`SeatVlmObjectDetector`、`SeatVlmController` | 截图、候选对象、工具协议、状态机 |
-| 世界几何层 | `World/SeatSurface*.cs`、`SeatActionProxy.cs` | 深度扫描、座面分析、物理代理 |
+| 世界几何层 | `World/SeatSurface*.cs`、`SeatActionProxy.cs` | 深度扫描、座面分析、物理代理、手动物体演示 |
 | 角色动作层 | `Mita_sit.cs` | 寻路、控制权、动画、IK、坐姿锁、起身恢复 |
 
 ---
@@ -254,6 +275,48 @@ seat_surface_preview_meta.json
 
 ---
 
+## 2.9 正式 SVT 与手动测试展示必须拥有独立生命周期
+
+手动演示命令用于在不经过 VLM 的情况下，按 Unity Explorer 中看到的真实对象名重建座面分析效果。它不能复用正式流程的对象所有权。
+
+正式流程使用：
+
+```text
+_created
+_debugRenderers
+_scanSerial
+_scanInProgress
+```
+
+手动测试使用：
+
+```text
+_manualDebugCreated
+_manualDebugRenderers
+_manualDebugScanSerial
+_manualDebugScanInProgress
+```
+
+必须保持以下语义：
+
+| 操作 | 正式 Seat VLM | 手动测试展示 |
+|---|---|---|
+| `svt_clear` | 清理正式临时展示并保留正式 Collider | 不删除、不隐藏 |
+| `debug_svt on/off` | 控制正式调试 Renderer | 不控制 |
+| `svt_test_clear` | 不影响 | 取消扫描并销毁全部手动测试对象 |
+| 新的手动测试命令 | 不覆盖正式最后分析结果 | 先替换旧手动测试结果 |
+| 场景切换/插件卸载 | 完整清理 | 完整清理 |
+
+额外约束：
+
+1. 正式扫描进行中时，手动测试必须拒绝启动，避免两个扫描相机同时修改目标 Layer；
+2. 手动测试构建的 `MeshCollider` 必须禁用，只把网格作为展示几何，不能产生重复物理碰撞；
+3. 同名对象按完整名称、不区分大小写匹配，并选择离主游戏摄像机最近且具有可用 Bounds 的活动对象；
+4. 手动测试不连接后端、不启动 VLM、不调用 `Mita_sit`；
+5. C# 协程不能在带 `catch` 的 `try` 中使用 `yield`。手动测试采用 `ManualDebugScanRoutineCore()` 的 `try/finally` 执行扫描，再由外层 `MoveNext()` 包装器捕获异常，避免 `CS1626`。
+
+---
+
 # 3. 启动与生命周期
 
 ## 3.1 插件启动顺序
@@ -296,6 +359,9 @@ SeatVlmController.Tick()
 ```text
 EnvironmentManager.ClearState()
 SeatVlmIntegration.ResetForSceneChange(...)
+  ├─ ClearAll() 清理正式分析对象
+  ├─ ClearManualDebugTest(..., false) 清理手动测试对象
+  └─ ClearAll() 清理 Action Proxy
 EnvironmentManager.Init()
 ```
 
@@ -306,7 +372,8 @@ EnvironmentManager.Init()
 插件卸载与游戏退出时必须：
 
 - 取消 Seat VLM；
-- 销毁相机、网格和 Action Proxy；
+- 销毁相机、正式分析网格和 Action Proxy；
+- 取消仍在运行的手动测试扫描并销毁其展示对象；
 - 恢复角色状态；
 - 关闭后端进程。
 
@@ -412,6 +479,7 @@ SeatVlmObjectDetector.cs
 World/SeatSurfaceAnalysisMesh.cs
 World/SeatSurfaceScanCapture.cs
 World/SeatSurfaceSeatability.cs
+World/SeatSurfaceManualDebugTest.cs
 World/SeatSurfaceSelectionLifecycle.cs
 World/SeatActionProxy.cs
 Mita_sit.cs
@@ -434,6 +502,16 @@ ClothChange.cs / SharedConfig
 SeatVlmAIClient.cs
 BackendSource/online_api_server.py
 Plugin.cs / StartBackendServer
+```
+
+### 只想修改手动物体演示
+
+```text
+SeatVlmIntegration.cs
+World/SeatSurfaceManualDebugTest.cs
+World/SeatSurfaceSeatability.cs
+World/SeatSurfaceVisualization.cs
+MakemitAGA.csproj
 ```
 
 ---
@@ -473,6 +551,29 @@ Plugin.cs / StartBackendServer
 - 后端配置路径通过环境变量传入，C# 与 Python 必须保持一致；
 - 新增长期运行模块时，必须同步补充 `Unload()` 和场景清理；
 - 不要在这里加入复杂业务流程，Plugin 应保持“编排者”角色。
+
+---
+
+### `MakemitAGA/MakemitAGA.csproj`（约 433 行）
+
+**定位**
+
+Visual Studio/MSBuild 项目文件，维护所有源码和游戏/框架引用。
+
+**本次变化**
+
+新增编译项：
+
+```xml
+<Compile Include="World\SeatSurfaceManualDebugTest.cs" />
+```
+
+**特别注意**
+
+- 新增 `.cs` 文件后必须同步加入项目编译项，否则文件存在但不会进入 DLL；
+- 引用路径继续以本机 BepInEx `interop` 和 Unity 模块为准；
+- 不要把测试项目的独立命名空间或 DLL 引用带入主项目；
+- 合并补丁后应确认项目中只存在一份 `SeatSurfaceManualDebugTest.cs`。
 
 ---
 
@@ -944,13 +1045,13 @@ Seat VLM 的核心有限状态机和工具协议执行器。
 
 ---
 
-### `SeatVlmIntegration.cs`（约 289 行）
+### `SeatVlmIntegration.cs`（约 420 行）
 
 **定位**
 
-正式 Seat VLM 的控制台入口和跨模块生命周期协调器。
+正式 Seat VLM、手动 SVT 演示命令的统一控制台入口，以及跨模块生命周期协调器。
 
-**命令**
+**正式命令**
 
 ```text
 svt_start <目标>
@@ -963,16 +1064,29 @@ svt_backend_status
 svt_backend_restart
 ```
 
+**手动演示命令**
+
+```text
+debug_svt_test(Bed)
+debug_svt_test Bed
+debug_svt_mesh(Bed)
+debug_svt_mesh Bed
+svt_test_clear
+```
+
 **特别注意**
 
 - `svt_start` 缺参数只能显示用法；
-- `svt_clear` 必须保留分析与动作 Collider；
-- `ResetForSceneChange` 才完整销毁；
+- `svt_clear` 必须保留正式分析 Collider 与动作 Collider，并且不得删除或隐藏手动测试展示；
+- `svt_test_clear` 只调用 `ClearManualDebugTest`；
+- `debug_svt` 只控制正式调试 Renderer，不接管手动测试 Renderer；
+- `ResetForSceneChange` 和 `Shutdown` 必须同时清理正式结果与手动测试结果；
 - 调试状态必须同时传给：
   - `SeatVlmDebugVisuals`
   - `SeatSurfaceAnalysisRuntime`
   - `SeatActionProxyRuntime`
-- 自动完成清理统一调用 `ClearTransientArtifacts`，不要在 Controller 中重复写销毁逻辑。
+- 自动完成清理统一调用 `ClearTransientArtifacts`，不要在 Controller 中重复写销毁逻辑；
+- 命令参数同时支持括号形式和空格形式，解析时不要退回模糊对象搜索。
 
 ---
 
@@ -1208,11 +1322,11 @@ SeatPose 数据结构和连续动作代理平面生成器。
 
 ---
 
-### `World/SeatSurfaceSeatability.cs`（约 1112 行）
+### `World/SeatSurfaceSeatability.cs`（约 1132 行）
 
 **定位**
 
-把高度图分类成“不可用、可承重、警告、动作有效”。
+把高度图分类成“不可用、可承重、警告、动作有效”，并为正式扫描与手动测试共用同一批处理分析实现。
 
 **主要判定**
 
@@ -1238,12 +1352,96 @@ SeatPose 数据结构和连续动作代理平面生成器。
 紫：适合坐姿动作
 ```
 
+**本次变化**
+
+`AnalyzeSeatabilityBatched(...)` 增加手动测试标记，并通过不同序号判断取消：
+
+```text
+正式扫描：_scanSerial
+手动测试：_manualDebugScanSerial
+```
+
+这样 `svt_test_clear` 可以中止手动分析，而不会取消正式 `svt_start`；反过来，正式流程的取消也不会误伤已经完成的手动展示。
+
 **特别注意**
 
 - “可承重”不等于“动作有效”；
 - 紫色必须同时满足接近、边缘、身体和腿部空间；
+- 正式与手动流程必须共享判定算法，但不能共享取消序号和对象生命周期；
 - 床、沙发、凳子的高度阈值可能需要分别演进，但不要用对象名称硬编码；
 - 修改拒绝条件后观察 `reject*` 统计，避免一个条件吞掉全部候选。
+
+---
+
+### `World/SeatSurfaceManualDebugTest.cs`（约 963 行）
+
+**定位**
+
+按真实 Unity `GameObject.name` 手动运行座面扫描和分类，用于演示、调参和排查，不连接 VLM。
+
+**公开入口**
+
+```text
+RunManualDebugTestByName(name, meshOnly, source)
+ClearManualDebugTest(reason, printResult)
+GetManualDebugTestStatus()
+```
+
+**支持命令**
+
+```text
+debug_svt_test(Bed)
+debug_svt_mesh(Bed)
+svt_test_clear
+```
+
+**对象选择规则**
+
+1. 只枚举当前场景中 `activeInHierarchy` 的对象；
+2. 名称完整匹配、不区分大小写；
+3. 候选必须具有可用 Renderer/Collider Bounds；
+4. 有多个同名对象时，选择离主游戏摄像机最近者；
+5. 没有可用摄像机时回退到 `MitaPerson`，再失败则以世界原点为参考；
+6. 距离完全相同时用完整层级路径稳定排序。
+
+**两种显示模式**
+
+- `FullDebug`：青色完整高度图、代理 MeshCollider 网格、绿色支撑区、红色无效区、橙色高度警告区、紫色动作有效区；
+- `MeshOnly`：只显示来自 `SeatSurface_ProxyMeshCollider` 几何的青色完整高度图。
+
+**生命周期**
+
+- 使用 `_manualDebugCreated` 保存根对象；
+- 使用 `_manualDebugRenderers` 保存 Renderer；
+- 使用 `_manualDebugScanSerial` 取消旧协程；
+- 新测试会先替换旧手动展示；
+- `svt_clear` 和 `debug_svt` 不控制这些对象；
+- `svt_test_clear`、场景切换和插件卸载负责销毁；
+- 所有测试 `MeshCollider` 都会禁用，避免重复碰撞。
+
+**IL2CPP/C# 协程注意**
+
+C# 不允许在包含 `catch` 的 `try` 作用域中执行 `yield return` 或 `yield break`。当前实现分为：
+
+```text
+ManualDebugScanRoutineCore()
+  → 真正的多帧扫描，只使用 try/finally
+
+ManualDebugScanRoutine()
+  → 手动推进 core.MoveNext()
+  → 在无 yield 的 try/catch 中捕获异常
+  → 在 catch 作用域外 yield core.Current
+```
+
+不要把这两层重新合并，否则会恢复六个 `CS1626` 编译错误。
+
+**特别注意**
+
+- 正式 `_scanInProgress` 为 true 时必须拒绝启动；
+- 临时修改目标 Layer 后要尽早恢复，并在 `finally` 再次兜底；
+- 手动 Renderer 从正式 `_debugRenderers` 中移除后再加入独立列表；
+- 不得写入正式 `_lastResultRoot`、最终选择结果或 Action Proxy；
+- 不得调用后端、`SeatVlmController` 或 `Mita_sit`。
 
 ---
 
@@ -1418,7 +1616,8 @@ Nuitka 构建说明。
 | 修改候选对象 | `SeatVlmObjectDetector.cs` | Bounds、过滤、坐标系 |
 | 修改扫描范围 | `SeatSurfaceScanCapture.cs` | SceneQuery Bounds 与高度过滤 |
 | 修改座面规则 | `SeatSurfaceSeatability.cs` | reject 统计和紫色区域 |
-| 修改分类网格 | `SeatSurfaceVisualization.cs` | debug_svt、Collider 生命周期 |
+| 修改手动物体演示 | `SeatSurfaceManualDebugTest.cs` | `SeatVlmIntegration`、`SeatSurfaceSeatability`、项目编译项 |
+| 修改分类网格 | `SeatSurfaceVisualization.cs` | debug_svt、手动展示材质、Collider 生命周期 |
 | 修改吸附策略 | `SeatSurfaceSelectionLifecycle.cs` | Controller 的反馈流程 |
 | 修改动作代理尺寸 | `SeatActionProxy.cs` | Mita_sit Root 滑入和脚点 |
 | 修改坐姿/起身 | `Mita_sit.cs` | Ownership Patch、Animator、IK、场景恢复 |
@@ -1446,6 +1645,26 @@ debug_svt off
 svt_backend_status
 svt_backend_restart
 ```
+
+## SVT 手动物体演示
+
+```text
+debug_svt_test(Bed)
+debug_svt_test Bed
+
+debug_svt_mesh(Bed)
+debug_svt_mesh Bed
+
+svt_test_clear
+```
+
+语义：
+
+- `debug_svt_test`：显示与正式 `debug_svt` 对应的完整分析网格，但不运行 VLM；
+- `debug_svt_mesh`：只显示青色完整高度图；
+- `svt_test_clear`：只清理手动测试对象；
+- 名称必须与 Unity Explorer 中的真实 `GameObject.name` 完整相同；
+- 存在重名对象时选择离主游戏摄像机最近、且具有可用 Bounds 的活动对象。
 
 ## 坐姿
 
@@ -1586,11 +1805,28 @@ Class::Init signatures have been exhausted, using a substitute!
 ## 13.3 调试显示
 
 - [ ] 默认无黄色射线和彩色网格；
-- [ ] `debug_svt on` 全部显示；
-- [ ] `debug_svt off` 只隐藏 Renderer；
-- [ ] `svt_clear` 不破坏正在使用的 Action Proxy。
+- [ ] `debug_svt on` 全部显示正式调试层；
+- [ ] `debug_svt off` 只隐藏正式 Renderer；
+- [ ] `svt_clear` 不破坏正在使用的 Action Proxy；
+- [ ] `svt_clear` 不删除也不隐藏手动测试展示。
 
-## 13.4 坐姿
+## 13.4 SVT 手动物体演示
+
+- [ ] `debug_svt_test(Bed)` 可以按真实名称找到目标；
+- [ ] 名称匹配不区分大小写，但不做包含或模糊匹配；
+- [ ] 存在多个同名对象时选择距离摄像机最近者；
+- [ ] 无 Renderer/Collider Bounds 的同名对象会被跳过；
+- [ ] 完整模式显示青、绿、红、橙、紫层；
+- [ ] `debug_svt_mesh(Bed)` 只显示青色完整高度图；
+- [ ] 测试 MeshCollider 为 disabled，不影响角色碰撞；
+- [ ] 正式扫描进行中时手动命令会拒绝启动；
+- [ ] 新手动测试会替换旧手动测试结果；
+- [ ] `svt_test_clear` 可以在分析中途取消；
+- [ ] `svt_test_clear` 不影响正式分析面或 Action Proxy；
+- [ ] 场景切换后手动测试对象和静态引用全部清除；
+- [ ] 编译时不再出现 `CS1626`。
+
+## 13.5 坐姿
 
 - [ ] 正常走到 FloorPoint；
 - [ ] 面向正确；
@@ -1604,7 +1840,7 @@ Class::Init signatures have been exhausted, using a substitute!
 - [ ] 中途取消能恢复；
 - [ ] 场景切换能恢复。
 
-## 13.5 场景切换
+## 13.6 场景切换
 
 - [ ] 菜单 → Loading → 游戏无旧引用异常；
 - [ ] 旧相机被销毁；
@@ -1622,7 +1858,8 @@ Class::Init signatures have been exhausted, using a substitute!
 | `Mita_sit.cs` | 2661 | 高优先级拆分：导航、动画、IK、环境探测、反射兼容 |
 | `SeatVlmController.cs` | 1963 | 中高优先级拆分：请求、Prompt、Parser、Executor、State |
 | `DialoguePatches.cs` | 695 | 中优先级拆分：命令路由、旧视觉、移动、文本注入 |
-| `SeatSurfaceSeatability.cs` | 1112 | 当前职责尚集中，可暂时保留 |
+| `SeatSurfaceSeatability.cs` | 1132 | 当前职责尚集中，可暂时保留 |
+| `SeatSurfaceManualDebugTest.cs` | 963 | 手动演示职责集中；继续增长时可拆对象选择、扫描和生命周期 |
 
 拆分原则：
 
@@ -1724,7 +1961,7 @@ IL2CPP 风险：
 | `MakemitAGA/Mita_self/Mita_tools/SeatVlmConfig.cs` | 109 | C# |
 | `MakemitAGA/Mita_self/Mita_tools/SeatVlmController.cs` | 1963 | C# |
 | `MakemitAGA/Mita_self/Mita_tools/SeatVlmDebugVisuals.cs` | 149 | C# |
-| `MakemitAGA/Mita_self/Mita_tools/SeatVlmIntegration.cs` | 289 | C# |
+| `MakemitAGA/Mita_self/Mita_tools/SeatVlmIntegration.cs` | 420 | C# |
 | `MakemitAGA/Mita_self/Mita_tools/SeatVlmObjectDetector.cs` | 174 | C# |
 | `MakemitAGA/Mita_self/Mita_tools/SeatVlmTargetPointSelector.cs` | 130 | C# |
 | `MakemitAGA/Mita_self/Mita_tools/SeatVlmVisionManager.cs` | 488 | C# |
@@ -1733,19 +1970,61 @@ IL2CPP 风险：
 | `MakemitAGA/Mita_self/ObjectDetector.cs` | 190 | C# |
 | `MakemitAGA/Mita_self/VisionPatches.cs` | 28 | C# |
 | `MakemitAGA/Plugin.cs` | 376 | C# |
+| `MakemitAGA/MakemitAGA.csproj` | 433 | MSBuild/XML |
 | `MakemitAGA/World/EnvironmentManager.cs` | 451 | C# |
 | `MakemitAGA/World/SeatActionProxy.cs` | 367 | C# |
 | `MakemitAGA/World/SeatSurfaceAnalysisMesh.cs` | 947 | C# |
 | `MakemitAGA/World/SeatSurfaceNavigation.cs` | 756 | C# |
 | `MakemitAGA/World/SeatSurfaceScanCapture.cs` | 951 | C# |
 | `MakemitAGA/World/SeatSurfaceSceneQuery.cs` | 497 | C# |
-| `MakemitAGA/World/SeatSurfaceSeatability.cs` | 1112 | C# |
+| `MakemitAGA/World/SeatSurfaceManualDebugTest.cs` | 963 | C# |
+| `MakemitAGA/World/SeatSurfaceSeatability.cs` | 1132 | C# |
 | `MakemitAGA/World/SeatSurfaceSelectionLifecycle.cs` | 1145 | C# |
 | `MakemitAGA/World/SeatSurfaceVisualization.cs` | 719 | C# |
 
 ---
 
-# 18. 最后的架构原则
+# 18. 2026-06-27 手动 SVT 演示补丁记录
+
+本次补丁修改文件：
+
+```text
+覆盖：
+MakemitAGA/Mita_self/Mita_tools/SeatVlmIntegration.cs
+MakemitAGA/World/SeatSurfaceSeatability.cs
+MakemitAGA/MakemitAGA.csproj
+
+新增：
+MakemitAGA/World/SeatSurfaceManualDebugTest.cs
+```
+
+行为变化：
+
+- 可以按 Unity Explorer 中的真实对象名直接演示座面扫描；
+- 可以单独查看青色完整高度图；
+- 正式流程与手动测试拥有独立清理命令和生命周期；
+- 同名目标选择最近对象；
+- 手动测试不会调用 VLM、后端、`Mita_sit`；
+- 测试 MeshCollider 禁用，不引入重复物理碰撞。
+
+编译修复：
+
+- 修复 `SeatSurfaceManualDebugTest.cs` 中六处 `CS1626`；
+- 保留“核心迭代器 + MoveNext 异常包装器”结构；
+- 后续修改协程时不得在包含 `catch` 的 `try` 内重新加入 `yield`。
+
+建议演示顺序：
+
+```text
+debug_svt_mesh(Bed)
+svt_test_clear
+debug_svt_test(Bed)
+svt_test_clear
+```
+
+---
+
+# 19. 最后的架构原则
 
 当项目继续扩展时，优先遵守以下顺序：
 

@@ -402,6 +402,7 @@
     <Compile Include="World\EnvironmentManager.cs" />
     <Compile Include="World\SeatActionProxy.cs" />
     <Compile Include="World\SeatSurfaceAnalysisMesh.cs" />
+    <Compile Include="World\SeatSurfaceManualDebugTest.cs" />
     <Compile Include="World\SeatSurfaceNavigation.cs" />
     <Compile Include="World\SeatSurfaceScanCapture.cs" />
     <Compile Include="World\SeatSurfaceSceneQuery.cs" />
