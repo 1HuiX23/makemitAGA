@@ -1,4 +1,4 @@
-/*
+﻿/*
  * =================================================================================================
  * SeatSurfaceSeatability.cs
  * =================================================================================================
@@ -7,7 +7,7 @@
 
  * 主要逻辑：
  *   - 支撑覆盖率与法线/坡度检查；
- *   - 座面边缘和外侧方向估计；
+ *   - 座面边缘和外侧方向估计（同时识别无表面轮廓与向下高度断层）；
  *   - 地面点、站立胶囊、接近走廊与腿部空间检查；
  *   - 绿色支撑区、橙色警告区和紫色动作有效区的统计。
  *
@@ -264,6 +264,22 @@ namespace MakemitAGA.World
                                 .actionOutwardDirections[x, z] =
                                 outward;
 
+                            // “紫色动作带”只限制臀部候选点在座面边缘内侧的深度。
+                            //
+                            // v0.3.4 将这条动作带整体向外侧移动：最小内缩减小，
+                            // 最大内缩同时收窄。这样既允许臀部更靠近床沿，又避免紫色
+                            // 深入床中央太多。前一阶段还轻微放宽了软垫圆角的坡度/起伏，
+                            // 因此原先紧邻紫色的部分温和红区有机会进入此处继续接受安全检查。
+                            //
+                            // 这里通过之后仍会执行 TryFindActionFloorPoint()，后者会继续检查：
+                            //   - 边缘外是否存在真实地板；
+                            //   - NavMesh 是否可达且吸附偏移合理；
+                            //   - 站立身体胶囊是否会撞到家具；
+                            //   - 从站立点走向床边的短走廊是否畅通；
+                            //   - 坐姿腿部空间是否足够。
+                            //
+                            // 因此扩大紫色带不会把靠墙、靠床头柜、无地板或会穿模的位置
+                            // 直接放行；它只是不再要求臀部深度必须非常精确。
                             if (edgeDistance <
                                     ActionMinEdgeInset ||
                                 edgeDistance >
@@ -415,6 +431,29 @@ namespace MakemitAGA.World
                     tz));
         }
 
+        /// <summary>
+        /// 从一个已经通过绿色承重检查的网格中心，沿 X/Z 四个方向寻找最近的
+        /// “当前座面平台边缘”，并返回该边缘距离以及朝向家具外侧的方向。
+        ///
+        /// 边缘现在有两种来源：
+        ///
+        /// A. 几何轮廓边缘
+        ///    - 搜索走出高度图范围；或
+        ///    - 下一格没有任何扫描表面。
+        ///
+        /// B. 高度断层边缘
+        ///    - 下一格仍然存在扫描表面；
+        ///    - 但它比候选座面低至少 ActionBoundaryMinDownwardDrop。
+        ///
+        /// B 是本次修复的核心。完整家具扫描会同时保留床垫和较低床架；床垫到边时，
+        /// surfaceMask 仍然可能为 true，因此只靠 A 会把床架最外侧误认为床垫边缘。
+        ///
+        /// 这里只把“向下落差”当作边缘：
+        ///    centerHeight - sampledHeight >= threshold
+        /// 向上升高通常代表靠背、扶手或枕头，不应该直接被解释为米塔面向的外侧。
+        /// 即使某个内部高度层被暂时识别为候选边缘，后续的地板、NavMesh、身体、
+        /// 接近走廊与腿部空间检查仍会负责淘汰无法真正执行坐姿的方向。
+        /// </summary>
         private static bool TryFindNearestSurfaceBoundary(
             HeightfieldStats heightfield,
             int centerX,
@@ -427,6 +466,23 @@ namespace MakemitAGA.World
             edgeDistance = float.MaxValue;
             outward = Vector3.zero;
 
+            // 调用者只会传入绿色有效中心，但仍做防御检查，避免以后复用此方法时
+            // 因无表面中心或非法索引读到默认高度，产生一个完全错误的边缘方向。
+            if (centerX < 0 ||
+                centerX >= MeshGrid ||
+                centerZ < 0 ||
+                centerZ >= MeshGrid ||
+                !heightfield.surfaceMask[centerX, centerZ])
+            {
+                return false;
+            }
+
+            float centerHeight =
+                heightfield.heights[centerX, centerZ];
+
+            // 仅检查四个主轴方向，与旧行为保持一致。
+            // 这样不会在本次修复中同时改变动作方向的离散规则，便于单独验证
+            // “高度断层是否恢复 Bed 紫色区域”。未来如需斜向边缘，可另开独立改动。
             int[,] dirs =
             {
                 { -1,  0 },
@@ -463,17 +519,48 @@ namespace MakemitAGA.World
                     int x = centerX + dx * step;
                     int z = centerZ + dz * step;
 
-                    bool outside =
+                    bool outsideGrid =
                         x < 0 ||
                         x >= MeshGrid ||
                         z < 0 ||
-                        z >= MeshGrid ||
+                        z >= MeshGrid;
+
+                    bool missingSurface =
+                        !outsideGrid &&
                         !heightfield.surfaceMask[x, z];
 
-                    if (!outside)
+                    bool downwardHeightBoundary = false;
+
+                    if (!outsideGrid &&
+                        !missingSurface)
+                    {
+                        float sampledHeight =
+                            heightfield.heights[x, z];
+
+                        // 使用候选座面中心高度作为“当前平台”的参考高度，而不是使用
+                        // 上一个格子的高度。这样即使边缘经过平滑后分散到两三个网格，
+                        // 累积落差仍能被识别；同时我们只接受向下落差，向上的靠背不会
+                        // 被误认成外侧。
+                        float downwardDrop =
+                            centerHeight - sampledHeight;
+
+                        downwardHeightBoundary =
+                            downwardDrop >=
+                            ActionBoundaryMinDownwardDrop;
+                    }
+
+                    bool reachedBoundary =
+                        outsideGrid ||
+                        missingSurface ||
+                        downwardHeightBoundary;
+
+                    if (!reachedBoundary)
                         continue;
 
-                    // The center is approximately (step - 0.5) cells inside the boundary.
+                    // 当前 step 指向的是“边缘外侧第一格”或“明显更低的第一格”。
+                    // 因此把边界近似放在上一格与当前格的中间，继续沿用旧公式：
+                    //   (step - 0.5) * cellSize
+                    // 这能保持 ActionMinEdgeInset / ActionMaxEdgeInset 的原有标定意义。
                     float distance =
                         Mathf.Max(0f, step - 0.5f) *
                         stepSizes[d];
@@ -484,6 +571,8 @@ namespace MakemitAGA.World
                         outward = worldDirs[d];
                     }
 
+                    // 每个方向只取遇到的第一个边缘。继续向外搜索会跨过当前座面平台，
+                    // 很可能再次找到床架或家具整体轮廓，反而回到旧问题。
                     break;
                 }
             }

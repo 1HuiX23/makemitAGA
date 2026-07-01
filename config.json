@@ -4,10 +4,10 @@
   "SYSTEM_PROMPT": "",
   "BASE_URL": "https://api-inference.modelscope.cn/v1/chat/completions",
   "MAX_TOKENS": 512,
-  "TEMPERATURE": 0.899999976,
+  "TEMPERATURE": 0.9,
   "CONNECT_TIMEOUT_SECONDS": 20,
   "READ_TIMEOUT_SECONDS": 240,
-  "WRITE_BACKEND_DEBUG_FILE": false,
+  "WRITE_BACKEND_DEBUG_FILE": true,
   "CurrentOutfitId": "Original",
   "CurrentCursorName": "Cursor",
   "UnlockAllOutfits": false

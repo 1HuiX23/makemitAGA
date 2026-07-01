@@ -1,9 +1,9 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
-VisualStudioVersion = 17.14.36408.4
+VisualStudioVersion = 17.14.37328.6 d17.14
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MakemitAGA", "MakemitAGA\MakemitAGA.csproj", "{0DCD0CB9-8D5D-4B8F-8C49-B8413D7C6347}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MakemitAGA", "MakemitAGA.csproj", "{8B6853AD-2D3F-4208-9742-24FA6B4FDF81}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -11,15 +11,15 @@ Global
 		Release|Any CPU = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{0DCD0CB9-8D5D-4B8F-8C49-B8413D7C6347}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{0DCD0CB9-8D5D-4B8F-8C49-B8413D7C6347}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{0DCD0CB9-8D5D-4B8F-8C49-B8413D7C6347}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{0DCD0CB9-8D5D-4B8F-8C49-B8413D7C6347}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8B6853AD-2D3F-4208-9742-24FA6B4FDF81}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8B6853AD-2D3F-4208-9742-24FA6B4FDF81}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8B6853AD-2D3F-4208-9742-24FA6B4FDF81}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8B6853AD-2D3F-4208-9742-24FA6B4FDF81}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
-		SolutionGuid = {18F0FB79-E71D-43A3-861F-E5DF3E963B66}
+		SolutionGuid = {6BA72E89-3872-4775-BFA9-5403D9A2AF92}
 	EndGlobalSection
 EndGlobal

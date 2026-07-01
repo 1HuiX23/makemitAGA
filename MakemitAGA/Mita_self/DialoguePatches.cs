@@ -1,4 +1,4 @@
-/*
+﻿/*
  * [文件说明]: 对话与交互的核心钩子 (say, look, goto, anim)
  * 
  * [分析过程]:
@@ -47,12 +47,25 @@ namespace MakemitAGA.Mita_self
         private static Dictionary<string, GameObject> _floorCache = new Dictionary<string, GameObject>();
 
         // ----------------------------------------------------------------
-        // 补丁 1: 3D 文字注入 (保持不变)
+        // 补丁 1: 原生运行时字体观察 + 旧版 3D 文字注入兼容
         // ----------------------------------------------------------------
         [HarmonyPatch(typeof(Dialogue_3DText), "Start")]
         [HarmonyPostfix]
         public static void InjectText(Dialogue_3DText __instance)
         {
+            /*
+             * 先观察原生 Start 最终选出的字体。
+             *
+             * 原生 Start 会把 GlobalGame.fontUse 写入 Dialogue_3DText.font 和
+             * exampleSymbol。Formula3D 私有模板不会执行 Start，因此这里缓存一个
+             * 真正完成初始化的结果作为保险。
+             */
+            GameUIManager.NotifyNativeDialogueStarted(__instance);
+
+            /*
+             * 以下 PendingInjections 是旧版纯文字流程的兼容分支。
+             * 新 Formula3D 混排路径通常不会进入这里，但继续保留以免旧调用失效。
+             */
             if (GameUIManager.PendingInjections.TryGetValue(__instance, out string aiReply))
             {
                 __instance.textPrint = aiReply;
@@ -104,6 +117,11 @@ namespace MakemitAGA.Mita_self
         public static bool InterceptCommand(string code)
         {
             string command = (code ?? "").Trim();
+
+            // Formula3D 内置调试/配置命令。普通 say 回复无需经过此分支，
+            // HandleAICommand 仍会调用 GameUIManager.ShowLongText 并自动识别公式。
+            if (FormulaConsoleCommands.TryHandle(command))
+                return false;
 
             // Seat VLM 正式命令优先分发，避免再注册第二个 Console Command Prefix。
             if (SeatVlmIntegration.TryHandleConsoleCommand(command))

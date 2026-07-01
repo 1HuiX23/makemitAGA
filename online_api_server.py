@@ -1,17 +1,16 @@
 """
-MiSide Online AI API Server v2.3
+MiSide Online AI API Server v2.3.1
 
-正式 MakemitAGA 后端：
-- 默认读取 BepInEx/plugins/config.json；
-- 唯一必须生成的运行时文件是 plugins/cache.jpg；
-- 默认不创建 backend_boot.log、backend_last_prompt.txt、backend_last_reply.txt、
-  backend_last_error.txt 或 backend_startup_error.txt；
-- config.json 中 WRITE_BACKEND_DEBUG_FILE=true 时，以上诊断内容统一写入
-  plugins/backend_debug.txt；
-- stdout/stderr 始终实时输出，由 Plugin.cs 转发到 BepInEx 控制台。
+修复内容：
+- 强制 stdout/stderr 使用 UTF-8；日志永不因 emoji/Unicode 失败；
+- 新增带随机 token 的 POST /shutdown；
+- 新增父进程 watchdog：MiSide 进程消失后后端自动退出；
+- ThreadingHTTPServer 线程设为 daemon，端口允许快速复用；
+- 保持 legacy-dialogue-v1 与 vision-tool-v1 协议兼容。
 """
 
 import base64
+import ctypes
 import json
 import os
 import sys
@@ -22,6 +21,25 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import requests
+
+
+BACKEND_VERSION = "2.3.1"
+
+
+def configure_utf8_stdio() -> None:
+    """Windows 默认 GBK 时，也强制标准输出使用 UTF-8。"""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(
+                encoding="utf-8",
+                errors="backslashreplace",
+                line_buffering=True,
+            )
+        except Exception:
+            pass
+
+
+configure_utf8_stdio()
 
 
 def is_nuitka_compiled() -> bool:
@@ -68,8 +86,16 @@ CONNECT_TIMEOUT = 20.0
 READ_TIMEOUT = 240.0
 WRITE_BACKEND_DEBUG_FILE = False
 
+try:
+    PARENT_PID = int(os.environ.get("MISIDE_PARENT_PID", "0") or "0")
+except Exception:
+    PARENT_PID = 0
+
+SHUTDOWN_TOKEN = os.environ.get("MISIDE_SHUTDOWN_TOKEN", "")
+
 REQUEST_LOCK = threading.Lock()
 DEBUG_FILE_LOCK = threading.Lock()
+SHUTDOWN_ONCE = threading.Event()
 
 
 def parse_bool(value, default: bool = False) -> bool:
@@ -85,31 +111,61 @@ def timestamp() -> str:
 
 
 def append_debug_record(kind: str, text: str) -> None:
-    """Append one chronological record to the single optional debug file."""
+    """写入唯一的可选调试文件；失败绝不影响 HTTP。"""
     if not WRITE_BACKEND_DEBUG_FILE:
         return
 
     try:
+        value = str(text or "")
         with DEBUG_FILE_LOCK:
-            with DEBUG_FILE_PATH.open("a", encoding="utf-8", newline="\n") as handle:
+            with DEBUG_FILE_PATH.open(
+                "a", encoding="utf-8", newline="\n"
+            ) as handle:
                 handle.write(f"\n[{timestamp()}] [{kind}]\n")
-                handle.write(str(text or ""))
-                if not str(text or "").endswith("\n"):
+                handle.write(value)
+                if not value.endswith("\n"):
                     handle.write("\n")
     except Exception:
-        # Debug-file failure must never break the HTTP backend or recurse through log().
+        pass
+
+
+def safe_stream_write(stream, line: str) -> None:
+    """多重兜底，日志输出不能向调用者抛异常。"""
+    try:
+        print(line, file=stream, flush=True)
+        return
+    except Exception:
+        pass
+
+    try:
+        encoding = getattr(stream, "encoding", None) or "utf-8"
+        safe = line.encode(
+            encoding, errors="backslashreplace"
+        ).decode(
+            encoding, errors="replace"
+        )
+        stream.write(safe + "\n")
+        stream.flush()
+    except Exception:
         pass
 
 
 def log(message: str, *, error: bool = False) -> None:
-    """Always print to console; optionally mirror into backend_debug.txt."""
-    line = str(message)
-    print(line, file=sys.stderr if error else sys.stdout, flush=True)
+    """
+    no-throw 日志。
+    v2.3 中此处的 GBK UnicodeEncodeError 会把成功回复变成 HTTP 500。
+    """
+    try:
+        line = str(message)
+    except Exception:
+        line = "<unprintable log message>"
+
+    stream = sys.stderr if error else sys.stdout
+    safe_stream_write(stream, line)
     append_debug_record("STDERR" if error else "STDOUT", line)
 
 
 def cleanup_legacy_debug_files() -> None:
-    """Remove files produced by backend v2.1 and earlier."""
     for path in LEGACY_DEBUG_PATHS:
         try:
             if path.exists():
@@ -172,8 +228,7 @@ def initialize_config() -> None:
     CONNECT_TIMEOUT = float(config.get("CONNECT_TIMEOUT_SECONDS", 20))
     READ_TIMEOUT = float(config.get("READ_TIMEOUT_SECONDS", 240))
     WRITE_BACKEND_DEBUG_FILE = parse_bool(
-        config.get("WRITE_BACKEND_DEBUG_FILE", False),
-        False,
+        config.get("WRITE_BACKEND_DEBUG_FILE", False), False
     )
 
 
@@ -206,8 +261,89 @@ def extract_assistant_content(api_response: dict) -> str:
     return str(content or "")
 
 
+def is_parent_process_alive(pid: int) -> bool:
+    if pid <= 0:
+        return True
+
+    if os.name == "nt":
+        process_query_limited_information = 0x1000
+        still_active = 259
+
+        try:
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.OpenProcess(
+                process_query_limited_information, False, pid
+            )
+            if not handle:
+                return False
+
+            try:
+                exit_code = ctypes.c_ulong()
+                ok = kernel32.GetExitCodeProcess(
+                    handle, ctypes.byref(exit_code)
+                )
+                return bool(ok and exit_code.value == still_active)
+            finally:
+                kernel32.CloseHandle(handle)
+        except Exception:
+            # watchdog 自身异常时宁可暂不退出，避免误杀正常后端。
+            return True
+
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+class MiSideThreadingHTTPServer(ThreadingHTTPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+
+def request_server_shutdown(server, reason: str) -> None:
+    """shutdown() 必须从 serve_forever() 所在线程以外调用。"""
+    if SHUTDOWN_ONCE.is_set():
+        return
+
+    SHUTDOWN_ONCE.set()
+    log(f"SERVER_SHUTDOWN_REQUESTED reason={reason}")
+
+    def worker():
+        try:
+            server.shutdown()
+        except Exception as exc:
+            log(
+                "server.shutdown failed: "
+                f"{type(exc).__name__}: {exc}",
+                error=True,
+            )
+
+    threading.Thread(
+        target=worker,
+        name="MiSideBackendShutdown",
+        daemon=True,
+    ).start()
+
+
+def parent_watchdog(server) -> None:
+    if PARENT_PID <= 0:
+        log("parent watchdog disabled: MISIDE_PARENT_PID is not set")
+        return
+
+    log(f"parent watchdog started pid={PARENT_PID}")
+
+    while not SHUTDOWN_ONCE.wait(1.0):
+        if is_parent_process_alive(PARENT_PID):
+            continue
+
+        log(f"parent process exited pid={PARENT_PID}")
+        request_server_shutdown(server, "parent-process-exited")
+        return
+
+
 class RequestHandler(BaseHTTPRequestHandler):
-    server_version = "MiSideOnlineAI/2.3"
+    server_version = "MiSideOnlineAI/" + BACKEND_VERSION
 
     def do_GET(self):
         if self.path.rstrip("/") == "/health":
@@ -216,13 +352,15 @@ class RequestHandler(BaseHTTPRequestHandler):
                 json.dumps(
                     {
                         "ok": True,
-                        "version": "2.3",
+                        "version": BACKEND_VERSION,
                         "model": MODEL_ID,
                         "config_path": str(CONFIG_PATH),
                         "cache_path": str(CACHE_IMAGE_PATH),
                         "cache_exists": CACHE_IMAGE_PATH.is_file(),
                         "debug_file_enabled": WRITE_BACKEND_DEBUG_FILE,
                         "nuitka": is_nuitka_compiled(),
+                        "parent_pid": PARENT_PID,
+                        "shutdown_enabled": bool(SHUTDOWN_TOKEN),
                     },
                     ensure_ascii=False,
                 ),
@@ -233,11 +371,23 @@ class RequestHandler(BaseHTTPRequestHandler):
         self._write_response(404, "not found")
 
     def do_POST(self):
+        normalized_path = self.path.rstrip("/")
+
+        if normalized_path == "/shutdown":
+            self._handle_shutdown()
+            return
+
+        if normalized_path not in ("", "/"):
+            self._write_response(404, "not found")
+            return
+
         request_id = self.headers.get("X-MiSide-Request-Id", "?")
         run_id = self.headers.get("X-MiSide-Run-Id", "?")
         state = self.headers.get("X-MiSide-State", "")
         protocol = self.headers.get("X-MiSide-Protocol", "legacy")
-        include_image = self.headers.get("X-MiSide-Include-Image", "0") == "1"
+        include_image = (
+            self.headers.get("X-MiSide-Include-Image", "0") == "1"
+        )
 
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -248,7 +398,8 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         log(
             f"[request run={run_id} id={request_id}] protocol={protocol} "
-            f"state={state} include_image={include_image} prompt_chars={len(prompt)}"
+            f"state={state} include_image={include_image} "
+            f"prompt_chars={len(prompt)}"
         )
         append_debug_record(
             f"PROMPT run={run_id} id={request_id} state={state}",
@@ -258,8 +409,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         try:
             user_content = self._build_user_content(prompt, include_image)
             messages = []
+
             if SYSTEM_PROMPT.strip():
                 messages.append({"role": "system", "content": SYSTEM_PROMPT})
+
             messages.append({"role": "user", "content": user_content})
 
             payload = {
@@ -272,7 +425,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
             headers = {
                 "Authorization": f"Bearer {API_KEY}",
-                "User-Agent": "MiSideOnlineAI/2.3",
+                "User-Agent": "MiSideOnlineAI/" + BACKEND_VERSION,
                 "Content-Type": "application/json",
             }
 
@@ -286,7 +439,8 @@ class RequestHandler(BaseHTTPRequestHandler):
 
             log(
                 f"[request run={run_id} id={request_id}] "
-                f"upstream_status={response.status_code} bytes={len(response.content)}"
+                f"upstream_status={response.status_code} "
+                f"bytes={len(response.content)}"
             )
 
             if response.status_code != 200:
@@ -301,13 +455,18 @@ class RequestHandler(BaseHTTPRequestHandler):
                 )
                 return
 
-            reply = clean_transport_text(extract_assistant_content(response.json()))
+            reply = clean_transport_text(
+                extract_assistant_content(response.json())
+            )
             if not reply:
                 raise ValueError("upstream returned empty assistant content")
 
             log(
-                f"[request run={run_id} id={request_id}] reply_chars={len(reply)}"
+                f"[request run={run_id} id={request_id}] "
+                f"reply_chars={len(reply)}"
             )
+
+            # log() 已经 no-throw；emoji 不会再把成功请求变成 500。
             log(f"[assistant] {reply}")
             append_debug_record(
                 f"REPLY run={run_id} id={request_id}",
@@ -316,7 +475,10 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._write_response(200, reply)
 
         except requests.RequestException as exc:
-            error = f"upstream request exception: {type(exc).__name__}: {exc}"
+            error = (
+                "upstream request exception: "
+                f"{type(exc).__name__}: {exc}"
+            )
             append_debug_record(
                 f"REQUEST_EXCEPTION run={run_id} id={request_id}",
                 error,
@@ -335,6 +497,27 @@ class RequestHandler(BaseHTTPRequestHandler):
             log(details, error=True)
             self._write_response(500, error)
 
+    def _handle_shutdown(self) -> None:
+        supplied_token = self.headers.get("X-MiSide-Shutdown-Token", "")
+
+        if not SHUTDOWN_TOKEN or supplied_token != SHUTDOWN_TOKEN:
+            log("rejected unauthorized /shutdown", error=True)
+            self._write_response(403, "forbidden")
+            return
+
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            reason = self.rfile.read(length).decode(
+                "utf-8", errors="replace"
+            )
+        except Exception:
+            reason = "no-reason"
+
+        self._write_response(200, "shutting down")
+        request_server_shutdown(
+            self.server, reason or "authorized-request"
+        )
+
     def _build_user_content(self, prompt: str, include_image: bool):
         if not include_image:
             log("image: disabled by request header")
@@ -342,7 +525,8 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         if not CACHE_IMAGE_PATH.is_file():
             raise FileNotFoundError(
-                f"image requested but cache.jpg does not exist: {CACHE_IMAGE_PATH}"
+                "image requested but cache.jpg does not exist: "
+                f"{CACHE_IMAGE_PATH}"
             )
 
         image_bytes = CACHE_IMAGE_PATH.read_bytes()
@@ -364,31 +548,52 @@ class RequestHandler(BaseHTTPRequestHandler):
         content_type: str = "text/plain; charset=utf-8",
     ) -> None:
         data = (body or "").encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Connection", "close")
-        self.end_headers()
-        self.wfile.write(data)
+
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def log_message(self, fmt, *args):
+        # 关闭 BaseHTTPRequestHandler 默认访问日志。
         pass
 
 
 def run_server(port: int = 8080) -> None:
-    log("MiSide Online AI API Server v2.3")
+    log(f"MiSide Online AI API Server v{BACKEND_VERSION}")
     log(f"base_dir={BASE_DIR}")
     log(f"config={CONFIG_PATH}")
     log(f"cache={CACHE_IMAGE_PATH}")
     log(f"model={MODEL_ID}")
     log(f"debug_file_enabled={WRITE_BACKEND_DEBUG_FILE}")
-    server = ThreadingHTTPServer(("127.0.0.1", port), RequestHandler)
+    log(f"parent_pid={PARENT_PID}")
+    log(f"shutdown_token_enabled={bool(SHUTDOWN_TOKEN)}")
+
+    server = MiSideThreadingHTTPServer(
+        ("127.0.0.1", port), RequestHandler
+    )
+
+    threading.Thread(
+        target=parent_watchdog,
+        args=(server,),
+        name="MiSideParentWatchdog",
+        daemon=True,
+    ).start()
+
     log(f"SERVER_READY http://127.0.0.1:{port}")
+
     try:
-        server.serve_forever()
+        server.serve_forever(poll_interval=0.25)
     finally:
+        SHUTDOWN_ONCE.set()
         server.server_close()
+        log("SERVER_STOPPED")
 
 
 def main() -> int:
@@ -398,9 +603,10 @@ def main() -> int:
         run_server()
         return 0
     except Exception as exc:
-        # Config may fail before the optional file switch is available,
-        # but stderr still reaches the BepInEx console.
-        log(f"startup exception: {type(exc).__name__}: {exc}", error=True)
+        log(
+            f"startup exception: {type(exc).__name__}: {exc}",
+            error=True,
+        )
         log(traceback.format_exc(), error=True)
         return 1
 

@@ -1,0 +1,119 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <LangVersion>10.0</LangVersion>
+    <PlatformTarget>x64</PlatformTarget>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+	<CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+	<CodePage>65001</CodePage>
+  </PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="CSharpMath.SkiaSharp" Version="0.5.1" />
+		<PackageReference Include="SkiaSharp" Version="2.88.9" />
+		<PackageReference Include="SkiaSharp.NativeAssets.Win32"
+						  Version="2.88.9"
+						  PrivateAssets="all"
+						  GeneratePathProperty="true" />
+		<PackageReference Include="Fody" Version="6.8.2" PrivateAssets="all" />
+		<PackageReference Include="Costura.Fody" Version="6.0.0" PrivateAssets="all" />
+	</ItemGroup>
+
+	<PropertyGroup>
+		<SkiaNativePackageFile Condition="'$(PkgSkiaSharp_NativeAssets_Win32)' != ''">$(PkgSkiaSharp_NativeAssets_Win32)\runtimes\win-x64\native\libSkiaSharp.dll</SkiaNativePackageFile>
+		<SkiaNativePackageFile Condition="'$(SkiaNativePackageFile)' == '' and '$(NuGetPackageRoot)' != ''">$(NuGetPackageRoot)skiasharp.nativeassets.win32\2.88.9\runtimes\win-x64\native\libSkiaSharp.dll</SkiaNativePackageFile>
+	</PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="0Harmony">
+      <HintPath>..\..\..\..\..\..\dpan\jgggggg\steam\steamapps\common\MiSide\BepInEx\core\0Harmony.dll</HintPath>
+	  <Private>false</Private>
+    </Reference>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>..\..\..\..\..\..\dpan\jgggggg\steam\steamapps\common\MiSide\BepInEx\interop\Assembly-CSharp.dll</HintPath>
+	  <Private>false</Private>
+    </Reference>
+    <Reference Include="Assembly-CSharp-firstpass">
+      <HintPath>..\..\..\..\..\..\dpan\jgggggg\steam\steamapps\common\MiSide\BepInEx\interop\Assembly-CSharp-firstpass.dll</HintPath>
+	  <Private>false</Private>
+	</Reference>
+    <Reference Include="BepInEx.Core">
+      <HintPath>..\..\..\..\..\..\dpan\jgggggg\steam\steamapps\common\MiSide\BepInEx\core\BepInEx.Core.dll</HintPath>
+   	  <Private>false</Private>
+    </Reference>
+    <Reference Include="BepInEx.Unity.Common">
+      <HintPath>..\..\..\..\..\..\dpan\jgggggg\steam\steamapps\common\MiSide\BepInEx\core\BepInEx.Unity.Common.dll</HintPath>
+	  <Private>false</Private>
+    </Reference>
+    <Reference Include="BepInEx.Unity.IL2CPP">
+      <HintPath>..\..\..\..\..\..\dpan\jgggggg\steam\steamapps\common\MiSide\BepInEx\core\BepInEx.Unity.IL2CPP.dll</HintPath>
+   	  <Private>false</Private>
+    </Reference>
+    <Reference Include="Il2CppInterop.Runtime">
+      <HintPath>..\..\..\..\..\..\dpan\jgggggg\steam\steamapps\common\MiSide\BepInEx\core\Il2CppInterop.Runtime.dll</HintPath>
+	  <Private>false</Private>
+    </Reference>
+    <Reference Include="Il2Cppmscorlib">
+      <HintPath>..\..\..\..\..\..\dpan\jgggggg\steam\steamapps\common\MiSide\BepInEx\interop\Il2Cppmscorlib.dll</HintPath>
+	  <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>..\..\..\..\..\..\dpan\jgggggg\steam\steamapps\common\MiSide\BepInEx\interop\UnityEngine.dll</HintPath>
+	  <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.AIModule">
+      <HintPath>..\..\..\..\..\..\dpan\jgggggg\steam\steamapps\common\MiSide\BepInEx\interop\UnityEngine.AIModule.dll</HintPath>
+	  <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.AnimationModule">
+      <HintPath>..\..\..\..\..\..\dpan\jgggggg\steam\steamapps\common\MiSide\BepInEx\interop\UnityEngine.AnimationModule.dll</HintPath>
+	  <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>..\..\..\..\..\..\dpan\jgggggg\steam\steamapps\common\MiSide\BepInEx\interop\UnityEngine.CoreModule.dll</HintPath>
+	  <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.ImageConversionModule">
+      <HintPath>..\..\..\..\..\..\dpan\jgggggg\steam\steamapps\common\MiSide\BepInEx\interop\UnityEngine.ImageConversionModule.dll</HintPath>
+	  <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.InputLegacyModule">
+      <HintPath>..\..\..\..\..\..\dpan\jgggggg\steam\steamapps\common\MiSide\BepInEx\interop\UnityEngine.InputLegacyModule.dll</HintPath>
+	  <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.InputModule">
+      <HintPath>..\..\..\..\..\..\dpan\jgggggg\steam\steamapps\common\MiSide\BepInEx\interop\UnityEngine.InputModule.dll</HintPath>
+	  <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.ParticleSystemModule">
+      <HintPath>..\..\..\..\..\..\dpan\jgggggg\steam\steamapps\common\MiSide\BepInEx\interop\UnityEngine.ParticleSystemModule.dll</HintPath>
+	  <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.PhysicsModule">
+      <HintPath>..\..\..\..\..\..\dpan\jgggggg\steam\steamapps\common\MiSide\BepInEx\interop\UnityEngine.PhysicsModule.dll</HintPath>
+	  <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.TextRenderingModule">
+      <HintPath>..\..\..\..\..\..\dpan\jgggggg\steam\steamapps\common\MiSide\BepInEx\interop\UnityEngine.TextRenderingModule.dll</HintPath>
+	  <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.UI">
+      <HintPath>..\..\..\..\..\..\dpan\jgggggg\steam\steamapps\common\MiSide\BepInEx\interop\UnityEngine.UI.dll</HintPath>
+	  <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+	<ItemGroup Condition="Exists('$(SkiaNativePackageFile)')">
+		<EmbeddedResource Include="$(SkiaNativePackageFile)"
+						  LogicalName="MakemitAGA.Dialogue.Native.libSkiaSharp.dll" />
+	</ItemGroup>
+
+	<Target Name="ValidateFormula3DNativePayload" BeforeTargets="CoreCompile">
+		<Message Importance="high"
+				 Text="[Formula3D] Skia native package file: $(SkiaNativePackageFile)" />
+		<Error Condition="'$(SkiaNativePackageFile)' == '' or !Exists('$(SkiaNativePackageFile)')"
+			   Text="找不到 SkiaSharp.NativeAssets.Win32 2.88.9 的 win-x64/libSkiaSharp.dll。解析路径：$(SkiaNativePackageFile)" />
+	</Target>
+</Project>
