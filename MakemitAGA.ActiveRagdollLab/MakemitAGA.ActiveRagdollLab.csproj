@@ -1,0 +1,77 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- ARL v0.4.76: Dynamic torso recovery A/B; coherent Foot reference, forces, limits and Pelvis braking B retained.
+       Shared clocks and session ownership; legacy loaded baseline retained. -->
+  <!-- Load the user's path before deriving BepInExCore and InteropDir. -->
+  <Import Project="LocalPaths.props" Condition="Exists('LocalPaths.props')" />
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <LangVersion>10.0</LangVersion>
+    <PlatformTarget>x64</PlatformTarget>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>MakemitAGA.ActiveRagdollLab</AssemblyName>
+    <RootNamespace>MakemitAGA.ActiveRagdollLab</RootNamespace>
+    <Version>0.4.76</Version>
+    <AssemblyVersion>0.4.76</AssemblyVersion>
+    <FileVersion>0.4.76</FileVersion>
+    <CodePage>65001</CodePage>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <MiSideRoot Condition="'$(MiSideRoot)' == ''">C:\dpan\jgggggg\steam\steamapps\common\MiSide</MiSideRoot>
+    <BepInExCore>$(MiSideRoot)\BepInEx\core</BepInExCore>
+    <InteropDir>$(MiSideRoot)\BepInEx\interop</InteropDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="0Harmony">
+      <HintPath>$(BepInExCore)\0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="BepInEx.Core">
+      <HintPath>$(BepInExCore)\BepInEx.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="BepInEx.Unity.Common">
+      <HintPath>$(BepInExCore)\BepInEx.Unity.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="BepInEx.Unity.IL2CPP">
+      <HintPath>$(BepInExCore)\BepInEx.Unity.IL2CPP.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Il2CppInterop.Runtime">
+      <HintPath>$(BepInExCore)\Il2CppInterop.Runtime.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Il2Cppmscorlib">
+      <HintPath>$(InteropDir)\Il2Cppmscorlib.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(InteropDir)\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>$(InteropDir)\UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(InteropDir)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.PhysicsModule">
+      <HintPath>$(InteropDir)\UnityEngine.PhysicsModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.AnimationModule">
+      <HintPath>$(InteropDir)\UnityEngine.AnimationModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="ValidateMiSideReferences" BeforeTargets="CoreCompile">
+    <Error Condition="!Exists('$(BepInExCore)\BepInEx.Unity.IL2CPP.dll')" Text="找不到 BepInEx.Unity.IL2CPP.dll。请复制 LocalPaths.props.example 为 LocalPaths.props，并设置 MiSideRoot。当前：$(MiSideRoot)" />
+    <Error Condition="!Exists('$(InteropDir)\Assembly-CSharp.dll')" Text="找不到 Assembly-CSharp.dll。请确认 BepInEx interop 已生成。当前：$(MiSideRoot)" />
+    <Error Condition="!Exists('$(InteropDir)\UnityEngine.PhysicsModule.dll')" Text="找不到 UnityEngine.PhysicsModule.dll。当前：$(InteropDir)" />
+  </Target>
+</Project>

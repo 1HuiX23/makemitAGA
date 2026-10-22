@@ -1,0 +1,123 @@
+# MakemitAGA Active Ragdoll Lab 0.4.2 - Mechanical Contact Causal Requalification
+# 保存后执行：arl_profile_reload
+# 当前主线：v0.4.7恢复raw native-gait reference；A=Foot Collider全程OFF，B=per-foot confirmed STANCE + current exact static support identity才允许该Foot接触，TRANSITION_TO_SWING/SWING立即释放。Gravity/GSP与全部hard gate不变，无新增profile键。
+# 本文件只保留仍由活动运行时消费的配置；历史实验参数与 A/B 细节请查长期版本记录或旧版本 ZIP。
+
+# --- 目标与 Two-Body 几何 ---
+targetName=MitaPerson Mita
+pelvisBonePath=Armature/Hips
+spineBonePath=Armature/Hips/Spine
+chestBonePath=Armature/Hips/Spine/Chest
+pelvisMass=8
+chestMass=12
+pelvisSizeScale=0.70,0.34,0.52
+chestSizeScale=0.86,0.68,0.56
+minBoxDimension=0.10
+maxBoxDimension=0.55
+
+# --- Two-Body 冻结控制与诊断 ---
+# 运动阶段与 source-turn 阈值只用于 trace/冻结验收，不进入控制。
+maxLinearVelocity=6
+angularSpring=55
+angularDamper=12
+maxAngularAcceleration=40
+angularDrag=3
+maxAngularVelocity=18
+driveDisableDistance=0.80
+targetVelocityBlend=0.50
+traceIntervalSeconds=0.50
+traceVerboseSnapshots=false
+sourceTurnVerboseContextLogging=false
+motionIdleSpeedThreshold=0.15
+motionSteadyMinSpeed=0.50
+motionLinearAccelerationThreshold=3.00
+motionTurnAngularVelocityThreshold=1.20
+motionTurnAngularAccelerationThreshold=12.0
+motionTransitionHoldSeconds=0.30
+sourceTurnEventRotationDeltaDegrees=20
+sourceTurnEventAngularSpeedThreshold=4
+sourceTurnEventAngularAccelerationThreshold=30
+sourceTurnContextPreSeconds=0.50
+sourceTurnContextPostSeconds=0.75
+
+# --- Torso pose bridge / parent feedforward / joint safety ---
+# WIDE_ISOLATION=true 时人体窄限位字段仅作为未来恢复 ANATOMICAL 模式的保留配置。
+parentMotionFeedforward=true
+parentMotionFeedforwardGain=12
+maxParentMotionFeedforwardAcceleration=20
+poseBridgeMaxExtrapolationSeconds=0.10
+poseBridgePositionCorrectionGain=6.0
+poseBridgeMaxPositionCorrectionSpeed=0.75
+poseBridgeRotationCorrectionGain=6.0
+poseBridgeMaxRotationCorrectionAngularSpeed=3.0
+wideJointLimitIsolation=true
+wideJointLimitDegrees=170
+chestLowTwistLimitDegrees=-35
+chestHighTwistLimitDegrees=35
+chestSwing1LimitDegrees=45
+chestSwing2LimitDegrees=35
+jointAnchorSafetyDistance=0.15
+
+# --- Bilateral frozen leg foundation ---
+# 当前生产链要求 Knee PCA 显式 apply 后再 arl_hip_stack(on)；Hip/Knee hard tether safety 仍为 30 mm fail-close。显式骨骼路径默认留空，AUTO 失败时再填写。
+singleLegEnabled=true
+bilateralLegEnabled=true
+singleLegSide=Left
+singleLegUpperBonePath=
+singleLegLowerBonePath=
+singleLegFootBonePath=
+upperLegMass=7.0
+lowerLegMass=4.0
+# v0.4.7：Profile键值继续不变；stance-only contact复用冻结的v0.4.5 gait阈值与v0.4.0 exact-support identity阈值，不新增参数。v0.4.6 discontinuity reconciliation不推广，正式A/B均恢复raw native-gait reference；Gravity/GSP/增益/MaxA/MaxTau/hard gate不变。
+footAnkleFoundationEnabled=true
+footMass=1.0
+legSegmentThickness=0.10
+legHipAngularSpring=55
+legHipAngularDamper=12
+legHipMaxAngularAcceleration=40
+legHipSourceTurnMaxAngularAcceleration=80
+legHipRecoveryMaxAngularAcceleration=80
+legHipRecoveryExitErrorDegrees=10
+legHipRecoveryStableHoldSeconds=0.15
+legHipRecoveryMaxSeconds=2.0
+legHipTrackingHealthEnterErrorDegrees=15
+legHipTrackingHealthEnterHoldSeconds=0.10
+legHipTrackingHealthImmediateErrorDegrees=30
+legHipControlFrameInertialization=true
+legHipControlFrameSourceMaxAngularSpeed=6
+legHipControlFrameSourceMaxAngularAcceleration=60
+legHipControlFrameRecoveryMaxAngularSpeed=8
+legHipControlFrameRecoveryMaxAngularAcceleration=80
+legHipControlFrameMaxLagDegrees=25
+legHipControlFrameRecoveryExitAngleDegrees=1.5
+legHipControlFrameRecoveryExitAngularSpeed=0.5
+legHipControlFrameRecoveryStableHoldSeconds=0.10
+legHipControlFrameRecoveryMaxSeconds=1.5
+legKneeAngularSpring=45
+legKneeAngularDamper=9
+legKneeMaxAngularAcceleration=40
+legKneeSoftOffAxisAngularSpring=30
+legKneeSoftOffAxisAngularDamper=8
+legKneeSoftOffAxisMaxAngularAcceleration=20
+legKneeSoftOffAxisSourceTurnMaxAngularAcceleration=40
+legKneeSoftOffAxisRecoveryMaxAngularAcceleration=40
+legKneeSoftOffAxisRecoveryExitErrorDegrees=5
+legKneeSoftOffAxisRecoveryStableHoldSeconds=0.15
+legKneeSoftOffAxisRecoveryMaxSeconds=2.0
+legKneeSoftOffAxisTrackingHealthEnterErrorDegrees=10
+legKneeSoftOffAxisTrackingHealthEnterHoldSeconds=0.10
+legKneeSoftOffAxisTrackingHealthImmediateErrorDegrees=25
+legDriveDisableDistance=0.65
+
+# --- Validated angular-acceleration feedforward ---
+# 已验证 production baseline：ON / gain=1 / bound=20；Source/Recovery/陈旧样本等抑制逻辑由运行时负责。
+legAngularAccelerationFeedforward=true
+legAngularAccelerationFeedforwardGain=1.0
+legAngularAccelerationFeedforwardMaxAcceleration=20.0
+legAngularAccelerationFeedforwardMaxSourceSampleAgeSeconds=0.10
+
+# --- 默认安全状态与预览 ---
+# 默认不启用物理 Collider/Gravity；后续 feet/GSP 接触阶段再由专门测试流程显式开启。
+defaultColliders=false
+defaultGravity=false
+previewAlpha=0.28

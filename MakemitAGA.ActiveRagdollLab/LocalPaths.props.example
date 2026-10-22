@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <!-- 修改为本机 MiSide 根目录，然后把本文件复制并改名为 LocalPaths.props。 -->
+    <MiSideRoot>C:\dpan\jgggggg\steam\steamapps\common\MiSide</MiSideRoot>
+  </PropertyGroup>
+</Project>
