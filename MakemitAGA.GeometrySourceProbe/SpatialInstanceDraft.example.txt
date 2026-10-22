@@ -1,0 +1,5 @@
+# GSP spatial instance mapping draft example.
+# Runtime command: gsp_instance_export_draft
+#
+# targetPath|instanceKey|channel|associatedCollisionKey|center|size|sourceRoutes|sourceRenderers|recommendedRole|proxyType|proxyCenter|proxyRawSize|proxySize|proxyEuler|proxyRatioToAabb|profileMatched|fixedToWorld|pickable|massKg|staticFriction|dynamicFriction|bounciness|materialTag|notes
+World/Scene/.../TargetObject|SI-COLLISION-EXAMPLE|collision||(0,0,0)|(0.48,0.47,0.02)|1|TargetRenderer|PHYSICAL_PROXY_OR_REPAIR_REQUIRED|ORIENTED_THIN_BOX|(0,0,0)|(0.47,0.46,0.015)|(0.474,0.464,0.020)|(0,90,0)|0.20|False|auto|auto|||||unclassified|Example only

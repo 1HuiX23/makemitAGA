@@ -1,0 +1,8 @@
+# MakemitAGA GSP spatial instance physics whitelist example
+# objectPattern|instancePattern|channel|enabled|proxyType|fixedToWorld|pickable|massKg|staticFriction|dynamicFriction|bounciness|materialTag|minimumThicknessMeters|notes
+#
+# 先执行 gsp_instance_audit(TargetObject)，再用 gsp_instance_profile_seed_current
+# 生成精确 instanceKey 草案。以下示例保持注释，不会自动生效。
+# */FixedDecoration|SI-COLLISION-*|collision|true|ORIENTED_THIN_BOX|true|false|||||unclassified-fixed|固定薄代理示例
+# */PortableObject|SI-COLLISION-*|collision|true|ORIENTED_BOX|false|true|||||unclassified-portable|可移动代理示例，质量和摩擦需实测
+# */StaticComplexObject|SI-COLLISION-*|collision|true|STATIC_NONCONVEX_MESH|true|false|||||unclassified-static|固定复杂表面示例，无 Rigidbody

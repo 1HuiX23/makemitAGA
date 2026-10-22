@@ -1,0 +1,103 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    MakemitAGA Geometry Source Probe 0.2.3（活动房间增量地板 Atlas 基础版）
+
+    冻结主线：
+    1. 通过只读 D3D11 staging 路线取得 Renderer 实际路由子网格；绝不修改
+       mesh.vertexBufferTarget / mesh.indexBufferTarget，避免已验证的原生崩溃路径。
+    2. 对多 Renderer / 静态合批几何执行世界坐标统一、空间焊接、连通组件与
+       现实实例拆分，并通过部件级与实例级白名单区分实体、视觉层和阴影特效。
+    3. 固定复杂家具使用 STATIC_NONCONVEX_MESH：把成功审计保存的世界空间碰撞
+       聚合几何创建为 GSP 自有半透明 Mesh + 静态非凸 MeshCollider；不创建 Rigidbody，
+       不修改源对象，Collider 默认关闭。定向盒/复合盒仅保留为简单物体或粗略回退。
+    4. v0.2.1 在不引用 ARL DLL 的前提下增加统一 environment-provider 入口：根据实例配置
+       选择 STATIC_NONCONVEX_MESH 或 Box/Compound，统一提供 build/status/visual/collider/rollback。
+       GSP 只负责自己拥有的固定环境 Collider；消费者只通过 Unity Physics 使用这些代理。
+    5. provider build 使用审计时保存的完整 targetPath 做唯一精确重绑定；Collider 每次从 OFF→ON
+       都重新执行身份、Transform、shape、layer、Rigidbody 与读回安全门，任一失败立即 fail-close。
+    6. v0.2.2 建立四房间 HouseFloorRegistry：Bedroom→FloorBedroom、Kitchen→FloorKitchen、
+       Main→RoomMain、Toilet→FloorToilet；实机随后确认非玩家房间会整体失活，因此“4/4 同时 active”假设退休。
+    7. v0.2.3 改为 active-room incremental floor atlas：四个房间只是长期语义槽位；当前 active 房间首次出现时
+       捕获其地板并创建 parentless GSP-owned static non-convex MeshCollider。源房间之后失活不影响已捕获代理；
+       未访问房间为 WAITING_ACTIVE，不是 failure；scene-change / rollback 仍完整清理。
+    8. 保留文件化报告、环境观测 DTO、实例代理受控接触测试和旧低层 proxy 命令用于诊断；
+       详细报告不得直接灌入游戏控制台，继续使用短摘要 + 文件导出与统一字符预算安全门。
+
+    本项目使用独立 DLL、独立插件 GUID 与 gsp_ 命令前缀，不引用或覆盖 SRL/ARL DLL。
+  -->
+  <Import Project="LocalPaths.props" Condition="Exists('LocalPaths.props')" />
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <LangVersion>10.0</LangVersion>
+    <PlatformTarget>x64</PlatformTarget>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>MakemitAGA.GeometrySourceProbe</AssemblyName>
+    <RootNamespace>MakemitAGA.GeometrySourceProbe</RootNamespace>
+    <Version>0.2.3</Version>
+    <AssemblyVersion>0.2.3.0</AssemblyVersion>
+    <FileVersion>0.2.3.0</FileVersion>
+    <CodePage>65001</CodePage>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <MiSideRoot Condition="'$(MiSideRoot)' == ''">C:\dpan\jgggggg\steam\steamapps\common\MiSide</MiSideRoot>
+    <BepInExCore>$(MiSideRoot)\BepInEx\core</BepInExCore>
+    <InteropDir>$(MiSideRoot)\BepInEx\interop</InteropDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="0Harmony">
+      <HintPath>$(BepInExCore)\0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="BepInEx.Core">
+      <HintPath>$(BepInExCore)\BepInEx.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="BepInEx.Unity.Common">
+      <HintPath>$(BepInExCore)\BepInEx.Unity.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="BepInEx.Unity.IL2CPP">
+      <HintPath>$(BepInExCore)\BepInEx.Unity.IL2CPP.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Il2CppInterop.Runtime">
+      <HintPath>$(BepInExCore)\Il2CppInterop.Runtime.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Il2Cppmscorlib">
+      <HintPath>$(InteropDir)\Il2Cppmscorlib.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(InteropDir)\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>$(InteropDir)\UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(InteropDir)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!--
+      MiSide / Unity 2021.3 的 BepInEx IL2CPP interop 不一定生成独立的
+      UnityEngine.RenderingModule.dll。GraphicsBuffer、VertexAttribute、
+      IndexFormat、ShadowCastingMode 等 UnityEngine.Rendering 命名空间类型
+      在本游戏的 interop 布局中由 UnityEngine.CoreModule.dll 提供。
+      因此这里不要添加不存在的 RenderingModule 硬引用。
+    -->
+    <Reference Include="UnityEngine.PhysicsModule">
+      <HintPath>$(InteropDir)\UnityEngine.PhysicsModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="ValidateMiSideReferences" BeforeTargets="CoreCompile">
+    <Error Condition="!Exists('$(BepInExCore)\BepInEx.Unity.IL2CPP.dll')" Text="找不到 BepInEx.Unity.IL2CPP.dll。请复制 LocalPaths.props.example 为 LocalPaths.props，并设置 MiSideRoot。当前：$(MiSideRoot)" />
+    <Error Condition="!Exists('$(InteropDir)\Assembly-CSharp.dll')" Text="找不到 Assembly-CSharp.dll。请确认 BepInEx interop 已生成。当前：$(MiSideRoot)" />
+  </Target>
+</Project>

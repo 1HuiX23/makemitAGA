@@ -1,0 +1,8 @@
+# MakemitAGA GSP object physics whitelist example
+# objectPattern|partPattern|role|observation|collision|massKg|staticFriction|dynamicFriction|bounciness|materialTag|notes
+#
+# 以下均为注释示例，不会自动生效。
+# */TargetObject|*DisplayOverlay*|VISUAL_ONLY|true|false|||||display-overlay|显示层保留观察、排除碰撞
+# */TargetObject|*Shadow*|SHADOW_EFFECT_EXCLUDE|false|false|||||shadow-effect|阴影或投影面排除
+# */TargetObject|DetachedChild|CHILD_OBJECT_EXCLUDE|false|false|||||independent-child|独立子物体不并入父对象
+# */TargetObject|*|PHYSICAL_CORE|true|true|||||unclassified-solid|主体进入观察与碰撞候选
