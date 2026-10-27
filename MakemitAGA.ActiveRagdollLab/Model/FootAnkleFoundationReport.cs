@@ -728,7 +728,16 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                    "/completedTrace(n/anchorPeakMm)=" + TraceSamples + "/" + F(TraceAnkleAnchorErrorMaxMeters * 1000f);
         }
 
-        public string GetConsoleSummary()
+        // Only explicit free-space callers opt out. Any exposure/failure restores the full legacy evidence.
+        private bool SupportOutputNeeded => ColliderEnabled || GravityEnabled || ContactShadowActive ||
+            StanceContactLifecycleEnabled || StanceFootNativeGravityEnabled || ContactShadowTraceMatchedCallbacks > 0 ||
+            MechanicalReactionTraceCallbacks > 0 || StanceContactLifecycleActiveSamples > 0 || !Finite ||
+            !SoleRequalificationFinite || !ContactIdentityFinite || !ContactShadowFinite || !StanceContactLifecycleFinite ||
+            !MechanicalReactionFinite || !SupportEntityBoundaryFinite || !SupportEntityBoundaryMotionFinite ||
+            !SupportNormalWindowFinite || !SupportCallbackMomentumFinite || !DynamicNormalLoadFinite ||
+            !RockingTetherCouplingFinite || !FootAngularImpulseAttributionFinite;
+
+        public string GetConsoleSummary(bool includeSupport = true)
         {
             return "ARL foot/ankle foundation" +
                 " | mode=" + ModeName +
@@ -771,6 +780,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                 " | sourceW=" + V(SourceAnkleRelativeAngularVelocityLocal) + "/mag=" + F(SourceAnkleRelativeAngularSpeed) +
                 " | sourceA=" + V(SourceAnkleRelativeAngularAccelerationLocal) +
                 " | continuity(errDeg/anchor)=" + F(AnkleRelativeTrackingErrorDegrees) + "/" + F(AnkleAnchorErrorMeters) +
+                (includeSupport || SupportOutputNeeded ?
                 " | v0561=" + (SoleRequalificationMode ?? "<none>") + "/finite=" + SoleRequalificationFinite +
                 " | v0561Now=" + (SoleRequalificationCurrentSummary ?? "<none>") +
                 " | v0561Trace=" + (SoleRequalificationTraceSummary ?? "<none>") +
@@ -790,7 +800,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                 " | v04390ContactOffset=" + (FootContactOffsetSummary ?? "<none>") +
                 " | v04250AngularImpulse=" + (FootAngularImpulseAttributionMode ?? "<none>") + "/finite=" + FootAngularImpulseAttributionFinite + "/ready=" + FootAngularImpulseAttributionEvidenceReady +
                 " | v04250Now=" + (FootAngularImpulseAttributionCurrentSummary ?? "<none>") +
-                " | v04250Trace=" + (FootAngularImpulseAttributionTraceSummary ?? "<none>") +
+                " | v04250Trace=" + (FootAngularImpulseAttributionTraceSummary ?? "<none>")  : " | inactiveSupport=OMITTED_FREE_SPACE_NO_EXPOSURE") +
                 " | v0450GameNativeGait=" + (GameNativeGaitPhaseMode ?? "<none>") + "/finite=" + GameNativeGaitPhaseFinite +
                 " | v0450Trace=" + (GameNativeGaitTraceSummary ?? "<none>") +
                 " | v058=" + (AnkleDriveMode ?? "<none>") + "/arm=" + (AnkleDriveArm ?? "<none>") + "/finite=" + AnkleDriveFinite +
@@ -817,7 +827,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                 " | trace(n/errMeanMax/anchorMeanMax/wMeanMax)=" + TraceSamples + "/" + F(TraceAnkleRelativeErrorMeanDegrees) + "/" + F(TraceAnkleRelativeErrorMaxDegrees) + "/" + F(TraceAnkleAnchorErrorMeanMeters) + "/" + F(TraceAnkleAnchorErrorMaxMeters) + "/" + F(TraceSourceAngularSpeedMean) + "/" + F(TraceSourceAngularSpeedMax);
         }
 
-        public string GetFullText()
+        public string GetFullText(bool includeSupport = true)
         {
             StringBuilder sb = new StringBuilder(4096);
             sb.AppendLine("MakemitAGA Active Ragdoll Lab - Foot/Ankle | sourceRevision=" + Plugin.SourceRevision);
@@ -864,59 +874,63 @@ namespace MakemitAGA.ActiveRagdollLab.Model
             sb.AppendLine("traceSourceWMeanMax=" + F(TraceSourceAngularSpeedMean) + "/" + F(TraceSourceAngularSpeedMax));
             sb.AppendLine("traceSourceFromBindAxisMinMaxAbs=" + V(TraceSourceFromBindAxisMinDegrees) + "/" + V(TraceSourceFromBindAxisMaxDegrees) + "/" + V(TraceSourceFromBindAxisAbsMaxDegrees));
             sb.AppendLine("traceSourceWAxisMinMaxAbs=" + V(TraceSourceAngularVelocityAxisMin) + "/" + V(TraceSourceAngularVelocityAxisMax) + "/" + V(TraceSourceAngularVelocityAxisAbsMax));
-            sb.AppendLine("soleRequalificationMode=" + (SoleRequalificationMode ?? "<none>"));
-            sb.AppendLine("soleRequalificationFinite=" + SoleRequalificationFinite + "/reason=" + (SoleRequalificationInvalidReason ?? "<none>"));
-            sb.AppendLine("soleRequalificationCurrent=" + (SoleRequalificationCurrentSummary ?? "<none>"));
-            sb.AppendLine("soleRequalificationTrace=" + (SoleRequalificationTraceSummary ?? "<none>"));
-            sb.AppendLine("contactIdentityMode=" + (ContactIdentityMode ?? "<none>"));
-            sb.AppendLine("contactIdentityFinite=" + ContactIdentityFinite + "/reason=" + (ContactIdentityInvalidReason ?? "<none>"));
-            sb.AppendLine("contactIdentityCurrent=" + (ContactIdentityCurrentSummary ?? "<none>"));
-            sb.AppendLine("contactIdentityTrace=" + (ContactIdentityTraceSummary ?? "<none>"));
-            sb.AppendLine("contactShadowMode=" + (ContactShadowMode ?? "<none>") + "/arm=" + (ContactShadowArm ?? "<none>"));
-            sb.AppendLine("contactShadowFinite=" + ContactShadowFinite + "/reason=" + (ContactShadowInvalidReason ?? "<none>"));
-            sb.AppendLine("contactShadowCurrent=" + (ContactShadowCurrentSummary ?? "<none>"));
-            sb.AppendLine("contactShadowTrace=" + (ContactShadowTraceSummary ?? "<none>"));
-            sb.AppendLine("stanceContactLifecycleMode=" + (StanceContactLifecycleMode ?? "<none>"));
-            sb.AppendLine("stanceContactLifecycleFinite=" + StanceContactLifecycleFinite + "/reason=" + (StanceContactLifecycleInvalidReason ?? "<none>"));
-            sb.AppendLine("stanceContactLifecycleCurrent=" + (StanceContactLifecycleCurrentSummary ?? "<none>"));
-            sb.AppendLine("stanceContactLifecycleTrace=" + (StanceContactLifecycleTraceSummary ?? "<none>"));
-            sb.AppendLine("stanceContactFrictionIsolation=" + (StanceContactFrictionIsolationSummary ?? "<none>"));
-            sb.AppendLine("stanceLowerGroundAnchorAuthority=" + (StanceLowerGroundAuthoritySummary ?? "<none>"));
-            sb.AppendLine("stanceFootNativeGravitySupportLoad=" + (StanceFootNativeGravitySummary ?? "<none>"));
-            sb.AppendLine("mechanicalReactionMode=" + (MechanicalReactionMode ?? "<none>"));
-            sb.AppendLine("mechanicalReactionFinite=" + MechanicalReactionFinite + "/reason=" + (MechanicalReactionInvalidReason ?? "<none>"));
-            sb.AppendLine("mechanicalReactionCurrent=" + (MechanicalReactionCurrentSummary ?? "<none>"));
-            sb.AppendLine("mechanicalReactionTrace=" + (MechanicalReactionTraceSummary ?? "<none>"));
             sb.AppendLine("footCollisionDetectionMode=" + (FootCollisionDetectionModeSummary ?? "<none>"));
             sb.AppendLine("footContactOffset=" + (FootContactOffsetSummary ?? "<none>"));
-            sb.AppendLine("stancePlanarDamping=" + (StancePlanarDampingSummary ?? "<none>"));
-            sb.AppendLine("supportEntityBoundaryMode=" + (SupportEntityBoundaryMode ?? "<none>"));
-            sb.AppendLine("supportEntityBoundaryFinite=" + SupportEntityBoundaryFinite + "/ready=" + SupportEntityBoundaryEvidenceReady + "/reason=" + (SupportEntityBoundaryInvalidReason ?? "<none>"));
-            sb.AppendLine("supportEntityBoundaryTrace=" + (SupportEntityBoundaryTraceSummary ?? "<none>"));
-            sb.AppendLine("supportMotionWindowMode=" + (SupportEntityBoundaryMotionMode ?? "<none>"));
-            sb.AppendLine("supportMotionWindowFinite=" + SupportEntityBoundaryMotionFinite + "/reason=" + (SupportEntityBoundaryMotionInvalidReason ?? "<none>"));
-            sb.AppendLine("supportMotionWindowTrace=" + (SupportEntityBoundaryMotionTraceSummary ?? "<none>"));
-            sb.AppendLine("supportNormalWindowMode=" + (SupportNormalWindowMode ?? "<none>"));
-            sb.AppendLine("supportNormalWindowFinite=" + SupportNormalWindowFinite + "/ready=" + SupportNormalWindowEvidenceReady + "/reason=" + (SupportNormalWindowInvalidReason ?? "<none>"));
-            sb.AppendLine("supportNormalWindowTrace=" + (SupportNormalWindowTraceSummary ?? "<none>"));
-            sb.AppendLine("supportCallbackMomentumMode=" + (SupportCallbackMomentumMode ?? "<none>"));
-            sb.AppendLine("supportCallbackMomentumFinite=" + SupportCallbackMomentumFinite + "/reason=" + (SupportCallbackMomentumInvalidReason ?? "<none>"));
-            sb.AppendLine("supportCallbackMomentumTrace=" + (SupportCallbackMomentumTraceSummary ?? "<none>"));
-            sb.AppendLine("supportEntityBoundaryRecent12Frames(SI_units;before_gravity_clear_and_lifecycle):");
-            sb.AppendLine(SupportEntityBoundaryRecentFrames ?? "<none>");
-            sb.AppendLine("dynamicNormalLoadMode=" + (DynamicNormalLoadMode ?? "<none>"));
-            sb.AppendLine("dynamicNormalLoadFinite=" + DynamicNormalLoadFinite + "/ready=" + DynamicNormalLoadEvidenceReady + "/reason=" + (DynamicNormalLoadInvalidReason ?? "<none>"));
-            sb.AppendLine("dynamicNormalLoadTrace=" + (DynamicNormalLoadTraceSummary ?? "<none>"));
-            sb.AppendLine("dynamicNormalLoadPeakFrames_Ns:").AppendLine(DynamicNormalLoadPeakFrames ?? "<none>");
-            sb.AppendLine("rockingTetherCouplingMode=" + (RockingTetherCouplingMode ?? "<none>"));
-            sb.AppendLine("rockingTetherCouplingFinite=" + RockingTetherCouplingFinite + "/ready=" + RockingTetherCouplingEvidenceReady + "/reason=" + (RockingTetherCouplingInvalidReason ?? "<none>"));
-            sb.AppendLine("rockingTetherCouplingTrace=" + (RockingTetherCouplingTraceSummary ?? "<none>"));
-            sb.AppendLine("rockingTetherCouplingRecentFrames_SI_WORLD_VECTORS_NORMAL_AXIS_PRE_SOLVE:");
-            sb.AppendLine(RockingTetherCouplingRecentFrames ?? "<none>");
-            sb.AppendLine("footAngularImpulseAttributionMode=" + (FootAngularImpulseAttributionMode ?? "<none>"));
-            sb.AppendLine("footAngularImpulseAttributionFinite=" + FootAngularImpulseAttributionFinite + "/ready=" + FootAngularImpulseAttributionEvidenceReady + "/reason=" + (FootAngularImpulseAttributionInvalidReason ?? "<none>"));
-            sb.AppendLine("footAngularImpulseAttributionCurrent=" + (FootAngularImpulseAttributionCurrentSummary ?? "<none>"));
-            sb.AppendLine("footAngularImpulseAttributionTrace=" + (FootAngularImpulseAttributionTraceSummary ?? "<none>"));
+            if (includeSupport || SupportOutputNeeded)
+            {
+                sb.AppendLine("soleRequalificationMode=" + (SoleRequalificationMode ?? "<none>"));
+                sb.AppendLine("soleRequalificationFinite=" + SoleRequalificationFinite + "/reason=" + (SoleRequalificationInvalidReason ?? "<none>"));
+                sb.AppendLine("soleRequalificationCurrent=" + (SoleRequalificationCurrentSummary ?? "<none>"));
+                sb.AppendLine("soleRequalificationTrace=" + (SoleRequalificationTraceSummary ?? "<none>"));
+                sb.AppendLine("contactIdentityMode=" + (ContactIdentityMode ?? "<none>"));
+                sb.AppendLine("contactIdentityFinite=" + ContactIdentityFinite + "/reason=" + (ContactIdentityInvalidReason ?? "<none>"));
+                sb.AppendLine("contactIdentityCurrent=" + (ContactIdentityCurrentSummary ?? "<none>"));
+                sb.AppendLine("contactIdentityTrace=" + (ContactIdentityTraceSummary ?? "<none>"));
+                sb.AppendLine("contactShadowMode=" + (ContactShadowMode ?? "<none>") + "/arm=" + (ContactShadowArm ?? "<none>"));
+                sb.AppendLine("contactShadowFinite=" + ContactShadowFinite + "/reason=" + (ContactShadowInvalidReason ?? "<none>"));
+                sb.AppendLine("contactShadowCurrent=" + (ContactShadowCurrentSummary ?? "<none>"));
+                sb.AppendLine("contactShadowTrace=" + (ContactShadowTraceSummary ?? "<none>"));
+                sb.AppendLine("stanceContactLifecycleMode=" + (StanceContactLifecycleMode ?? "<none>"));
+                sb.AppendLine("stanceContactLifecycleFinite=" + StanceContactLifecycleFinite + "/reason=" + (StanceContactLifecycleInvalidReason ?? "<none>"));
+                sb.AppendLine("stanceContactLifecycleCurrent=" + (StanceContactLifecycleCurrentSummary ?? "<none>"));
+                sb.AppendLine("stanceContactLifecycleTrace=" + (StanceContactLifecycleTraceSummary ?? "<none>"));
+                sb.AppendLine("stanceContactFrictionIsolation=" + (StanceContactFrictionIsolationSummary ?? "<none>"));
+                sb.AppendLine("stanceLowerGroundAnchorAuthority=" + (StanceLowerGroundAuthoritySummary ?? "<none>"));
+                sb.AppendLine("stanceFootNativeGravitySupportLoad=" + (StanceFootNativeGravitySummary ?? "<none>"));
+                sb.AppendLine("mechanicalReactionMode=" + (MechanicalReactionMode ?? "<none>"));
+                sb.AppendLine("mechanicalReactionFinite=" + MechanicalReactionFinite + "/reason=" + (MechanicalReactionInvalidReason ?? "<none>"));
+                sb.AppendLine("mechanicalReactionCurrent=" + (MechanicalReactionCurrentSummary ?? "<none>"));
+                sb.AppendLine("mechanicalReactionTrace=" + (MechanicalReactionTraceSummary ?? "<none>"));
+                sb.AppendLine("stancePlanarDamping=" + (StancePlanarDampingSummary ?? "<none>"));
+                sb.AppendLine("supportEntityBoundaryMode=" + (SupportEntityBoundaryMode ?? "<none>"));
+                sb.AppendLine("supportEntityBoundaryFinite=" + SupportEntityBoundaryFinite + "/ready=" + SupportEntityBoundaryEvidenceReady + "/reason=" + (SupportEntityBoundaryInvalidReason ?? "<none>"));
+                sb.AppendLine("supportEntityBoundaryTrace=" + (SupportEntityBoundaryTraceSummary ?? "<none>"));
+                sb.AppendLine("supportMotionWindowMode=" + (SupportEntityBoundaryMotionMode ?? "<none>"));
+                sb.AppendLine("supportMotionWindowFinite=" + SupportEntityBoundaryMotionFinite + "/reason=" + (SupportEntityBoundaryMotionInvalidReason ?? "<none>"));
+                sb.AppendLine("supportMotionWindowTrace=" + (SupportEntityBoundaryMotionTraceSummary ?? "<none>"));
+                sb.AppendLine("supportNormalWindowMode=" + (SupportNormalWindowMode ?? "<none>"));
+                sb.AppendLine("supportNormalWindowFinite=" + SupportNormalWindowFinite + "/ready=" + SupportNormalWindowEvidenceReady + "/reason=" + (SupportNormalWindowInvalidReason ?? "<none>"));
+                sb.AppendLine("supportNormalWindowTrace=" + (SupportNormalWindowTraceSummary ?? "<none>"));
+                sb.AppendLine("supportCallbackMomentumMode=" + (SupportCallbackMomentumMode ?? "<none>"));
+                sb.AppendLine("supportCallbackMomentumFinite=" + SupportCallbackMomentumFinite + "/reason=" + (SupportCallbackMomentumInvalidReason ?? "<none>"));
+                sb.AppendLine("supportCallbackMomentumTrace=" + (SupportCallbackMomentumTraceSummary ?? "<none>"));
+                sb.AppendLine("supportEntityBoundaryRecent12Frames(SI_units;before_gravity_clear_and_lifecycle):");
+                sb.AppendLine(SupportEntityBoundaryRecentFrames ?? "<none>");
+                sb.AppendLine("dynamicNormalLoadMode=" + (DynamicNormalLoadMode ?? "<none>"));
+                sb.AppendLine("dynamicNormalLoadFinite=" + DynamicNormalLoadFinite + "/ready=" + DynamicNormalLoadEvidenceReady + "/reason=" + (DynamicNormalLoadInvalidReason ?? "<none>"));
+                sb.AppendLine("dynamicNormalLoadTrace=" + (DynamicNormalLoadTraceSummary ?? "<none>"));
+                sb.AppendLine("dynamicNormalLoadPeakFrames_Ns:").AppendLine(DynamicNormalLoadPeakFrames ?? "<none>");
+                sb.AppendLine("rockingTetherCouplingMode=" + (RockingTetherCouplingMode ?? "<none>"));
+                sb.AppendLine("rockingTetherCouplingFinite=" + RockingTetherCouplingFinite + "/ready=" + RockingTetherCouplingEvidenceReady + "/reason=" + (RockingTetherCouplingInvalidReason ?? "<none>"));
+                sb.AppendLine("rockingTetherCouplingTrace=" + (RockingTetherCouplingTraceSummary ?? "<none>"));
+                sb.AppendLine("rockingTetherCouplingRecentFrames_SI_WORLD_VECTORS_NORMAL_AXIS_PRE_SOLVE:");
+                sb.AppendLine(RockingTetherCouplingRecentFrames ?? "<none>");
+                sb.AppendLine("footAngularImpulseAttributionMode=" + (FootAngularImpulseAttributionMode ?? "<none>"));
+                sb.AppendLine("footAngularImpulseAttributionFinite=" + FootAngularImpulseAttributionFinite + "/ready=" + FootAngularImpulseAttributionEvidenceReady + "/reason=" + (FootAngularImpulseAttributionInvalidReason ?? "<none>"));
+                sb.AppendLine("footAngularImpulseAttributionCurrent=" + (FootAngularImpulseAttributionCurrentSummary ?? "<none>"));
+                sb.AppendLine("footAngularImpulseAttributionTrace=" + (FootAngularImpulseAttributionTraceSummary ?? "<none>"));
+            }
+            else sb.AppendLine("inactiveSupport=OMITTED_FREE_SPACE_NO_EXPOSURE");
             sb.AppendLine("gameNativeGaitPhaseMode=" + (GameNativeGaitPhaseMode ?? "<none>"));
             sb.AppendLine("gameNativeGaitPhaseFinite=" + GameNativeGaitPhaseFinite + "/reason=" + (GameNativeGaitPhaseInvalidReason ?? "<none>"));
             sb.AppendLine("gameNativeGaitPhaseTrace=" + (GameNativeGaitTraceSummary ?? "<none>"));

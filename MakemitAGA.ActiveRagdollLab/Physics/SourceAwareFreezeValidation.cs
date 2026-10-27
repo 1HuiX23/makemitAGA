@@ -20,7 +20,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     ///    falsely counting the upstream interruption as a controller failure.
     ///
     /// Aggregate validation does not write physics. The legacy FreezeRecoveryActive report is also consumed
-    /// by leg phase/FF qualification in legacy scopes and the dynamic control arm A. V04760 arm B instead
+    /// by leg phase/FF qualification in legacy scopes. Both V04770 dynamic arms instead
     /// consumes DynamicTorsoRecoveryGate; preserve this validator for historical acceptance comparisons.
     /// </summary>
     internal sealed class SourceAwareFreezeValidation

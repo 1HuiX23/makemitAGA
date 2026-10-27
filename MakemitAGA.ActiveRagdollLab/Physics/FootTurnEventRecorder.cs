@@ -7,14 +7,14 @@ using UnityEngine;
 
 namespace MakemitAGA.ActiveRagdollLab.Physics
 {
-    // V04650: numeric-only, bounded diagnostic for the dynamic-parent FREE-SPACE run.
+    // V04650: numeric-only, bounded diagnostic for dynamic-parent runs; trace scope is pinned at start.
     // No controller, lifecycle, readiness or safety decision consumes this recorder.
     // Command N is joined to the settled pre-controller N+1 state using N's dt.
     // Windows are candidates for inspection, NOT an automatic overshoot certification.
     internal sealed partial class FootTurnEventRecorder
     {
         private const int Before = 16, After = 48, Capacity = Before + 1 + After;
-        private const float QuietW = 0.05f, MinAngle = 0.5f * Mathf.Deg2Rad;
+        private const float QuietW = 0.05f;
 
         private struct Frame
         {
@@ -45,6 +45,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             internal bool HipWitnessValid;
             internal float HipRawLocalError, HipControlError, HipRawWorldError, HipTargetGap;
             internal HipProgress HipResponse;
+            internal int HipScope;
+            internal bool NormalPlanGapValid;
+            internal float NormalPlanGap;
         }
 
         private sealed class Window
@@ -57,9 +60,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         }
 
         private readonly Frame[] _ring = new Frame[Before];
-        private readonly Window _peak = new Window(), _away = new Window(), _hipPeak = new Window();
-        private int _next, _count, _captured, _resolved, _censored, _invalid, _gaps, _awayCandidates;
+        private readonly Window _peak = new Window(), _normalHip = new Window(), _hipPeak = new Window();
+        private int _next, _count, _captured, _resolved, _censored, _invalid, _gaps, _normalHipCandidates;
         private bool _pending, _sealed, _hasSource, _sourceWValid;
+        private PelvisRunScope _traceScope;
         private Frame _command;
         private SourceStepContext _source;
         private Quaternion _sourceR;
@@ -68,13 +72,15 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private int _legCaptured, _legUnavailable, _legRawWValid;
         private int _quietFootLegMoving, _quietFootLegQuiet, _quietFootLegUnknown;
 
-        internal void Reset()
+        internal void Reset(PelvisRunScope scope = PelvisRunScope.DynamicLegFreeSpace)
         {
+            _traceScope = scope;
             ResetStepProgress();
             ResetHipWitness();
-            _next = _count = _captured = _resolved = _censored = _invalid = _gaps = _awayCandidates = 0;
+            ResetHipScope();
+            _next = _count = _captured = _resolved = _censored = _invalid = _gaps = _normalHipCandidates = 0;
             _pending = _sealed = false;
-            _peak.Reset(); _away.Reset(); _hipPeak.Reset();
+            _peak.Reset(); _normalHip.Reset(); _hipPeak.Reset();
             // Source derivative belongs only to this diagnostic; trace does not touch controller histories.
             _hasSource = _sourceWValid = false;
             _sourceW = Vector3.zero; _sourceDt = 0f;
@@ -184,6 +190,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 RecordReferenceWitness(f);
                 try { CaptureHipWitness(ref f); }
                 catch { f.HipWitnessValid = false; _hipMissing++; }
+                try { CaptureHipScope(ref f); }
+                catch { f.HipScope = ScopeUnavailable; f.NormalPlanGapValid = false; _hipScopeFailures++; }
                 _command = f; _pending = true; _captured++;
             }
             catch { _invalid++; CensorPending(); BreakContinuity(); } // Diagnostic failure never changes the plant.
@@ -238,24 +246,26 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             _count = _next = 0;
             // Preserve missing-tail counts; never fill an interrupted window with a different epoch/run.
-            _peak.Collecting = _away.Collecting = _hipPeak.Collecting = false;
+            _peak.Collecting = _normalHip.Collecting = _hipPeak.Collecting = false;
         }
 
         private void Record(Frame f)
         {
-            Append(_peak, f); Append(_away, f); Append(_hipPeak, f);
+            Append(_peak, f); Append(_normalHip, f); Append(_hipPeak, f);
             // Both arms retain the worst RAW-animation local error. A smoother control goal must
             // not move the only peak window away from the largest remaining animation mismatch.
             float peakError = f.ReferenceWitnessValid ? f.RawLocalError : f.Error;
             if (_peak.Count == 0 || peakError > _peak.Score + 0.000001f) Start(_peak, f, peakError);
-            if (f.SourceWValid && f.Age <= FootAnkleSourceDrivenRelativePdIsolation.MaxFreshTargetAgeSeconds &&
-                f.RawW.magnitude <= QuietW && f.RawError > MinAngle && f.RawOpening > 0.01f)
+            // Reuse the old quiet-away window, not a fourth buffer. Both arms qualify through
+            // the actual Hip FF owner. B's optional input-to-plan gap can also select a large lag.
+            if (f.HipScope == ScopeNormal && f.HipWitnessValid)
             {
-                _awayCandidates++;
-                if (_away.Count == 0 || f.RawOpening > _away.Score + 0.000001f) Start(_away, f, f.RawOpening);
+                _normalHipCandidates++;
+                float score = Mathf.Max(f.HipRawLocalError, f.NormalPlanGapValid ? f.NormalPlanGap : 0f);
+                if (_normalHip.Count == 0 || score > _normalHip.Score + 0.000001f) Start(_normalHip, f, score);
             }
             // Reuse the third window for final world-control Hip error. Raw-local and raw-world
-            // comparisons remain in every frame and all-run summaries; Foot peak/quiet windows are independent.
+            // comparisons remain in every frame and all-run summaries; the other two windows are independent.
             if (f.HipWitnessValid && (_hipPeak.Count == 0 || f.HipControlError > _hipPeak.Score + 0.000001f))
                 Start(_hipPeak, f, f.HipControlError);
             _ring[_next] = f; _next = (_next + 1) % Before; _count = Math.Min(_count + 1, Before);
@@ -277,10 +287,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal string GetDetails()
         {
             var sb = new StringBuilder(8192);
-            sb.Append("FOOT_TURN_V04650/readOnly=True/scope=DYNAMIC_PARENT_FREE_SPACE/sealed=").Append(_sealed)
+            sb.Append("FOOT_TURN_V04650/readOnly=True/scope=").Append(PelvisRunScopes.HasUpperWeight(_traceScope) ? "DYNAMIC_PARENT_UPPER_SELF_WEIGHT_CONTACT" : PelvisRunScopes.HasKneeCoupling(_traceScope) ? "DYNAMIC_PARENT_KNEE_NORMAL_COUPLING_CONTACT" : _traceScope == PelvisRunScope.DynamicLegLowerSelfWeightContact ? "DYNAMIC_PARENT_LOWER_SELF_WEIGHT_CONTACT" : _traceScope == PelvisRunScope.DynamicLegFootSelfWeightContact ? "DYNAMIC_PARENT_FOOT_SELF_WEIGHT_CONTACT" : _traceScope == PelvisRunScope.DynamicLegUnloadedContact ? "DYNAMIC_PARENT_UNLOADED_CONTACT" : "DYNAMIC_PARENT_FREE_SPACE").Append("/sealed=").Append(_sealed)
                 .Append("/captured-resolved-censored-pending=").Append(_captured).Append('/').Append(_resolved).Append('/').Append(_censored).Append('/').Append(_pending)
                 .Append("/invalid-gaps=").Append(_invalid).Append('/').Append(_gaps)
-                .Append("/awayCandidates=").Append(_awayCandidates)
+                .Append("/normalHipCandidates=").Append(_normalHipCandidates)
                 .Append("/window=16pre+trigger+48post/angles=rotvecRad/W=radPerSec/A=radPerSec2/tau=Nm")
                 .AppendLine("/openingPositive=AWAY/worldY=projection_NOT_EULER_YAW/response=TOTAL_PLANT_NOT_SINGLE_TORQUE_CAUSALITY");
             sb.Append("LEG_CHAIN_V04680/readOnly=True/captured-unavailable-rawWorldWValid=")
@@ -292,9 +302,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             AppendStepProgressSummary(sb);
             AppendReferenceSummary(sb);
             AppendHipSummary(sb);
-            sb.AppendLine("HIP_FF_GATE_V04760/readOnly=True/reason=ACTUAL_FF_OWNER_FIRST_MATCH/stateBits=1:NO_TORSO,2:SOURCE_TURN,4:SELECTED_TORSO_RECOVERY,8:HIP_RECOVERY,16:KNEE_RECOVERY,32:CONTROL_FRAME,64:HIP_UNHEALTHY,128:KNEE_UNHEALTHY,256:B_REFERENCE_GOAL_BRIDGE/healthBits=CONTEXT_NOT_EXTRA_FF_GATES/inputA=RENDER_RELATIVE_A_IN_CONTROL_PARENT_WORLD_BASIS/selectedA=BEFORE_FINAL_HIP_SUM_AND_CAP_NOT_NET_BODY_A/staleThreshold=MAX_0_MAXAGE_PLUS_0.0001_SECONDS/NA=OPTIONAL_NOT_FOOT_OR_HIP_QUALIFICATION");
+            AppendHipScopeSummary(sb);
+            sb.AppendLine("NORMAL_HIP_WINDOW_V04790/replaces=QUIET_RAW_WORLD_AWAY/triggerScope=NORMAL_WITH_VALID_HIP/scoreRad=MAX_RAW_LOCAL_BODY_ERROR_AND_VALID_B_INPUT_TO_PLAN_GAP/eachIndependentPeakMayDiffer=True/prePostMayCrossScopes=True/windowRowsNotRunHistogram=True/empty=NO_ELIGIBLE_NORMAL_HIP_EVIDENCE");
+            sb.AppendLine("HIP_FF_GATE_V04770/readOnly=True/reason=ACTUAL_FF_OWNER_FIRST_MATCH/stateBits=1:NO_TORSO,2:SOURCE_TURN,4:SELECTED_TORSO_RECOVERY,8:HIP_RECOVERY,16:KNEE_RECOVERY,32:CONTROL_FRAME,64:HIP_UNHEALTHY,128:KNEE_UNHEALTHY,256:HIP_REFERENCE_GOAL_BRIDGE/healthBits=CONTEXT_NOT_EXTRA_FF_GATES/inputA=COHERENT_NORMAL_WORLD_A_WHEN_APPLIED_ELSE_RENDER_RELATIVE_A_IN_CONTROL_PARENT_WORLD_BASIS/selectedA=BEFORE_FINAL_HIP_SUM_AND_CAP_NOT_NET_BODY_A/staleThreshold=MAX_0_MAXAGE_PLUS_0.0001_SECONDS/NA=OPTIONAL_NOT_FOOT_OR_HIP_QUALIFICATION");
+            sb.AppendLine("HIP_NORMAL_V04780/poseW=ONE_SHARED_FIXED_TRAJECTORY/normalFF=WORLD_PLANNER_A_NO_EXTRA_PARENT_A/limits=W_HIP40_OVER_KD12_A_FF20/notHumanLimits=True/NA=BASELINE_OR_OPTIONAL_ONLY/noNewRing=True");
+            sb.AppendLine("KNEE_FF_GATE_V04770/readOnly=True/mode32=HIP_FF_ACTIVE_ONLY/kneeReason=ACTUAL_KNEE_LANE_FIRST_MATCH/input-selected=BEFORE_ORIGINAL_KNEE_ALLOCATION/allocated=AFTER_OPPOSING_SUPPRESSION_BEFORE_FINAL_CLAMP/finalFlexion=ORIGINAL_SCALAR_COMMAND_NOT_NATIVE_RESPONSE/normalKneeCap=40/goalScope=HIP_ONLY_KEEP_KNEE_IN_BOTH_CURRENT_DYNAMIC_ARMS");
             FormatWindow(sb, "PEAK_RAW_LOCAL_ERROR_V04720", _peak);
-            FormatWindow(sb, "QUIET_RAW_WORLD_AWAY", _away);
+            FormatWindow(sb, "PEAK_NORMAL_HIP_RAW_OR_PLAN_GAP_V04790", _normalHip);
             FormatWindow(sb, "PEAK_HIP_CONTROL_WORLD_ERROR_V04740", _hipPeak);
             return sb.ToString();
         }
@@ -328,6 +342,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 AppendReferenceWitness(sb, f);
                 AppendHipWitness(sb, f);
                 AppendHipFeedforwardWitness(sb, f);
+                AppendKneeFeedforwardWitness(sb, f);
+                AppendHipNormalReferenceWitness(sb, f);
+                AppendHipScopeWitness(sb, f);
                 sb.AppendLine();
             }
         }

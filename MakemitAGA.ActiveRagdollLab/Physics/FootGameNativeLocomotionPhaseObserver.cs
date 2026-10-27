@@ -93,7 +93,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal bool Finite => _finite;
         internal string State => _state;
         internal bool CurrentStrongStanceSample => _currentStrongStanceSample;
-        internal bool CurrentStrongSwingSample => _currentStrongSwingSample;
 
         internal void ResetTrace(FootAnkleFoundationReport report)
         {

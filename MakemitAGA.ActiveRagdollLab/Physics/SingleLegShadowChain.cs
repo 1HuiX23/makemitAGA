@@ -89,6 +89,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private string _kneeAxisMode = "INITIAL_CHARACTER_RIGHT";
         private Vector3 _rawHipConnectedAnchorLocal;
         private Vector3 _lastHipAppliedAngularAccelerationWorld;
+        private readonly HipNormalReference _hipNormalReference = new HipNormalReference();
 
         // Actual relative Knee command remains a live Foot attribution input.
         // The v0.3.34 frame/response observer closed in v0.3.75; its unused counterfactual storage is retired.
@@ -105,7 +106,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         // feasibility-limited Source accumulator. Raw sampled target remains authoritative for health/diagnostics.
         private Quaternion _sourceControlTargetHipRelative = Quaternion.identity;
         private Vector3 _sourceControlTargetHipRelativeAngularVelocityLocal;
-        // Active P targets. Healthy Normal still mirrors raw Render samples; v0.2.44 replaces Hip only while the
+        // Active P targets. Baseline Normal mirrors Render; V04780 B overrides ordinary Hip from one Fixed world trajectory.
+        // v0.2.44 replaces Hip while the
         // physical-state-aware feasibility governor is active across Source Turn and physical recovery.
         private Quaternion _controlTargetHipRelative = Quaternion.identity;
         private Quaternion _controlTargetKneeRelative = Quaternion.identity;
@@ -115,7 +117,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         // Fixed-step pose trajectory so P/W remain dynamically consistent throughout Source/recovery handoff.
         private Vector3 _controlTargetHipRelativeAngularVelocityLocal;
         private Vector3 _controlTargetKneeRelativeAngularVelocityLocal;
-        // v0.2.4 DIAGNOSTIC ONLY: derivative of the render-sampled/sample-held target relative angular velocity.
+        // Render-only relative target-A for the original FF path. V04780 coherent Normal Hip instead uses its private world-plan A.
         private Vector3 _sampledTargetHipRelativeAngularAccelerationLocal;
         private Vector3 _sampledTargetKneeRelativeAngularAccelerationLocal;
         private Vector3 _previousFilteredTargetHipRelativeAngularVelocityLocal;
@@ -453,8 +455,15 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (_driveEnabled && (_dynamicParentActive != parent.PhysicalParent.Valid ||
                 (_dynamicParentActive && (!parent.PhysicalParent.Matches(step) ||
                 parent.PhysicalParent.BodyId != _pelvisBody.GetInstanceID() || parent.PhysicalParent.Epoch != _physicalParent.Epoch ||
-                _pelvisBody.isKinematic || !FreeSpaceNativeReady))))
-                throw new InvalidOperationException("LEG_PHYSICAL_PARENT_OR_FREE_SPACE_CONTRACT_LOST");
+                _pelvisBody.isKinematic || !DynamicEnvironmentNativeReady))))
+                throw new InvalidOperationException("LEG_PHYSICAL_PARENT_OR_ENVIRONMENT_CONTRACT_LOST" +
+                    (DynamicContactSelected ? ":" + DynamicContactIssue : ""));
+            if (_driveEnabled && _dynamicParentActive && !DynamicContactSelected)
+            {
+                FreeSpaceBoundaryIssue boundary = FreeSpaceSelectorIssue;
+                if (boundary != FreeSpaceBoundaryIssue.None)
+                    throw new InvalidOperationException("LEG_FREE_SPACE_SELECTOR_CONTRACT_LOST:" + boundary);
+            }
             if (_driveEnabled && _torso.Report.UseDynamicTorsoRecovery &&
                 (!_dynamicParentActive || !_torso.Report.DynamicTorsoRecovery.Matches(step)))
                 throw new InvalidOperationException("DYNAMIC_TORSO_RECOVERY_SHARED_CLOCK_MISMATCH");
@@ -765,6 +774,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     _hipReferenceGovernor.Active ||
                     _hipControlFrame.Active ||
                     _hipAuthority.PhysicalRecoveryPending;
+                if (!TryPrepareHipNormalRecovery(sourceActiveForGovernor, out bool normalRecoveryRequested))
+                {
+                    AbortDrive("HIP_NORMAL_RECOVERY_HANDOFF_CONTRACT_BROKEN");
+                    return;
+                }
                 _hipCompositeReferenceShockAbsorber.Step(
                     _profile,
                     sourceActiveForGovernor,
@@ -772,7 +786,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     preCompositeAbsorberWorldTarget,
                     preCompositeAbsorberWorldW,
                     PhysicsDt,
-                    _report);
+                    _report,
+                    normalRecoveryRequested);
                 if (!_hipCompositeReferenceShockAbsorber.OutputValid ||
                     !_hipCompositeReferenceShockAbsorber.SpeedContractSatisfied ||
                     !_hipCompositeReferenceShockAbsorber.AccelerationContractSatisfied)
@@ -792,6 +807,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     _controlTargetHipRelative,
                     _report);
 
+                if (!UpdateHipNormalReference(compositeControlParentRotation, compositeControlParentW))
+                {
+                    AbortDrive("HIP_NORMAL_REFERENCE_INVALID:" + _hipNormalReference.Issue);
+                    return;
+                }
+
                 // v0.4.6 was NOT PROMOTED. v0.4.15 removes the dormant reconciler implementation entirely;
                 // production Lower/Knee reference is always the raw native-gait sample above.
                 if (!UpdateLegAngularAccelerationFeedforward())
@@ -806,9 +827,16 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 if (_legAngularAccelerationFeedforward.ActiveThisStep &&
                     ((_torso.Report != null && (_torso.Report.SourceTurnEventActive || _torso.Report.ControlRecoveryActive)) ||
                      _hipAuthority.PhysicalRecoveryPending || _softKneeAuthority.PhysicalRecoveryPending ||
-                     (_hipControlFrame.Active && _profile.LegHipControlFrameInertialization) || HipFeedforwardGoalBridgeActive))
+                     (_hipControlFrame.Active && _profile.LegHipControlFrameInertialization)))
                 {
                     AbortDrive("A_FF_RECOVERY_GATE_INVARIANT_BROKEN");
+                    return;
+                }
+
+                if (HipFeedforwardGoalBridgeActive && (_legAngularAccelerationFeedforward.HipActiveThisStep ||
+                    (!_torso.Report.HipGoalGateOnlyHip && _legAngularAccelerationFeedforward.KneeActiveThisStep)))
+                {
+                    AbortDrive("A_FF_HIP_GOAL_GATE_SCOPE_INVARIANT_BROKEN");
                     return;
                 }
 
@@ -1057,7 +1085,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                         _footFoundation.ExactAuthorizedStanceSupportLoadEligible,
                         _footFoundation.StanceContactZeroFriction, _upperBody, _lowerBody, _footFoundation.DynamicBody,
                         _footFoundation.CurrentAuthorizedSupportNormalWorld, PhysicsDt,
-                        _report, _footFoundation.Report, _hipCharacterJointResponseIsolation.CurrentAppliedAccelerationWorld))
+                        _report, _footFoundation.Report, _hipCharacterJointResponseIsolation.CurrentAppliedAccelerationWorld,
+                        _dynamicParentActive ? _dynamicScope : PelvisRunScope.TorsoPairOnly))
                     {
                         AbortDrive("UPPER_SELF_WEIGHT_SCHEDULE_INVALID:" + _upperSelfWeightTransfer.Report.InvalidReason);
                         return;
@@ -1071,7 +1100,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                         _report.StanceLowerSelfWeightTransferCurrentApplied,
                         _report.StanceLowerSelfWeightTransferCurrentFootLoadAcceleration,
                         _report, _kneeCharacterJointResponseIsolation.CurrentAppliedAccelerationWorld,
-                        _torso.Report.MotionPhase, _dynamicParentActive ? _physicalParent : default, _legTurnCurrent))
+                        _torso.Report.MotionPhase, _dynamicParentActive ? _physicalParent : default, _legTurnCurrent, _dynamicScope))
                     {
                         AbortDrive("FOOT_VELOCITY_SOLVER_PRE_SOLVE_INVALID:" + (_footFoundation.CurrentInvalidReason ?? "UNKNOWN"));
                         return;
@@ -1171,6 +1200,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     _pelvisBody.rotation * _sampledTargetHipRelative,
                     _measuredPelvisAngularVelocity + _pelvisBody.rotation * _sampledTargetHipRelativeAngularVelocityLocal,
                     _report);
+                _hipNormalReference.Reset(_dynamicParentActive && _torso.Report.UseCoherentHipNormalReference,
+                    _pelvisBody.rotation * _controlTargetHipRelative,
+                    _measuredPelvisAngularVelocity + _pelvisBody.rotation * _controlTargetHipRelativeAngularVelocityLocal,
+                    _torso.Report.HipNormalSampleAgePrediction);
                 _hipCharacterJointResponseIsolation.ResetStats(_report);
                 _kneeParentAngularTransport.ResetDiagnostics(_report);
                 _lastHipAppliedAngularAccelerationWorld = Vector3.zero;
@@ -2304,27 +2337,28 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _footFoundation?.EndTrace();
                 CopyTraceStatsToReport();
                 CopyLegAngularAccelerationFeedforwardToReport();
+                _report.HipNormalReferenceSummary = _hipNormalReference.GetSummary();
 
                 // v0.3.52 maintenance: completed historical observers are retired from the hot path. Keep only diagnostics that
                 // still support the frozen runtime contract, current safety/recovery interpretation, or the active Foot/Ankle distal-boundary foundation.
-                Plugin.Logger?.LogWarning("[ARL][UPPER_SELF_WEIGHT_V04450] side=" + (_report.Side ?? "<none>") + " | " + _upperSelfWeightTransfer.Report.GetDetails());
+                if (!_dynamicParentActive) Plugin.Logger?.LogWarning("[ARL][UPPER_SELF_WEIGHT_V04450] side=" + (_report.Side ?? "<none>") + " | " + _upperSelfWeightTransfer.Report.GetDetails());
                 Plugin.Logger?.LogWarning("[ARL][LEG_TRACE_SUMMARY] side=" + (_report.Side ?? "<none>") + " | realInertia=True | " + GetTraceSummary());
                 Plugin.Logger?.LogWarning("[ARL][HIP_REFERENCE_GOVERNOR_KEY] side=" + (_report.Side ?? "<none>") + " | " + _hipReferenceGovernor.GetKey());
                 Plugin.Logger?.LogWarning("[ARL][KNEE_TETHER_SAFETY_KEY] side=" + (_report.Side ?? "<none>") + " | " + _kneeCharacterJointResponseIsolation.GetKey(_report));
                 if (_footFoundation != null && _footFoundation.IsBuilt)
                 {
-                    Plugin.Logger?.LogWarning("[ARL][FOOT_TRACE_SUMMARY] side=" + (_report.Side ?? "<none>") + " | " + _footFoundation.GetStatus());
-                    Plugin.Logger?.LogWarning("[ARL][FOOT_SOLE_REQUAL_V0561] side=" + (_report.Side ?? "<none>") + " | " + _footFoundation.GetSoleRequalificationStatus());
-                    Plugin.Logger?.LogWarning("[ARL][FOOT_CONTACT_IDENTITY_V0400] side=" + (_report.Side ?? "<none>") + " | " + _footFoundation.GetContactIdentityStatus());
+                    Plugin.Logger?.LogWarning("[ARL][FOOT_TRACE_SUMMARY] side=" + (_report.Side ?? "<none>") + " | " + _footFoundation.Report.GetConsoleSummary(!_dynamicParentActive));
+                    if (!_dynamicParentActive) Plugin.Logger?.LogWarning("[ARL][FOOT_SOLE_REQUAL_V0561] side=" + (_report.Side ?? "<none>") + " | " + _footFoundation.GetSoleRequalificationStatus());
+                    if (!_dynamicParentActive) Plugin.Logger?.LogWarning("[ARL][FOOT_CONTACT_IDENTITY_V0400] side=" + (_report.Side ?? "<none>") + " | " + _footFoundation.GetContactIdentityStatus());
                     Plugin.Logger?.LogWarning("[ARL][FOOT_ANKLE_DRIVE_V058] side=" + (_report.Side ?? "<none>") + " | " + _footFoundation.GetAnkleDrivePhysicalStatus());
-                    Plugin.Logger?.LogWarning("[ARL][ANKLE_TARGET_A_FF_V068] side=" + (_report.Side ?? "<none>") + " | " + _footFoundation.GetAnkleTargetAccelerationStatus() + " | " + _footFoundation.GetAnkleDrivePhysicalStatus());
+                    Plugin.Logger?.LogWarning("[ARL][ANKLE_TARGET_A_FF_V068] side=" + (_report.Side ?? "<none>") + " | " + _footFoundation.GetAnkleTargetAccelerationStatus());
                     Plugin.Logger?.LogWarning("[ARL][ANKLE_TARGET_A_CONDITIONER_V068] side=" + (_report.Side ?? "<none>") + " | frozenProduction=True | " + _footFoundation.GetTargetAccelerationPersistenceConditionerStatus());
                     Plugin.Logger?.LogWarning("[ARL][ANKLE_CAPTURE_AUTHORITY_V073] side=" + (_report.Side ?? "<none>") + " | production=True | " + _footFoundation.GetTranslationCaptureAuthorityStatus());
                     Plugin.Logger?.LogWarning("[ARL][ANKLE_CONSTRAINT_V063] side=" + (_report.Side ?? "<none>") + " | " + _footFoundation.GetAnkleConstraintStatus());
                     Plugin.Logger?.LogWarning("[ARL][ANKLE_TETHER_TRANSPORT_V064] side=" + (_report.Side ?? "<none>") + " | " + _footFoundation.GetAnkleTransportStatus());
                     Plugin.Logger?.LogWarning("[ARL][ANKLE_COMMON_MODE_ANGULAR_TRANSPORT_V078] side=" + (_report.Side ?? "<none>") + " | " + _footFoundation.GetAnkleAngularTransportStatus());
-                    Plugin.Logger?.LogWarning("[ARL][FOOT_LOWER_RECIPROCAL_V04200] side=" + (_report.Side ?? "<none>") + " | " + (_report.StanceFootLowerReciprocalSummary ?? "<none>"));
-                    Plugin.Logger?.LogWarning("[ARL][LOWER_SELF_WEIGHT_TRANSFER_V04210] side=" + (_report.Side ?? "<none>") + " | " + (_report.StanceLowerSelfWeightTransferSummary ?? "<none>"));
+                    if (!_dynamicParentActive) Plugin.Logger?.LogWarning("[ARL][FOOT_LOWER_RECIPROCAL_V04200] side=" + (_report.Side ?? "<none>") + " | " + (_report.StanceFootLowerReciprocalSummary ?? "<none>"));
+                    if (!_dynamicParentActive) Plugin.Logger?.LogWarning("[ARL][LOWER_SELF_WEIGHT_TRANSFER_V04210] side=" + (_report.Side ?? "<none>") + " | " + (_report.StanceLowerSelfWeightTransferSummary ?? "<none>"));
                 }
             }
 
@@ -2332,12 +2366,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _traceEnabled = enabled;
             if (enabled)
             {
-                _footFoundation?.BeginTrace();
+                _footFoundation?.BeginTrace(_dynamicScope);
                 ResetTraceStats();
                 _nextTraceTime = CurrentUnscaledTime + _profile.TraceIntervalSeconds;
             }
             UpdateReport();
-            if (!enabled && wasEnabled)
+            if (!enabled && wasEnabled && !_dynamicParentActive)
             {
                 string freeze = EvaluateSingleLegFreezeReadiness(true);
                 Plugin.Logger?.LogWarning("[ARL][SINGLE_LEG_FREEZE_CERTIFICATION] side=" + (_report.Side ?? "<none>") + " | " + freeze);
@@ -2640,16 +2674,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _footFoundation?.SetContactShadowArmA();
         }
 
-        internal bool PrepareFootContactShadowArmB(Collider authorizedCollider, out string error)
-        {
-            error = null;
-            if (_footFoundation == null || !_footFoundation.IsBuilt)
-            {
-                error = "FOOT_FOUNDATION_NOT_BUILT";
-                return false;
-            }
-            return _footFoundation.PrepareContactShadowArmB(authorizedCollider, out error);
-        }
 
         internal bool EnablePreparedFootContactShadowArmB(out string error)
         {
@@ -2884,7 +2908,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         private bool UpdateLegAngularAccelerationFeedforward()
         {
-            Vector3 hipTargetRelativeAWorld = GetHipDerivativeParentRotation() * _sampledTargetHipRelativeAngularAccelerationLocal;
+            Vector3 hipTargetRelativeAWorld = _hipNormalReference.Current.Applied ? _hipNormalReference.Current.A :
+                GetHipDerivativeParentRotation() * _sampledTargetHipRelativeAngularAccelerationLocal;
             Vector3 flexionAxisWorld = _lowerBody.transform.TransformDirection(_kneeFlexionAxisLowerLocal);
             if (flexionAxisWorld.sqrMagnitude < 0.0001f)
                 return false;
@@ -2903,8 +2928,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _hipAuthority.PhysicalRecoveryPending,
                 _softKneeAuthority.PhysicalRecoveryPending,
                 (_hipControlFrame.Active && _profile.LegHipControlFrameInertialization),
-                HipFeedforwardGoalBridgeActive);
-            CaptureLegTurnHipFeedforward(ok, hipTargetRelativeAWorld);
+                HipFeedforwardGoalBridgeActive,
+                _dynamicParentActive && _torso.Report != null && _torso.Report.HipGoalGateOnlyHip);
+            CaptureLegTurnHipFeedforward(ok, hipTargetRelativeAWorld, kneeTargetAxisA);
             CopyLegAngularAccelerationFeedforwardToReport();
             return ok;
         }
@@ -2919,6 +2945,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _report.LegAngularAccelerationFeedforwardMaxSourceSampleAgeSeconds = _profile.LegAngularAccelerationFeedforwardMaxSourceSampleAgeSeconds;
             _report.LegAngularAccelerationFeedforwardActiveThisStep = _legAngularAccelerationFeedforward.ActiveThisStep;
             _report.LegAngularAccelerationFeedforwardSuppressionReason = _legAngularAccelerationFeedforward.SuppressionReason;
+            _report.HipAngularAccelerationFeedforwardActiveThisStep = _legAngularAccelerationFeedforward.HipActiveThisStep;
+            _report.KneeAngularAccelerationFeedforwardActiveThisStep = _legAngularAccelerationFeedforward.KneeActiveThisStep;
+            _report.KneeAngularAccelerationFeedforwardSuppressionReason = _legAngularAccelerationFeedforward.KneeSuppressionReason;
+            _report.TraceHipFeedforwardActiveSteps = _legAngularAccelerationFeedforward.ActiveFixedSteps;
+            _report.TraceKneeFeedforwardActiveSteps = _legAngularAccelerationFeedforward.KneeActiveFixedSteps;
+            _report.TraceKneeHipGoalEligibleSteps = _legAngularAccelerationFeedforward.KneeGoalEligibleSteps;
+            _report.TraceKneeHipGoalNonzeroSelectedSteps = _legAngularAccelerationFeedforward.KneeGoalNonzeroSelectedSteps;
             _report.HipAngularAccelerationFeedforwardAppliedMagnitude = _legAngularAccelerationFeedforward.HipAppliedWorld.magnitude;
             _report.KneeAngularAccelerationFeedforwardAppliedSigned = _legAngularAccelerationFeedforward.KneeAppliedSigned;
             _report.HipAngularAccelerationFeedforwardClamped = _legAngularAccelerationFeedforward.HipClamped;
@@ -2956,7 +2989,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 bodyRelativeW = _pelvisBody.rotation * _fixedBodyHipRelativeAngularVelocityLocal;
             }
             Vector3 velocityError = targetRelativeW - bodyRelativeW;
-            Vector3 targetRelativeA = controlParentRotation * _sampledTargetHipRelativeAngularAccelerationLocal;
+            Vector3 targetRelativeA = _hipNormalReference.Current.Applied ? _hipNormalReference.Current.A :
+                controlParentRotation * _sampledTargetHipRelativeAngularAccelerationLocal;
 
             // v0.3.52 retirement: the v0.3.50-v0.3.51 Hip bandwidth/selective-swing route is closed.
             // Production now directly uses the frozen Hip55/12 contributions again; there is no runtime gain selector.
@@ -3059,6 +3093,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _upperBody.AddTorque(hipActuatorVector, ForceMode.Force);
             else
                 _upperBody.AddTorque(acceleration, ForceMode.Acceleration);
+            CaptureDynamicHipCommand(hipActuatorVector);
             CaptureLegTurnHip(inertialized, controlParentRotation, targetRelativeW,
                 relativeControlRaw, controlRaw, acceleration, effectiveHipMaxA, clamped);
         }
@@ -3167,7 +3202,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
             // v0.2.10-v0.2.11 pairwise reaction experiments remain retired: production actuator is CHILD_ONLY.
             _lowerBody.AddTorque(combinedAppliedWorld, ForceMode.Acceleration);
-            CaptureLegTurnKnee(targetRelativeW, relativeKneeAppliedWorld, combinedAppliedWorld);
+            CaptureLegTurnKnee(targetRelativeW, relativeKneeAppliedWorld, combinedAppliedWorld, raw, effectiveFeedforwardSigned, flexionAccel);
         }
 
         private float GetCurrentKneeOffAxisErrorDegrees()
@@ -3958,6 +3993,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _hipCompositeReferenceShockAbsorber.ResetDiagnostics(_report);
             _hipControlFrame.ResetDiagnostics();
             _legAngularAccelerationFeedforward.ResetDiagnostics();
+            _hipNormalReference.ResetTrace();
+            _report.HipNormalReferenceSummary = null;
             CopyLegAngularAccelerationFeedforwardToReport();
             CopyTraceStatsToReport();
         }
@@ -4012,6 +4049,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             int failures = 0;
             _driveEnabled = false; _dynamicParentActive = false;
+            _hipNormalReference.DisablePreserveTrace();
             try { _collidersEnabled = false; ApplyColliderState(); } catch { failures++; }
             if (!_upperSelfWeightTransfer.Quiesce(_upperBody)) failures++;
             _kneeCharacterJointResponseIsolation.CancelDeferredForce();
@@ -4181,6 +4219,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         private static Vector3 QuaternionToAngularVector(Quaternion q)
         {
+            if (!IsFinite(q)) return new Vector3(float.NaN, float.NaN, float.NaN);
             if (q.w < 0f)
             {
                 q.x = -q.x;
@@ -4188,15 +4227,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 q.z = -q.z;
                 q.w = -q.w;
             }
-            float w = Mathf.Clamp(q.w, -1f, 1f);
-            float angle = 2f * Mathf.Acos(w);
-            if (angle > Mathf.PI)
-                angle -= 2f * Mathf.PI;
-            float sinHalf = Mathf.Sqrt(Mathf.Max(0f, 1f - w * w));
-            if (sinHalf <= 0.0001f || Mathf.Abs(angle) <= 0.000001f)
-                return Vector3.zero;
-            Vector3 axis = new Vector3(q.x / sinHalf, q.y / sinHalf, q.z / sinHalf);
-            return axis * angle;
+            // atan2 preserves small rotations when round-off moves w to/above 1.
+            // The ratio is scale-invariant, so near-unit products need no acos/sqrt subtraction.
+            Vector3 v = new Vector3(q.x, q.y, q.z);
+            float length = v.magnitude;
+            return length > 0.00000001f ? v * (2f * Mathf.Atan2(length, q.w) / length) : Vector3.zero;
         }
 
         private static Vector3 ComputeAngularVelocity(Quaternion previous, Quaternion current, float dt)

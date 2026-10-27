@@ -27,16 +27,30 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal bool SelectFootRelativeReference(bool enabled) => !_driveEnabled && !_traceEnabled &&
             _footFoundation != null && _footFoundation.SelectRelativeReference(enabled);
         internal string FootRelativeReferenceStatus => _footFoundation?.RelativeReferenceStatus ?? "FOOT_REFERENCE_V04730=MISSING";
-        internal bool FreeSpaceSelectorsOff => !StanceContactLifecycleEnabled &&
-            FootContactShadowArm == FootQualifiedContactShadow.ArmA && !StanceLowerGroundAuthorityEnabled &&
-            !StanceFootNativeGravityEnabled && !StanceLowerNativeGravityEnabled &&
-            !StanceFootLowerReciprocalEnabled && !StanceLowerSelfWeightTransferEnabled && UpperSelfWeightOff &&
-            KneeSupportReactionOff && !StanceSupportAngularEnabled && !FootPositionSolverEnabled && !StancePlanarDampingEnabled;
+        internal FreeSpaceBoundaryIssue FreeSpaceSelectorIssue
+        {
+            get
+            {
+                if (!IsBuilt || _footFoundation == null) return FreeSpaceBoundaryIssue.MissingFoundation;
+                FreeSpaceBoundaryIssue foot = _footFoundation.FreeSpaceSelectorIssue;
+                if (foot != FreeSpaceBoundaryIssue.None) return foot;
+                if (_stanceLowerNativeGravity.Arm != LowerStanceNativeGravitySupportLoadIsolation.ArmA || !_stanceLowerNativeGravity.Finite)
+                    return FreeSpaceBoundaryIssue.LowerGravity;
+                if (_stanceFootLowerReciprocal.Arm != FootLowerSupportNormalReciprocalLoadTransferIsolation.ArmA || !_stanceFootLowerReciprocal.Finite)
+                    return FreeSpaceBoundaryIssue.ReciprocalLoad;
+                if (_stanceLowerSelfWeightTransfer.Arm != LowerSelfWeightSupportNormalLoadTransferIsolation.ArmA || !_stanceLowerSelfWeightTransfer.Finite)
+                    return FreeSpaceBoundaryIssue.LowerSelfWeight;
+                if (!UpperSelfWeightOff || !UpperSelfWeightFinite) return FreeSpaceBoundaryIssue.UpperSelfWeight;
+                if (!KneeSupportReactionOff || !KneeSupportReactionFinite) return FreeSpaceBoundaryIssue.KneeReaction;
+                return FreeSpaceBoundaryIssue.None;
+            }
+        }
+        internal bool FreeSpaceSelectorsOff => FreeSpaceSelectorIssue == FreeSpaceBoundaryIssue.None;
         internal bool FreeSpaceNativeReady => IsBuilt && !_gravityEnabled && !_collidersEnabled &&
             !_upperBody.useGravity && !_lowerBody.useGravity && !_upperCollider.enabled && !_lowerCollider.enabled &&
             _upperBody.isKinematic == !_driveEnabled && _lowerBody.isKinematic == !_driveEnabled &&
             _footFoundation != null && _footFoundation.FreeSpaceNativeState(_driveEnabled);
-        internal bool DynamicJoinFoundationReady => IsBuilt && !_driveEnabled && !_traceEnabled &&
+        internal bool DynamicJoinFoundationReady => !DynamicContactSelected && IsBuilt && !_driveEnabled && !_traceEnabled &&
             FrozenProductionStackReady && FootProductionBaselineReady && !KneeAxisCalibrationCollecting &&
             NativeBodiesSafeOff && FreeSpaceSelectorsOff && _hipJoint == null && _kneeJoint == null &&
             _upperObject.GetComponent<CharacterJoint>() == null && _lowerObject.GetComponent<CharacterJoint>() == null &&

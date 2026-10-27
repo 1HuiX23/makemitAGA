@@ -75,7 +75,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         internal bool Enabled => _enabled;
         internal bool Finite => _finite;
-        internal bool ContactActive => _state == StateActive;
 
         internal void SetEnabled(bool enabled, FootQualifiedContactShadow shadow, BoxCollider footCollider, FootAnkleFoundationReport report)
         {

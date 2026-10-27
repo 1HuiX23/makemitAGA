@@ -17,7 +17,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     /// v0.3.70 then proved the rare tail is COM-velocity/capture-authority limited while parent transport is correctly closing.
     /// v0.3.71 qualified a narrowly eligible MaxA60->80 capture reserve and v0.3.72 confirmed it again while translation stayed below ~15 mm. v0.3.73 promotes that unchanged law into production and adds only a read-only axial hard-envelope temporal-debt observer; the 30 mm translation gate and 45/40/30/total60 angular gate remain unchanged.
     /// </summary>
-    internal sealed class FootAnkleProxyFoundation
+    internal sealed partial class FootAnkleProxyFoundation
     {
         private const float TensorEpsilon = 0.000001f;
         private const float MassReadbackAbsoluteTolerance = 0.00005f;
@@ -339,7 +339,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _ankleConstraint.CopyToReport(_report);
                 _ankleTransport.CopyToReport(_report);
                 _report.Stage = "BUILD_COMPLETE";
-                _report.Detail = "V0378_FREE_SPACE_PRODUCTION;FOOT_DRIVE_SOURCE_RELATIVE_ANKLE_PD_FROZEN;CONSTRAINT_NO_CHARACTERJOINT+FOOT_COM_TRANSLATION_TETHER_FROZEN;LINEAR_TRANSPORT_MEASURED_LOWER_ANKLE_POINT_ACCELERATION_FF_FROZEN;ANGULAR_TRANSPORT_MEASURED_LOWER_A_PLUS_BOUNDED_COMMON_MODE_DRAG_COMPENSATION_PRODUCTION;FOOT_ANGULAR_DRAG_PROFILE_FROZEN;TARGET_A_FF_V0368_PERSISTENCE_CONDITIONED_FROZEN;V0373_CONDITIONAL_CAPTURE_AUTHORITY_PRODUCTION;V0377_CONFIRMATION_OBSERVER_RETIRED;HISTORICAL_FOOT_OBSERVERS_RETIRED;ONE_SHOT_SUPPORT_PLANE_HEIGHT_CALIBRATION;FOOTWEAR_STATE_UNRESOLVED;NO_CONTACT";
+                _report.Detail = "V0378_FREE_SPACE_PRODUCTION;FOOT_DRIVE_SOURCE_RELATIVE_ANKLE_PD_FROZEN;CONSTRAINT_NO_CHARACTERJOINT+FOOT_COM_TRANSLATION_TETHER_FROZEN;LINEAR_TRANSPORT_MEASURED_LOWER_ANKLE_POINT_ACCELERATION_FF_FROZEN;ANGULAR_TRANSPORT_MEASURED_LOWER_A_PLUS_BOUNDED_COMMON_MODE_DRAG_COMPENSATION_PRODUCTION;FOOT_ANGULAR_DRAG_PROFILE_FROZEN;TARGET_A_FF_V0368_PERSISTENCE_CONDITIONED_FROZEN;V0373_CONDITIONAL_CAPTURE_AUTHORITY_PRODUCTION;V0377_CONFIRMATION_OBSERVER_RETIRED;HISTORICAL_FOOT_OBSERVERS_RETIRED;ONE_SHOT_SUPPORT_PLANE_HEIGHT_CALIBRATION;FOOTWEAR_STATE_UNRESOLVED;CONTACT_SCOPE_SELECTED_BY_SESSION";
 
                 SampleSourcePose(new SourceStepContext(), 0, Time.unscaledTime, false);
                 FollowSourceKinematic();
@@ -939,10 +939,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             return finite;
         }
 
-        public void BeginTrace()
+        public void BeginTrace(PelvisRunScope scope = PelvisRunScope.DynamicLegFreeSpace)
         {
             _traceEnabled = true;
-            _turnEvents.Reset();
+            _turnEvents.Reset(scope);
             _relativeReference.ResetTrace();
             _report.TurnEventDetails = null;
             _footContactOffset.ResetTrace(_report);
@@ -985,7 +985,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _mechanicalReaction.ResetTrace(_report);
 
             _footAngularImpulseAttribution.ResetTrace(_report);
-            _rockingTetherCoupling.ResetTrace(_report);
+            _rockingTetherCoupling.ResetTrace(_report, scope);
             _supportEntityBoundary.ResetTrace(_report);
             _stanceSupportAngular.ResetTrace(_report);
             _footVelocitySolver.ResetTrace(_report);
@@ -1131,22 +1131,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             return _report.GetConsoleSummary();
         }
 
-        internal string GetSupportEntityBoundaryEvidence()
-        {
-            _supportEntityBoundary.CopyToReport(_report);
-            _ankleConstraint.GetStancePlanarDampingSummary(_report);
-            return "mode=" + _report.SupportEntityBoundaryMode + "/finite=" + _report.SupportEntityBoundaryFinite +
-                   "/ready=" + _report.SupportEntityBoundaryEvidenceReady + "/reason=" + (_report.SupportEntityBoundaryInvalidReason ?? "<none>") +
-                   " | " + _report.SupportEntityBoundaryTraceSummary + "\n" + _report.SupportEntityBoundaryRecentFrames;
-        }
 
-        internal string GetRockingTetherCouplingEvidence()
-        {
-            _rockingTetherCoupling.CopyToReport(_report);
-            return "mode=" + _report.RockingTetherCouplingMode + "/finite=" + _report.RockingTetherCouplingFinite +
-                   "/ready=" + _report.RockingTetherCouplingEvidenceReady + "/reason=" + (_report.RockingTetherCouplingInvalidReason ?? "<none>") +
-                   " | " + _report.RockingTetherCouplingTraceSummary + "\n" + _report.RockingTetherCouplingRecentFrames;
-        }
 
         public string GetSoleRequalificationStatus()
         {
@@ -1167,15 +1152,17 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         private void RefreshSoleRequalificationCurrent()
         {
-            if (!IsBuilt) return;
-            // Status is allowed before leg-drive/trace. In A (or inactive B) refresh the kinematic pose.
-            // Critical v0.3.60 rule retained from v0.3.57: querying status during active B must NEVER teleport the Dynamic Foot.
-            if (!_ankleDrive.DynamicActive)
-                FollowSourceKinematic();
-            Vector3 statusGroundEligibilityVelocity = _ankleDrive.DynamicActive && _body != null
-                ? _body.velocity
-                : _sampledFootLinearVelocityWorld;
-            _soleRequalification.Observe(
+            // Active control owns the sole/identity witness in ObserveFixed. A status query
+            // must not resample geometry or reset identity continuity between that command
+            // and the next solve; read the last completed physical-step result instead.
+            if (!IsBuilt || _ankleDrive.DynamicActive) return;
+            FollowSourceKinematic();
+            RefreshSoleRequalificationWitness(_sampledFootLinearVelocityWorld);
+        }
+
+        private bool RefreshSoleRequalificationWitness(Vector3 groundEligibilityVelocity)
+        {
+            bool valid = _soleRequalification.Observe(
                 false,
                 "STATUS",
                 _body,
@@ -1186,9 +1173,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _ownerRoot,
                 _bindSourceRelative,
                 _sampledSourceRelative,
-                statusGroundEligibilityVelocity,
+                groundEligibilityVelocity,
                 _report);
-            _contactIdentity.Observe(false, "STATUS", statusGroundEligibilityVelocity, Time.fixedDeltaTime, _report);
+            _contactIdentity.Observe(false, "STATUS", groundEligibilityVelocity, Time.fixedDeltaTime, _report);
+            return valid && _report.SoleRequalificationFinite && _report.ContactIdentityFinite;
         }
 
         public string GetContactIdentityStatus()
@@ -1198,24 +1186,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             return _contactIdentity.GetStatus(_report);
         }
 
-        public string GetContactShadowStatusText()
-        {
-            UpdateStaticState();
-            _mechanicalReaction.CopyToReport(_report);
 
-            return _contactShadow.GetStatus(_report);
-        }
 
-        public string GetMechanicalReactionStatusText()
-        {
-            UpdateStaticState();
-            return GetMechanicalReactionStatus();
-        }
-
-        public string GetAnkleDriveStatus()
-        {
-            return GetAnkleDrivePhysicalStatus() + " | v063=" + GetAnkleConstraintStatus() + " | v064=" + GetAnkleTransportStatus() + " | v078AngularTransport=" + GetAnkleAngularTransportStatus();
-        }
 
         public string GetAnkleDrivePhysicalStatus()
         {
@@ -1295,6 +1267,37 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                                                      Mathf.Abs(_body.angularDrag - _profile.AngularDrag) <= 0.0001f;
         public float FootAngularDrag => _body != null ? _body.angularDrag : _profile.AngularDrag;
         internal Rigidbody DynamicBody => _body;
+        internal FreeSpaceBoundaryIssue FreeSpaceSelectorIssue
+        {
+            get
+            {
+                if (!IsBuilt) return FreeSpaceBoundaryIssue.MissingFoundation;
+                if (_stanceContactLifecycle.Enabled || !_stanceContactLifecycle.Finite ||
+                    _contactShadow.Arm != FootQualifiedContactShadow.ArmA || _contactShadow.Active || !_contactShadow.Finite)
+                    return FreeSpaceBoundaryIssue.ContactAuthorization;
+                if (_stanceContactFrictionIsolation.Arm != FootStanceContactFrictionIsolation.ArmA || !_stanceContactFrictionIsolation.Finite)
+                    return FreeSpaceBoundaryIssue.Friction;
+                if (_stanceLowerGroundAuthority.Arm != FootStanceLowerGroundAnchorAuthority.ArmA || !_stanceLowerGroundAuthority.Finite)
+                    return FreeSpaceBoundaryIssue.GroundAuthority;
+                // V04171 B can alter the tether even with contact OFF. No-load scope must explicitly retain A.
+                if (_ankleConstraint.PredictiveTailCaptureArm != FootAnkleTranslationPredictiveTailCaptureIsolation.ArmA ||
+                    !_ankleConstraint.PredictiveTailCaptureFinite) return FreeSpaceBoundaryIssue.PredictiveCapture;
+                if (_stanceFootNativeGravity.Arm != FootStanceNativeGravitySupportLoadIsolation.ArmA || !_stanceFootNativeGravity.Finite)
+                    return FreeSpaceBoundaryIssue.FootGravity;
+                if (_footCollisionDetectionMode.Arm != FootCollisionDetectionModeIsolation.IdleArm || !_footCollisionDetectionMode.Finite)
+                    return FreeSpaceBoundaryIssue.CollisionMode;
+                if (_report.FootContactOffsetArm != FootContactOffsetIsolation.IdleArm || !_report.FootContactOffsetInitialized ||
+                    !_report.FootContactOffsetFinite || !_report.FootContactOffsetReadbackValid || !_report.FootContactOffsetBaselineRestored)
+                    return FreeSpaceBoundaryIssue.ContactOffset;
+                if (!_footVelocitySolver.Finite || !_footVelocitySolver.BaselineRestored ||
+                    _footVelocitySolver.PositionArm != FootSolverIterationBaselineContract.PositionArmA)
+                    return FreeSpaceBoundaryIssue.Solver;
+                if (_stanceSupportAngular.Arm != FootStanceSupportNormalAngularStabilization.ArmA || !_stanceSupportAngular.Finite)
+                    return FreeSpaceBoundaryIssue.SupportAngular;
+                if (_ankleConstraint.StancePlanarDampingEnabled) return FreeSpaceBoundaryIssue.PlanarDamping;
+                return FreeSpaceBoundaryIssue.None;
+            }
+        }
         internal bool FreeSpaceNativeState(bool dynamicExpected) => IsBuilt && _body.isKinematic == !dynamicExpected &&
             !_body.useGravity && _collider != null && !_collider.enabled && _ankleJoint == null &&
             IsFinite(_body.position) && IsFinite(_body.rotation) && IsFinite(_body.velocity) && IsFinite(_body.angularVelocity);
@@ -1325,7 +1328,18 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             }
         }
 
-        internal void RefreshSupportProbe() => RefreshSoleRequalificationCurrent();
+        // Explicit preparation, used before pinning the original floor AND after binding the
+        // owned Box. Legs may already have joined their dynamic parent, but no traced/contact
+        // solve may own these witnesses. This must not go through the read-only status path.
+        internal void RefreshSupportProbe()
+        {
+            if (!IsBuilt) return;
+            if (_traceEnabled || _body.useGravity || _collider.enabled || _contactShadow.Active)
+                throw new InvalidOperationException("SUPPORT_PROBE_REQUIRES_TRACE_GRAVITY_AND_CONTACT_OFF");
+            if (!_ankleDrive.DynamicActive) FollowSourceKinematic();
+            if (!RefreshSoleRequalificationWitness(_ankleDrive.DynamicActive ? _body.velocity : _sampledFootLinearVelocityWorld))
+                throw new InvalidOperationException("SUPPORT_PROBE_CURRENT_WITNESS_INVALID");
+        }
         internal void BindSupportSurface(FootSupportSurfaceIsolation surface)
         {
             _supportSurface = surface;
@@ -1472,13 +1486,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             UpdateStaticState();
         }
 
-        internal bool PrepareContactShadowArmB(Collider authorizedCollider, out string error)
-        {
-            bool ok = _contactShadow.PrepareArmB(_collider, authorizedCollider, _targetRoot, _report, out error);
-            UpdateStaticState();
-            return ok;
-        }
-
         internal bool EnablePreparedContactShadowArmB(out string error)
         {
             bool ok = _contactShadow.EnablePreparedArmB(_report, out error);
@@ -1558,31 +1565,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             return ok;
         }
 
-        internal string GetMechanicalReactionStatus()
-        {
-            UpdateStaticState();
-            _mechanicalReaction.CopyToReport(_report);
-
-            _footAngularImpulseAttribution.CopyToReport(_report);
-            _rockingTetherCoupling.CopyToReport(_report);
-            _supportEntityBoundary.CopyToReport(_report);
-            _ankleConstraint.GetStancePlanarDampingSummary(_report);
-            _stanceSupportAngular.CopyToReport(_report);
-            _footVelocitySolver.CopyToReport(_report);
-            return "mode=" + (_report.MechanicalReactionMode ?? "<none>") +
-                   "/finite=" + _report.MechanicalReactionFinite +
-                   "/reason=" + (_report.MechanicalReactionInvalidReason ?? "<none>") +
-                   " | current=" + (_report.MechanicalReactionCurrentSummary ?? "<none>") +
-                   " | trace=" + (_report.MechanicalReactionTraceSummary ?? "<none>") +
-                   " | v04250=" + (_report.FootAngularImpulseAttributionTraceSummary ?? "<none>");
-        }
-
         internal bool CaptureSupportStepEvidencePrePhysics(
             PhysicsStepContext step, int fixedSequence,
             bool selfWeightTransferApplied,
             float selfWeightFootLoadAcceleration,
             SingleLegChainReport legReport, Vector3 kneeAppliedAcceleration, string sourceMotionPhase,
-            PelvisParentFrame dynamicParent, LegTurnStepEvidence legTurnEvidence)
+            PelvisParentFrame dynamicParent, LegTurnStepEvidence legTurnEvidence, PelvisRunScope scope = PelvisRunScope.TorsoPairOnly)
         {
             if (!_report.RuntimeContext.Matches(step) || _report.FixedUpdateSequence != fixedSequence)
                 throw new InvalidOperationException("FOOT_PRE_SOLVE_CONTEXT_NOT_CURRENT");
@@ -1616,7 +1604,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _body, _lowerBody, _footAnkleAnchorLocal, _lowerAnkleAnchorLocal,
                 footGravityScheduled, selfWeightTransferApplied, selfWeightFootLoadAcceleration, _report);
             _rockingTetherCoupling.CaptureNormalLoadInputs(_traceEnabled, fixedSequence,
-                legReport, _lowerBody, kneeAppliedAcceleration, sourceMotionPhase, _report);
+                legReport, _lowerBody, kneeAppliedAcceleration, sourceMotionPhase, _report, scope, step, dynamicParent);
             _supportEntityBoundary.CapturePreSolve(_traceEnabled, fixedSequence,
                 exactAuthorizedStance && footGravityScheduled && selfWeightTransferApplied &&
                 _body != null && !_body.isKinematic && _stanceContactFrictionIsolation.ZeroFriction,

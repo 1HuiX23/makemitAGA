@@ -549,7 +549,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 "/last=" + Clean(_lastCallbackPhase) + ":" + _lastCallbackColliderId + ":" + Clean(_lastCallbackColliderPath) +
                 "/TRACE_CONTACT_SHADOW_QUALIFIED=" + traceQualified +
                 "/thresholds(rayMatch-callback)=" + MinRaycastMatchSamples + "-" + MinMatchedCallbacks +
-                "/gravity=False/mechanicalReaction=READ_DOWNSTREAM_V0430_SUPPORT_NORMAL_ONLY";
+                "/gravityReadback=STANCE_NATIVE_GRAVITY_OWNER/mechanicalReaction=READ_DOWNSTREAM_V0430_SUPPORT_NORMAL_ONLY";
         }
 
         internal string GetStatus(FootAnkleFoundationReport report)

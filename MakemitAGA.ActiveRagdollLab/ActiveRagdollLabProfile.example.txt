@@ -1,6 +1,6 @@
-# MakemitAGA Active Ragdoll Lab 0.4.2 - Mechanical Contact Causal Requalification
+# MakemitAGA Active Ragdoll Lab 0.4.89 - Dynamic Hip Wrench Input Audit
 # 保存后执行：arl_profile_reload
-# 当前主线：v0.4.7恢复raw native-gait reference；A=Foot Collider全程OFF，B=per-foot confirmed STANCE + current exact static support identity才允许该Foot接触，TRANSITION_TO_SWING/SWING立即释放。Gravity/GSP与全部hard gate不变，无新增profile键。
+# 当前主线：v0.4.89沿用arl_pelvis_upper_load_test(b)及88受载范围，仅增加只读Hip实际命令、COM/挂点力矩和候选功率审计；候选反力不执行，Torso重力、Hip反力和Foot-tether reciprocal关闭。其它入口保留原范围。
 # 本文件只保留仍由活动运行时消费的配置；历史实验参数与 A/B 细节请查长期版本记录或旧版本 ZIP。
 
 # --- 目标与 Two-Body 几何 ---

@@ -216,7 +216,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         // v0.4.4.1 read-only diagnostic taps. The sequence is latched at collision-callback time so a
         // subsequent CapturePrePhysics call cannot make a previous callback look like the current step.
         internal Vector3 LastImpulseWorld => _lastImpulse;
-        internal Vector3 LastObservedDeltaWWorld => _lastObservedDeltaW;
         internal Vector3 LastSupportNormalWorld => _lastSupportNormal;
         internal float LastSignedNormalImpulse => _lastSignedNormalImpulse;
         internal float LastTangentImpulse => _lastTangentImpulse;
@@ -891,7 +890,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 "/lastReadFail=" + Clean(_lastReadFailureStage) + ":" + Clean(_lastReadFailureType) +
                 "/TRACE_SUPPORT_NORMAL_REACTION_QUALIFIED=" + qualified +
                 "/thresholds(supportN-projection-impulse-relVel-response-nonZeroImpulse)=" + MinSupportNormalSamples + "-" + MinProjectionSamples + "-" + MinImpulseReadSamples + "-" + MinRelativeVelocityReadSamples + "-" + MinPrePhysicsResponseSamples + "-" + MinNonZeroImpulseSamples +
-                "/observerOnly=True/gravity=False/noForceWrite=True";
+                "/observerOnly=True/gravityReadback=STANCE_NATIVE_GRAVITY_OWNER/noForceWrite=True";
         }
 
         internal string GetStatus(FootAnkleFoundationReport report)

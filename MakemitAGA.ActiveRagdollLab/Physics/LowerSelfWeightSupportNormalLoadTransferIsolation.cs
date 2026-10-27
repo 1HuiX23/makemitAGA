@@ -128,7 +128,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
             if (!exactAuthorizedStance || !zeroFriction)
             {
-                if (_currentApplied) _nonStanceAppliedSamples++;
                 CopyToReport(report);
                 return true;
             }
@@ -151,15 +150,18 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 !IsFinite(transferForce) || !IsFinite(lowerSupportA) || !IsFinite(footLoadA))
                 return Invalidate("LOWER_SELF_WEIGHT_TRANSFER_ATTRIBUTION_NONFINITE", report);
 
-            _eligibleSamples++;
-            _expectedForceSum += expectedForce;
-            _expectedForceMax = Mathf.Max(_expectedForceMax, expectedForce);
-            _expectedImpulseSum += expectedImpulse;
-            _expectedImpulseMax = Mathf.Max(_expectedImpulseMax, expectedImpulse);
-            _lowerSupportAccelerationSum += lowerSupportA;
-            _lowerSupportAccelerationMax = Mathf.Max(_lowerSupportAccelerationMax, Mathf.Abs(lowerSupportA));
-            _footLoadAccelerationAbsSum += Mathf.Abs(footLoadA);
-            _footLoadAccelerationAbsMax = Mathf.Max(_footLoadAccelerationAbsMax, Mathf.Abs(footLoadA));
+            if (traceEnabled)
+            {
+                _eligibleSamples++;
+                _expectedForceSum += expectedForce;
+                _expectedForceMax = Mathf.Max(_expectedForceMax, expectedForce);
+                _expectedImpulseSum += expectedImpulse;
+                _expectedImpulseMax = Mathf.Max(_expectedImpulseMax, expectedImpulse);
+                _lowerSupportAccelerationSum += lowerSupportA;
+                _lowerSupportAccelerationMax = Mathf.Max(_lowerSupportAccelerationMax, Mathf.Abs(lowerSupportA));
+                _footLoadAccelerationAbsSum += Mathf.Abs(footLoadA);
+                _footLoadAccelerationAbsMax = Mathf.Max(_footLoadAccelerationAbsMax, Mathf.Abs(footLoadA));
+            }
 
             _currentExpectedForce = expectedForce;
             _currentExpectedImpulse = expectedImpulse;
@@ -188,9 +190,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
                 _currentApplied = true;
                 _currentFixed = fixedSequence;
-                _appliedSamples++;
-                if (_firstAppliedFixed == 0) _firstAppliedFixed = fixedSequence;
-                _lastAppliedFixed = fixedSequence;
+                if (traceEnabled)
+                {
+                    _appliedSamples++;
+                    if (_firstAppliedFixed == 0) _firstAppliedFixed = fixedSequence;
+                    _lastAppliedFixed = fixedSequence;
+                }
             }
 
             CopyToReport(report);

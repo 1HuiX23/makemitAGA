@@ -1,5 +1,6 @@
 using System;
 using MakemitAGA.ActiveRagdollLab.Model;
+using MakemitAGA.ActiveRagdollLab.Runtime;
 using UnityEngine;
 
 namespace MakemitAGA.ActiveRagdollLab.Physics
@@ -61,10 +62,19 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         internal bool Schedule(bool trace, int fixedSequence, bool stance, bool zeroFriction,
             Rigidbody upper, Rigidbody lower, Rigidbody foot, Vector3 normal, float dt,
-            SingleLegChainReport leg, FootAnkleFoundationReport footReport, Vector3 hipAppliedAcceleration)
+            SingleLegChainReport leg, FootAnkleFoundationReport footReport, Vector3 hipAppliedAcceleration,
+            PelvisRunScope scope = PelvisRunScope.TorsoPairOnly)
         {
             ClearCurrent(); Report.CurrentFixed = fixedSequence;
+            bool dynamicUpper = PelvisRunScopes.HasUpperWeight(scope);
+            if (dynamicUpper && (!SelectorContract(Report, ArmB, false) || !DynamicReciprocalOff(leg) ||
+                footReport == null || !leg.RuntimeContext.Valid || !footReport.RuntimeContext.Matches(leg.RuntimeContext) ||
+                leg.RuntimeContext.Dt != dt || leg.FixedUpdateSequence != fixedSequence ||
+                footReport.FootControllerLastCompletedFixedSequence != fixedSequence))
+                return Invalid("DYNAMIC_UPPER_SELECTOR_OR_RECIPROCAL_BOUNDARY_INVALID");
             if (!Report.Selected) return true;
+            if (PelvisRunScopes.IsContact(scope) && !dynamicUpper)
+                return Invalid("UPPER_LOAD_NOT_AUTHORIZED_IN_CONTACT_SCOPE");
             if (!Report.Finite) return false;
             if (trace) { Report.Samples++; if (!stance) Report.NonStance++; }
             if (upper == null || lower == null || foot == null || upper == lower || upper == foot || lower == foot ||
@@ -82,7 +92,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     leg.FixedUpdateSequence != fixedSequence ||
                     !leg.StanceLowerNativeGravityCurrentApplied || leg.StanceLowerNativeGravityCurrentScheduledFixed != fixedSequence ||
                     !leg.StanceLowerSelfWeightTransferCurrentApplied || leg.StanceLowerSelfWeightTransferCurrentFixed != fixedSequence ||
-                    !leg.StanceFootLowerReciprocalCurrentApplied || leg.StanceFootLowerReciprocalCurrentFixed != fixedSequence ||
+                    (!dynamicUpper && (!leg.StanceFootLowerReciprocalCurrentApplied || leg.StanceFootLowerReciprocalCurrentFixed != fixedSequence)) ||
                     footReport == null || !footReport.StanceFootNativeGravityCurrentApplied || footReport.StanceFootNativeGravityCurrentScheduledFixed != fixedSequence ||
                     !lower.useGravity || !foot.useGravity ||
                     !V(normal) || !F(normal.sqrMagnitude) || normal.sqrMagnitude <= 0.000001f)
@@ -232,6 +242,39 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         { try { body.AddForce(force, ForceMode.Force); } catch { Report.RollbackFailures++; } }
         private bool Invalid(string reason) { Report.Finite = false; Report.InvalidReason = Report.InvalidReason ?? reason; return false; }
         private void LedgerInvalid(string reason) { Report.LedgerFinite = false; Report.LedgerIssue = Report.LedgerIssue ?? reason; }
+        internal static bool DynamicReciprocalOff(SingleLegChainReport leg) => leg != null &&
+            leg.StanceFootLowerReciprocalArm == FootLowerSupportNormalReciprocalLoadTransferIsolation.ArmA &&
+            leg.StanceFootLowerReciprocalFinite && !leg.StanceFootLowerReciprocalEnabled &&
+            !leg.StanceFootLowerReciprocalCurrentApplied && leg.StanceFootLowerReciprocalCurrentFixed == 0;
+
+        internal static bool DynamicCommandMatches(UpperSelfWeightSupportReport r, SingleLegChainReport leg,
+            FootAnkleFoundationReport foot, int fixedSequence, bool loaded)
+        {
+            if (!SelectorContract(r, ArmB, false) || !DynamicReciprocalOff(leg) || foot == null ||
+                r.CurrentFixed != fixedSequence || r.CurrentEligible != loaded || r.CurrentApplied != loaded ||
+                r.GravityReadback != loaded || !V(r.CurrentUpperForce) || !V(r.CurrentLowerKneeForce) ||
+                !V(r.CurrentLowerAnkleForce) || !V(r.CurrentFootForce) || !V(r.CurrentGravity)) return false;
+            if (!loaded) return r.CurrentUpperForce == Vector3.zero && r.CurrentLowerKneeForce == Vector3.zero &&
+                r.CurrentLowerAnkleForce == Vector3.zero && r.CurrentFootForce == Vector3.zero && r.CurrentGravity == Vector3.zero;
+            KneeSupportNormalReactionReport knee = leg.KneeSupportReaction;
+            if (knee == null || !Mass(knee.CurrentUpperMass) || !Mass(leg.StanceLowerNativeGravityLowerMass) ||
+                !Mass(foot.StanceFootNativeGravityFootMass) || !V(knee.CurrentNormalWorld) ||
+                !V(leg.StanceLowerNativeGravityGravityWorld) || !V(foot.StanceFootNativeGravityGravityWorld) || !Mass(r.CurrentUpperMass) || !Mass(r.CurrentLowerMass) || !Mass(r.CurrentFootMass) ||
+                !V(r.CurrentNormal) || Mathf.Abs(r.CurrentNormal.sqrMagnitude - 1f) > 0.0001f ||
+                !F(r.CurrentExpectedImpulse) || r.CurrentExpectedImpulse <= 0f ||
+                Mathf.Abs(r.CurrentUpperMass - knee.CurrentUpperMass) > 0.0001f ||
+                Mathf.Abs(r.CurrentLowerMass - leg.StanceLowerNativeGravityLowerMass) > 0.0001f ||
+                Mathf.Abs(r.CurrentFootMass - foot.StanceFootNativeGravityFootMass) > 0.0001f ||
+                (r.CurrentNormal - knee.CurrentNormalWorld).magnitude > 0.0001f ||
+                (r.CurrentGravity - leg.StanceLowerNativeGravityGravityWorld).magnitude > 0.0001f ||
+                (r.CurrentGravity - foot.StanceFootNativeGravityGravityWorld).magnitude > 0.0001f) return false;
+            Vector3 force = -r.CurrentUpperMass * r.CurrentGravity;
+            return (r.CurrentUpperForce - force).magnitude <= 0.0001f &&
+                (r.CurrentLowerKneeForce + force).magnitude <= 0.0001f &&
+                (r.CurrentLowerAnkleForce - force).magnitude <= 0.0001f &&
+                (r.CurrentFootForce + force).magnitude <= 0.0001f;
+        }
+
         internal static bool SelectorContract(UpperSelfWeightSupportReport r, string arm, bool completed) =>
             r != null && r.Finite && r.Selected && IsExperimentArm(arm) && r.Arm == arm && r.Enabled == (arm == ArmB) &&
             r.ReadbackFailures == 0 && r.RollbackFailures == 0 && r.GravityReadback == r.CurrentApplied &&

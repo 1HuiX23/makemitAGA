@@ -5,7 +5,7 @@ using UnityEngine;
 namespace MakemitAGA.ActiveRagdollLab.Model
 {
     // V04460 reuses the Upper input ledger. No settled Pelvis momentum or native Hip reaction is inferred.
-    internal sealed class HipPelvisLoadPathReport
+    internal sealed partial class HipPelvisLoadPathReport
     {
         internal bool Selected, Collecting, Finite = true, ReceiverCaptured;
         internal string Issue;
@@ -27,6 +27,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
             internal float Dt;
             internal Vector3 PelvisCom, LeftUpperCom, RightUpperCom;
             internal Vector3 LeftHipJ, RightHipJ, LeftCommonJ, RightCommonJ, ComMirrorMomentJ;
+            internal HipCommandWrench LeftWrench, RightWrench;
         }
         internal sealed class Bucket
         {
@@ -59,11 +60,11 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         internal readonly Bucket Idle = new Bucket(), Motion = new Bucket();
         internal readonly InputFrame[] Ring = new InputFrame[12];
         internal int Next, Count;
-        internal bool EvidenceReady => Selected && Finite && ReceiverCaptured &&
+        internal bool EvidenceReady => (!DynamicMode || DynamicExposureReady) && Selected && Finite && ReceiverCaptured &&
             LeftLoaded >= 50 && RightLoaded >= 50 && LeftReleased >= 30 && RightReleased >= 30 &&
             Idle.Samples >= 50 && Motion.Samples >= 30;
 
-        internal string GetSummary() => "mode=READ_ONLY_HIP_PELVIS_LOAD_PATH_V04460/selected-collecting-finite=" +
+        internal string GetSummary() => DynamicMode ? GetDynamicSummary() : "mode=READ_ONLY_HIP_PELVIS_LOAD_PATH_V04460/selected-collecting-finite=" +
             Selected + "-" + Collecting + "-" + Finite + "/issue=" + (Issue ?? "<none>") +
             "/receiverCaptured=" + ReceiverCaptured + "/inputEvidenceReady=" + EvidenceReady +
             "/samples-leftLoaded-rightLoaded-leftReleased-rightReleased-both-neither=" + Samples + "-" + LeftLoaded + "-" + RightLoaded + "-" + LeftReleased + "-" + RightReleased + "-" + BothLoaded + "-" + NeitherLoaded +
@@ -77,6 +78,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
 
         internal string GetDetails()
         {
+            if (DynamicMode) return GetDynamicDetails();
             var sb = new StringBuilder(GetSummary());
             for (int k = 0; k < Count; k++)
             {

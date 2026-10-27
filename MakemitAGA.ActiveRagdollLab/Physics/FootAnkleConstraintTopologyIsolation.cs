@@ -80,7 +80,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private float _traceTotalAngleMax;
 
         internal string Arm => _armB ? ArmB : ArmA;
-        internal bool TetherArm => _armB;
         internal bool CharacterJointArm => !_armB;
         internal bool IsProductionSelectorArm => _armB;
         internal bool Finite => _finite;
@@ -102,10 +101,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             return _captureAuthority.GetStatus(report);
         }
 
-        internal string GetPredictiveTailCaptureStatus(FootAnkleFoundationReport report)
-        {
-            return _predictiveTailCapture.GetStatus(report);
-        }
 
         internal bool SetPredictiveTailCaptureArm(string arm, FootAnkleFoundationReport report, out string error)
         {

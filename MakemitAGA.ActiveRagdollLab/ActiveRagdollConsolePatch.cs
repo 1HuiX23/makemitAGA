@@ -6,8 +6,8 @@ using MakemitAGA.ActiveRagdollLab.Runtime;
 namespace MakemitAGA.ActiveRagdollLab
 {
     /// <summary>
-    /// V04640: dynamic-leg angular derivatives use the feedback parent basis.
-    /// The new free-space scope keeps contact/gravity/load transfer/Hip reaction OFF.
+    /// V04870: distinct Knee normal coupling scope; current commands share the existing session owners.
+    /// Free-space and the unloaded/Foot-only comparison scopes remain distinct.
     /// V04430/V04450 and contact damping remain available in the legacy loaded regression.
     /// V04210 self-weight transfer and all controller/hard-gate settings remain frozen. Joined load/angular/boundary evidence remains read-only;
     /// V04270 velocity stays original; V04310 position12 retains both captured originals for cleanup.
@@ -56,7 +56,7 @@ namespace MakemitAGA.ActiveRagdollLab
                 RunTestSetupBundle();
                 return true;
             }
-            if (IsBare(command, "arl_test_status") || IsBare(command, "arl_status"))
+            if (IsBare(command, "arl_test_status"))
             {
                 RunTestStatusBundle();
                 return true;
@@ -69,6 +69,51 @@ namespace MakemitAGA.ActiveRagdollLab
             if (IsBare(command, "arl_test_cleanup"))
             {
                 RunTestCleanupBundle();
+                return true;
+            }
+            if (IsBare(command, "arl_pelvis_upper_load_test"))
+            {
+                PrintGame(ActiveRagdollLabRuntime.StartPelvisUpperLoadTest()); return true;
+            }
+            if (TryParseCall(command, "arl_pelvis_upper_load_test", out string[] pelvisUpperLoadArgs))
+            {
+                PrintGame(pelvisUpperLoadArgs.Length == 1 ? ActiveRagdollLabRuntime.StartPelvisUpperLoadTest(pelvisUpperLoadArgs[0]) : ActiveRagdollLabRuntime.StartPelvisUpperLoadTest());
+                return true;
+            }
+            if (IsBare(command, "arl_pelvis_knee_test"))
+            {
+                PrintGame(ActiveRagdollLabRuntime.StartPelvisKneeTest()); return true;
+            }
+            if (TryParseCall(command, "arl_pelvis_knee_test", out string[] pelvisKneeArgs))
+            {
+                PrintGame(pelvisKneeArgs.Length == 1 ? ActiveRagdollLabRuntime.StartPelvisKneeTest(pelvisKneeArgs[0]) : ActiveRagdollLabRuntime.StartPelvisKneeTest());
+                return true;
+            }
+            if (IsBare(command, "arl_pelvis_lower_load_test"))
+            {
+                PrintGame(ActiveRagdollLabRuntime.StartPelvisLowerLoadTest()); return true;
+            }
+            if (TryParseCall(command, "arl_pelvis_lower_load_test", out string[] pelvisLowerLoadArgs))
+            {
+                PrintGame(pelvisLowerLoadArgs.Length == 1 ? ActiveRagdollLabRuntime.StartPelvisLowerLoadTest(pelvisLowerLoadArgs[0]) : ActiveRagdollLabRuntime.StartPelvisLowerLoadTest());
+                return true;
+            }
+            if (IsBare(command, "arl_pelvis_foot_load_test"))
+            {
+                PrintGame(ActiveRagdollLabRuntime.StartPelvisFootLoadTest()); return true;
+            }
+            if (TryParseCall(command, "arl_pelvis_foot_load_test", out string[] pelvisFootLoadArgs))
+            {
+                PrintGame(pelvisFootLoadArgs.Length == 1 ? ActiveRagdollLabRuntime.StartPelvisFootLoadTest(pelvisFootLoadArgs[0]) : ActiveRagdollLabRuntime.StartPelvisFootLoadTest());
+                return true;
+            }
+            if (IsBare(command, "arl_pelvis_contact_test"))
+            {
+                PrintGame(ActiveRagdollLabRuntime.StartPelvisContactTest()); return true;
+            }
+            if (TryParseCall(command, "arl_pelvis_contact_test", out string[] pelvisContactArgs))
+            {
+                PrintGame(pelvisContactArgs.Length == 1 ? ActiveRagdollLabRuntime.StartPelvisContactTest(pelvisContactArgs[0]) : ActiveRagdollLabRuntime.StartPelvisContactTest());
                 return true;
             }
             if (IsBare(command, "arl_pelvis_leg_test"))
@@ -89,10 +134,6 @@ namespace MakemitAGA.ActiveRagdollLab
                 PrintGame(pelvisTestArgs.Length == 1 ? ActiveRagdollLabRuntime.StartPelvisTest(pelvisTestArgs[0]) : ActiveRagdollLabRuntime.StartPelvisTest());
                 return true;
             }
-            if (IsBare(command, "arl_pelvis_test_stop"))
-            {
-                PrintGame(ActiveRagdollLabRuntime.StopPelvisTest()); return true;
-            }
             if (IsBare(command, "arl_ankle_test"))
             {
                 PrintGame(ActiveRagdollLabRuntime.StartAnkleTest());
@@ -109,12 +150,6 @@ namespace MakemitAGA.ActiveRagdollLab
                 }
                 else
                     PrintGame(ActiveRagdollLabRuntime.StartAnkleTest(ankleTestArgs[0]));
-                return true;
-            }
-            if (IsBare(command, "arl_ankle_test_stop"))
-            {
-                // Stop owns one complete immutable snapshot; do not immediately print it a second time.
-                PrintGame(ActiveRagdollLabRuntime.StopAnkleTest());
                 return true;
             }
             if (IsBare(command, "arl_profile_template"))
@@ -281,11 +316,6 @@ namespace MakemitAGA.ActiveRagdollLab
                 PrintGame(ActiveRagdollLabRuntime.ResetPose());
                 return true;
             }
-            if (IsBare(command, "arl_report"))
-            {
-                PrintGame(ActiveRagdollLabRuntime.WriteProxyReportAndGetSummary());
-                return true;
-            }
             if (IsBare(command, "arl_rollback"))
             {
                 PrintGame(ActiveRagdollLabRuntime.Rollback("console"));
@@ -333,7 +363,7 @@ namespace MakemitAGA.ActiveRagdollLab
             }
             PrintGame(torsoOnly
                 ? "<color=#9fe7ff><b>arl_pelvis_test_setup 完成</b></color>：仅创建Pelvis与Chest及两体CharacterJoint，无腿/足刚体或关节。双侧Hip源引用已解析；下一步arl_pelvis_test(b)，无需PCA/drive/Hip stack。"
-                : "<color=#9fe7ff><b>arl_test_setup 完成</b></color>：profile / audit / build / colliders OFF / gravity OFF / trace OFF 已一次执行。本轮先arl_drive(on)，双侧Knee PCA采集并apply，arl_hip_stack(on) READY后等待1秒，再arl_pelvis_leg_test(a或b)。0.4.76躯干恢复判据A/B，两臂足部一致参考、骨盆制动B及受力上限保持。");
+                : "<color=#9fe7ff><b>arl_test_setup 完成</b></color>：profile / audit / build / colliders OFF / gravity OFF / trace OFF 已一次执行。" + ActiveRagdollLabRuntime.StartPelvisKneeTest());
         }
 
         private static void RunTestStatusBundle(bool detailed = false)
@@ -390,11 +420,11 @@ namespace MakemitAGA.ActiveRagdollLab
 
         private static void PrintHelp()
         {
-            PrintGame("<b>MakemitAGA Active Ragdoll Lab v0.4.76</b>\n" +
-                "本轮：动态骨盆接入实际双腿与双足；无接触、无重力、无Hip反作用力。\n" +
-                "arl_test_setup / arl_pelvis_leg_test(a|b|stop) / arl_test_status / arl_test_cleanup\n" +
+            PrintGame("<b>MakemitAGA Active Ragdoll Lab v0.4.89</b>\n" +
+                "本轮：独立膝部法向耦合，保留Foot/Lower自重；Upper/Torso重力及Hip反力关闭。\n" +
+                "arl_test_setup / arl_pelvis_upper_load_test(b|stop) / arl_test_status / arl_test_cleanup\n" +
                 "arl_test_report（仅需重新展开完整诊断时使用）\n" +
-                ActiveRagdollLabRuntime.StartPelvisLegTest() + "\n\n" +
+                ActiveRagdollLabRuntime.StartPelvisKneeTest() + "\n小腿自重回归arl_pelvis_lower_load_test(b|stop)，Foot自重对照arl_pelvis_foot_load_test(b|stop)，无载荷接触对照arl_pelvis_contact_test(b|stop)，无接触对照arl_pelvis_leg_test(a|b|stop)。\n\n" +
                 "骨盆独立范围保留arl_pelvis_test_setup与arl_pelvis_test(b|stop)；两个会话互斥。\n" +
                 "arl_profile_template / arl_profile_reload / arl_profile_status\n" +
                 "arl_audit[(对象完整名称)] / arl_audit_report / arl_build[(对象完整名称)]\n" +
@@ -403,7 +433,7 @@ namespace MakemitAGA.ActiveRagdollLab
                 "arl_knee_axis_calibrate(on/off) / arl_knee_axis_status / arl_knee_axis_apply / arl_knee_axis_reset\n" +
                 "arl_hip_stack(on/off) / arl_hip_stack_status\n" +
                 "arl_bilateral_status / arl_foot_status / arl_knee_safety_status / arl_leg_freeze_status\n" +
-                "arl_reset_pose / arl_report / arl_rollback\n" +
+                "arl_reset_pose / arl_rollback\n" +
                 "任何自动停止立即收尾、保存完整日志；STARTED前的pending并非正式run。");
         }
 

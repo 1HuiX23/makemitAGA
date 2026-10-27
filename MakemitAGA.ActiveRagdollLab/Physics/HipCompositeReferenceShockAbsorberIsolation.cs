@@ -22,17 +22,26 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     /// governor, vector capture, radial floor, or any Rigidbody actuator. It reuses the frozen Source/Recovery 6/60 ->
     /// 8/80 W/A budgets. Thus the only causal variable is whether the FINAL composite Upper world reference itself is
     /// feasibility-limited before the unchanged Hip controller consumes it.
+    /// v0.4.81 also accepts a typed non-Source recovery request from a coherent normal command.
+    /// It continues the consumed world pose/W under the same recovery budget. The ArmA/B above
+    /// describe the original subsystem; both current dynamic test arms use this enabled subsystem.
     /// </summary>
     internal sealed class HipCompositeReferenceShockAbsorberIsolation
     {
         public const string ModeName = "HIP_COMPOSITE_WORLD_REFERENCE_SHOCK_ABSORPTION_CAUSAL_AB";
         public const string ArmA = "A_V071_LOCAL_ONLY_SOURCE_ABSORPTION";
         public const string ArmB = "B_V072_FINAL_COMPOSITE_WORLD_REFERENCE_ABSORBED";
+        internal const string NormalRecoveryHandoffMode = "NORMAL_TO_RECOVERY_WORLD_HANDOFF_V04810";
         private const float ContractTolerance = 0.02f;
 
         private bool _enabled;
         private bool _active;
         private bool _outputAppliedThisStep;
+        // V04810: this entry is owned by the previous coherent normal command,
+        // not by raw-error health or a new source event. Trace reset must not clear it.
+        private bool _normalRecoveryHandoff;
+        private bool _normalRecoveryStartedThisStep;
+        private int _normalRecoveryHandoffCount;
         private Quaternion _outputWorldPose = Quaternion.identity;
         private Vector3 _outputWorldW;
         private Quaternion _lastBypassWorldPose = Quaternion.identity;
@@ -81,6 +90,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         public bool Enabled => _enabled;
         public bool Active => _enabled && _active;
         public bool OutputAppliedThisStep => _enabled && _outputAppliedThisStep;
+        internal bool NormalRecoveryHandoffActive => _enabled && _active && _normalRecoveryHandoff;
+        internal bool NormalRecoveryStartedThisStep => _enabled && _normalRecoveryStartedThisStep;
         public string Arm => _enabled ? ArmB : ArmA;
         public Quaternion OutputWorldPose => _outputWorldPose;
         public Vector3 OutputWorldAngularVelocity => _outputWorldW;
@@ -94,6 +105,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             currentInputWorldPose = Finite(currentInputWorldPose) ? Normalize(currentInputWorldPose) : Quaternion.identity;
             currentInputWorldW = Finite(currentInputWorldW) ? currentInputWorldW : Vector3.zero;
             _active = false;
+            _normalRecoveryHandoff = _normalRecoveryStartedThisStep = false;
             _outputAppliedThisStep = false;
             _releaseStableSeconds = 0f;
             _outputWorldPose = currentInputWorldPose;
@@ -112,6 +124,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             currentInputWorldPose = Finite(currentInputWorldPose) ? Normalize(currentInputWorldPose) : Quaternion.identity;
             currentInputWorldW = Finite(currentInputWorldW) ? currentInputWorldW : Vector3.zero;
             _active = false;
+            _normalRecoveryHandoff = _normalRecoveryStartedThisStep = false;
             _outputAppliedThisStep = false;
             _releaseStableSeconds = 0f;
             _outputWorldPose = currentInputWorldPose;
@@ -129,6 +142,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             _fixedSteps = _sourceSteps = _recoverySteps = 0;
             _activationCount = _releaseCount = 0;
+            _normalRecoveryHandoffCount = 0;
             _speedLimitedSteps = _accelerationLimitedSteps = _inheritedOverSpeedSteps = _inputSpikeSteps = 0;
             _currentInputGapDegrees = _currentInputStepDegrees = 0f;
             _currentInputAngularSpeed = _currentInputAngularAcceleration = 0f;
@@ -154,9 +168,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             Quaternion inputWorldPose,
             Vector3 inputWorldAngularVelocity,
             float fixedDeltaTime,
-            SingleLegChainReport report)
+            SingleLegChainReport report,
+            bool normalRecoveryRequested = false)
         {
             _outputAppliedThisStep = false;
+            _normalRecoveryStartedThisStep = false;
             if (profile == null || !Finite(inputWorldPose) || !Finite(inputWorldAngularVelocity) ||
                 !Finite(fixedDeltaTime) || fixedDeltaTime <= 0.0001f)
             {
@@ -167,13 +183,15 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             }
 
             inputWorldPose = Normalize(inputWorldPose);
-            _currentUpstreamReferenceActive = upstreamReferenceActive;
+            bool holdRecovery = upstreamReferenceActive || normalRecoveryRequested;
+            _currentUpstreamReferenceActive = holdRecovery; // Diagnostic copy, never a control input.
             _fixedSteps++;
             ObserveInputDynamics(inputWorldPose, inputWorldAngularVelocity, fixedDeltaTime);
 
             if (!_enabled)
             {
                 _active = false;
+                _normalRecoveryHandoff = false;
                 _releaseStableSeconds = 0f;
                 _outputWorldPose = inputWorldPose;
                 _outputWorldW = inputWorldAngularVelocity;
@@ -185,8 +203,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 return;
             }
 
-            if (!_active && !sourceActive)
+            if (!_active && !sourceActive && !normalRecoveryRequested)
             {
+                _normalRecoveryHandoff = false;
                 _outputWorldPose = inputWorldPose;
                 _outputWorldW = inputWorldAngularVelocity;
                 _lastBypassWorldPose = inputWorldPose;
@@ -198,9 +217,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 return;
             }
 
-            if (!_active && sourceActive)
+            if (!_active && (sourceActive || normalRecoveryRequested))
             {
                 _active = true;
+                _normalRecoveryHandoff = !sourceActive && normalRecoveryRequested;
+                _normalRecoveryStartedThisStep = _normalRecoveryHandoff;
+                if (_normalRecoveryHandoff) _normalRecoveryHandoffCount++;
                 _activationCount++;
                 _releaseStableSeconds = 0f;
                 if (_hasBypassState)
@@ -274,7 +296,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 float wGap = (_outputWorldW - inputWorldAngularVelocity).magnitude;
                 float releasePoseThreshold = Mathf.Min(profile.LegHipControlFrameRecoveryExitAngleDegrees, 0.01f);
                 float releaseWThreshold = Mathf.Min(profile.LegHipControlFrameRecoveryExitAngularSpeed, maxA * fixedDeltaTime);
-                bool releaseCandidate = !upstreamReferenceActive &&
+                bool releaseCandidate = !holdRecovery &&
                                         _currentInputGapDegrees <= releasePoseThreshold &&
                                         wGap <= releaseWThreshold;
                 if (releaseCandidate) _releaseStableSeconds += fixedDeltaTime;
@@ -283,6 +305,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 if (_releaseStableSeconds >= profile.LegHipControlFrameRecoveryStableHoldSeconds)
                 {
                     _active = false;
+                    _normalRecoveryHandoff = false;
                     _releaseCount++;
                     _releaseStableSeconds = 0f;
                     _lastBypassWorldPose = _outputWorldPose;
@@ -300,9 +323,18 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 "/outputW=" + F(_currentOutputAngularSpeed) + "/" + F(maxW) +
                 "/outputA=" + F(_currentOutputAngularAcceleration) + "/" + F(maxA) +
                 "/localCompDeg=" + F(_currentLocalCompensationDegrees) +
-                "/upstreamActive=" + upstreamReferenceActive +
+                "/upstreamActive=" + holdRecovery +
                 "/releaseHold=" + F(_releaseStableSeconds);
             CopyToReport(report);
+        }
+
+        internal bool RecordAppliedNormalGoal(Quaternion worldR, Vector3 worldW)
+        {
+            if (!_enabled || _active || _outputAppliedThisStep || !Finite(worldR) || !Finite(worldW)) return false;
+            _lastBypassWorldPose = _outputWorldPose = Normalize(worldR);
+            _lastBypassWorldW = _outputWorldW = worldW;
+            _hasBypassState = true;
+            return true;
         }
 
         public void CaptureLocalCompensation(Quaternion originalLocalTarget, Quaternion effectiveLocalTarget, SingleLegChainReport report)
@@ -348,7 +380,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             string primary;
             if (!_enabled) primary = "A_V071_LOCAL_ONLY_COMPOSITE_BASELINE";
-            else if (_fixedSteps <= 0 || _sourceSteps <= 0) primary = "B_COMPOSITE_ABSORBER_INSUFFICIENT_SOURCE_EXPOSURE";
+            else if (_fixedSteps <= 0 || (_sourceSteps <= 0 && _normalRecoveryHandoffCount <= 0)) primary = "B_COMPOSITE_ABSORBER_INSUFFICIENT_SOURCE_OR_NORMAL_HANDOFF_EXPOSURE";
             else if (!_speedContractSatisfied || !_accelerationContractSatisfied) primary = "B_COMPOSITE_ABSORBER_CONTRACT_BROKEN";
             else if (_inputSpikeSteps > 0) primary = "B_FINAL_COMPOSITE_REFERENCE_FEASIBILITY_LIMITED";
             else primary = "B_COMPOSITE_ABSORBER_ACTIVE_NO_OVER_BUDGET_INPUT_SPIKE";
@@ -360,6 +392,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 " | active=" + Active +
                 " | steps(total/source/recovery)=" + _fixedSteps + "/" + _sourceSteps + "/" + _recoverySteps +
                 " | lifecycle(activate/release)=" + _activationCount + "/" + _releaseCount +
+                " | normalRecoveryHandoff_V04810(starts/active)=" + _normalRecoveryHandoffCount + "/" + NormalRecoveryHandoffActive +
                 " | limiting(speed/A/inheritedOverW/inputSpike)=" + _speedLimitedSteps + "/" + _accelerationLimitedSteps + "/" + _inheritedOverSpeedSteps + "/" + _inputSpikeSteps +
                 " | peak(inputGap/inputStep/inputW/inputA)=" + F(_peakInputGapDegrees) + "/" + F(_peakInputStepDegrees) + "/" + F(_peakInputAngularSpeed) + "/" + F(_peakInputAngularAcceleration) +
                 " | peak(outputStep/outputW/outputA/Aratio/localComp)=" + F(_peakOutputStepDegrees) + "/" + F(_peakOutputAngularSpeed) + "/" + F(_peakOutputAngularAcceleration) + "/" + F(_peakOutputAccelerationRatio) + "/" + F(_peakLocalCompensationDegrees) +

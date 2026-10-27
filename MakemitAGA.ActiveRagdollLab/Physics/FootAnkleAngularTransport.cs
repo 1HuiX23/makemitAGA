@@ -86,10 +86,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal bool CurrentWarmup => _currentWarmup;
         internal bool CurrentAccelerationClamp => _currentAccelerationClamp;
         internal bool CurrentTorqueClamp => _currentTorqueClamp;
-        internal Vector3 CurrentLowerAngularVelocityWorld => _currentLowerAngularVelocityWorld;
         internal Vector3 CurrentMeasuredLowerAngularAccelerationWorld => _currentMeasuredLowerAngularAccelerationWorld;
         internal Vector3 CurrentRequestedAngularAccelerationWorld => _currentRequestedAngularAccelerationWorld;
-        internal Vector3 CurrentAppliedAngularAccelerationWorld => _currentAppliedAngularAccelerationWorld;
         internal Vector3 CurrentTorqueWorld => _currentTorqueWorld;
 
         internal bool Step(

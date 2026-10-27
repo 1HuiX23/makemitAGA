@@ -372,7 +372,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _characterJointPelvisAnchorLocal = _characterJoint.connectedAnchor;
             }
             _characterJointAnchorModeValidated = ok && ValidateConfiguredCharacterJointAnchors();
-            _report.UseDynamicTorsoRecovery = ok && arm == PelvisDynamicReceiverIsolation.DynamicLegArmB;
+            _report.UseDynamicTorsoRecovery = ok && PelvisDynamicReceiverIsolation.IsDynamicLegArm(arm);
+            _report.HipGoalGateOnlyHip = _report.UseDynamicTorsoRecovery;
+            _report.UseCoherentHipNormalReference = _report.UseDynamicTorsoRecovery;
+            _report.HipNormalSampleAgePrediction = _report.UseCoherentHipNormalReference && arm == PelvisDynamicReceiverIsolation.DynamicLegArmA;
             UpdateReport("receiver-selected");
             return "ARL pelvis receiver | success=" + ok + " | " + _pelvisReceiver.Report.GetSummary();
         }

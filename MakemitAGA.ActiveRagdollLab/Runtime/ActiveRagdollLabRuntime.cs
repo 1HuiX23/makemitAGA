@@ -31,7 +31,9 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
         private static int _sceneHandle;
         private static bool _shutdown;
         private static PelvisTestCoordinator _pelvisTest;
-        private static bool _pelvisWithLegs;
+        private static PelvisRunScope _pelvisScope;
+        private static bool _pelvisWithLegs => _pelvisScope != PelvisRunScope.TorsoPairOnly;
+        private static bool _pelvisWithContact => PelvisRunScopes.IsContact(_pelvisScope);
         private static RuntimeStepClock _stepClock = new RuntimeStepClock();
         private static bool _cleanupPending;
         private static string _runtimeStage = "IDLE";
@@ -74,7 +76,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             _pelvisTest = new PelvisTestCoordinator(new PelvisRunPort());
             _stepClock = new RuntimeStepClock(); _cleanupPending = false; _runtimeStage = "IDLE";
             _ankleTest = new AnkleTestCoordinator(new AnkleRunPort());
-            _lastTestScope = "PELVIS"; _pelvisWithLegs = false;
+            _lastTestScope = "PELVIS"; _pelvisScope = PelvisRunScope.TorsoPairOnly;
             _deferredCompletedOutput = null;
             _automaticStop = new AutomaticStopNotice();
             LastRollbackSucceeded = true;
@@ -156,7 +158,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
                 _runtimeStage = "SESSION_READINESS";
                 _pelvisTest.OnFixed(_stepClock.LastFixed);
                 _runtimeStage = "FIXED_COMPLETE";
-                return; // One session owns either the torso-only baseline or the staged free-space leg join.
+                return; // One typed session owns torso-only, dynamic free-space, or unloaded stance contact.
             }
 
             if (AnkleTestActive)
@@ -1189,17 +1191,27 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
         private static string Fmm(float meters) => (meters * 1000f).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
 
         public static string StartPelvisTest() => PelvisTestCoordinator.TestInstructions;
-        public static string StartPelvisTest(string requestedArm) => StartPelvisRun(requestedArm, false);
-        public static string StartPelvisLegTest() => "ARL v0.4.76 动态腿足：完成arl_test_setup、PCA/apply、hip_stack后执行arl_pelvis_leg_test(a或b)。A沿用旧躯干恢复资格，B使用当前受控骨盆/胸腔误差及原生连接点恢复资格，并在髋部目标缓冲时关闭原始动画加速度前馈；两臂足部均使用一致受限参考，骨盆均保持制动B，受力上限不变。自动[STARTED]后计时；结束stop、arl_test_cleanup、arl_test_status各一次。";
-        public static string StartPelvisLegTest(string requestedArm) => StartPelvisRun(requestedArm, true);
-        private static string StartPelvisRun(string requestedArm, bool withLegs)
+        public static string StartPelvisTest(string requestedArm) => StartPelvisRun(requestedArm, PelvisRunScope.TorsoPairOnly);
+        public static string StartPelvisLegTest() => "ARL v0.4.89 无接触回归：完成arl_test_setup、arl_drive(on)、双侧Knee PCA采集/停止ready/apply、arl_hip_stack(on) READY后等待1秒，执行arl_pelvis_leg_test(a|b)。A保留采样年龄外推，B关闭；两者均无接触/重力/载荷/Hip反力。无载荷接触对照用arl_pelvis_contact_test；足部自重对照用arl_pelvis_foot_load_test，小腿自重回归用arl_pelvis_lower_load_test，膝部耦合回归用arl_pelvis_knee_test，当前大腿自重用arl_pelvis_upper_load_test。自动[STARTED]后计时，结束本入口stop、arl_test_cleanup、arl_test_status各一次。";
+        public static string StartPelvisLegTest(string requestedArm) => StartPelvisRun(requestedArm, PelvisRunScope.DynamicLegFreeSpace);
+        public static string StartPelvisContactTest() => "ARL v0.4.89 动态无载荷接触：arl_test_setup → arl_drive(on) → 双侧Knee PCA采集/停止确认ready/apply → arl_hip_stack(on)，双侧READY后静止等待1秒 → arl_pelvis_contact_test(b)。本入口固定B普通参考、厚静态Box、exact-STANCE、零摩擦、Speculative/20mm/position12，全部重力、自重、reciprocal、Knee反力与Hip反力OFF。看到[STARTED]且scope=DYNAMIC_PELVIS_LEGS_UNLOADED_CONTACT后，静止40秒→同房自然行走转身40秒→静止20秒。结束arl_pelvis_contact_test(stop)、arl_test_cleanup、arl_test_status各一次；自动停止或启动拒绝后只cleanup/status，不继续开drive。";
+        public static string StartPelvisContactTest(string requestedArm) => StartPelvisRun(requestedArm, PelvisRunScope.DynamicLegUnloadedContact);
+        public static string StartPelvisFootLoadTest() => "ARL v0.4.89 足部自重接触：arl_test_setup → arl_drive(on) → 双侧Knee PCA采集/停止确认ready/apply → arl_hip_stack(on)，双侧READY后静止等待1秒 → arl_pelvis_foot_load_test(b)。固定B普通参考、厚静态Box、exact-STANCE、零摩擦、Speculative/20mm/position12；仅Foot由既有模块在授权支撑物理步开启native gravity，沿用游戏Physics.gravity，Lower/Upper/Torso重力、上游自重传递、reciprocal、Knee/Hip反力OFF。看到[STARTED]且scope=DYNAMIC_PELVIS_LEGS_FOOT_SELF_WEIGHT_CONTACT后，静止40秒→同房自然行走转身40秒→静止20秒。结束arl_pelvis_foot_load_test(stop)、arl_test_cleanup、arl_test_status各一次；自动停止或启动拒绝后只cleanup/status，不继续开drive。无载荷接触对照仍用arl_pelvis_contact_test(b)。";
+        public static string StartPelvisFootLoadTest(string requestedArm) => StartPelvisRun(requestedArm, PelvisRunScope.DynamicLegFootSelfWeightContact);
+        public static string StartPelvisLowerLoadTest() => "ARL v0.4.89 小腿自重接触：arl_test_setup → arl_drive(on) → 双侧Knee PCA采集/停止确认ready/apply → arl_hip_stack(on)，双侧READY后静止等待1秒 → arl_pelvis_lower_load_test(b)。本范围保留86的Foot/Lower重力、自重法向力对、B参考及同拍只读收支审计，reciprocal OFF按实际零记账，限定同房水平Box；Upper/Torso重力、Foot-tether reciprocal、Knee/Hip反力、Lower-ground authority与支撑角阻尼仍OFF，V04171 A。看到[STARTED]、testArm=B_V04860_DYNAMIC_LOWER_SELF_WEIGHT_LEDGER_AUDIT且scope=DYNAMIC_PELVIS_LEGS_LOWER_SELF_WEIGHT_CONTACT后，静止40秒→同房自然行走转身40秒→静止20秒。结束arl_pelvis_lower_load_test(stop)、arl_test_cleanup、arl_test_status各一次；自动停止或启动拒绝后只cleanup/status，不继续开drive。Foot-only对照仍用arl_pelvis_foot_load_test(b)。";
+        public static string StartPelvisLowerLoadTest(string requestedArm) => StartPelvisRun(requestedArm, PelvisRunScope.DynamicLegLowerSelfWeightContact);
+        public static string StartPelvisUpperLoadTest() => "ARL v0.4.89 大腿自重与只读Hip wrench审计：arl_test_setup → arl_drive(on) → 双侧Knee PCA采集/停止ready/apply → arl_hip_stack(on)，双侧READY后静止1秒 → arl_pelvis_upper_load_test(b)。[STARTED]且B_V04880_DYNAMIC_UPPER_SELF_WEIGHT后静止40秒→同房水平地面自然行走转身40秒→静止20秒。沿用88 Upper支撑重力和两级COM自重传递，本版只新增同拍Hip命令/作用点/功率审计；骨盆候选反力不执行，Hip反力、Torso重力、Foot-tether reciprocal仍OFF。正常结束本入口stop、arl_test_cleanup、arl_test_status各一次；拒绝/自动停止后只cleanup/status。";
+        public static string StartPelvisUpperLoadTest(string requestedArm) => StartPelvisRun(requestedArm, PelvisRunScope.DynamicLegUpperSelfWeightContact);
+        public static string StartPelvisKneeTest() => "ARL v0.4.89 膝部法向耦合：arl_test_setup → arl_drive(on) → 双侧Knee PCA采集/停止确认ready/apply → arl_hip_stack(on)，双侧READY后静止等待1秒 → arl_pelvis_knee_test(b)。保留86 Foot/Lower自重组合，仅新增既有V04430 B膝部约化质量法向PD和对应Upper反力；Upper/Torso重力、Foot-tether reciprocal、Hip反力、Lower-ground authority、支撑角阻尼及planar damping OFF，V04171 A，控制上限与硬门不变。看到[STARTED]、testArm=B_V04870_DYNAMIC_KNEE_NORMAL_COUPLING且scope=DYNAMIC_PELVIS_LEGS_KNEE_NORMAL_COUPLING_CONTACT后，静止40秒→同房水平地面自然行走转身40秒→静止20秒。结束arl_pelvis_knee_test(stop)、arl_test_cleanup、arl_test_status各一次；自动停止或启动拒绝后只cleanup/status，不继续开drive。小腿自重回归仍用arl_pelvis_lower_load_test(b)，不要手动切换重力或反力选择器。";
+        public static string StartPelvisKneeTest(string requestedArm) => StartPelvisRun(requestedArm, PelvisRunScope.DynamicLegKneeNormalCouplingContact);
+        private static string StartPelvisRun(string requestedArm, PelvisRunScope scope)
         {
             if (string.Equals(requestedArm, "stop", StringComparison.OrdinalIgnoreCase)) return StopPelvisTest();
-            if (PelvisTestActive && _pelvisWithLegs != withLegs) return "ARL pelvis | started=False | reason=OTHER_PELVIS_SCOPE_ACTIVE";
+            if (PelvisTestActive && _pelvisScope != scope) return "ARL pelvis | started=False | reason=OTHER_PELVIS_SCOPE_ACTIVE";
             if (AnkleTestActive) return "ARL pelvis | started=False | reason=ANKLE_TEST_ACTIVE";
-            if (PelvisRunPort.ResolveRequestedArm(requestedArm, withLegs) == null)
-                return "ARL pelvis | started=False | reason=INVALID_ARM | " + (withLegs ? StartPelvisLegTest() : StartPelvisTest());
-            _pelvisWithLegs = withLegs; _lastTestScope = "PELVIS";
+            if (PelvisRunPort.ResolveRequestedArm(requestedArm, scope) == null)
+                return "ARL pelvis | started=False | reason=INVALID_ARM | " + (PelvisRunScopes.HasUpperWeight(scope) ? StartPelvisUpperLoadTest() : PelvisRunScopes.HasKneeCoupling(scope) ? StartPelvisKneeTest() : scope == PelvisRunScope.DynamicLegLowerSelfWeightContact ? StartPelvisLowerLoadTest() : scope == PelvisRunScope.DynamicLegFootSelfWeightContact ? StartPelvisFootLoadTest() : scope == PelvisRunScope.DynamicLegUnloadedContact ? StartPelvisContactTest() : scope == PelvisRunScope.DynamicLegFreeSpace ? StartPelvisLegTest() : StartPelvisTest());
+            _pelvisScope = scope; _lastTestScope = "PELVIS";
             return _pelvisTest.Start(requestedArm);
         }
         public static string StopPelvisTest() => StopPelvisTest("USER_STOP");
@@ -1207,10 +1219,12 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
 
         private static bool RestorePelvisTestSafeState(StringBuilder evidence)
         {
+            bool contactRestored = true;
             if (_legChain != null)
             {
                 if (_legChain.TraceEnabled) TryAnkleCleanup("DEFENSIVE_LEG_TRACE_OFF", () => _legChain.SetTrace(false), evidence);
                 if (!_legChain.NativeBodiesSafeOff) TryAnkleCleanup("DEFENSIVE_LEG_DRIVE_OFF", () => _legChain.SetDrive(false), evidence);
+                if (_pelvisWithContact || _legChain.DynamicContactSelected) contactRestored = _legChain.RestoreDynamicContact(evidence);
                 if (_legChain.KneeAxisCalibrationCollecting) TryAnkleCleanup("DEFENSIVE_PCA_OFF", () => _legChain.SetKneeAxisCalibration(false), evidence);
                 TryAnkleCleanup("FOOT_REFERENCE_BASELINE_RESTORE", () => _legChain.RestoreFootRelativeReferenceBaseline(), evidence);
             }
@@ -1220,15 +1234,16 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
                 TryAnkleCleanup("RECEIVER_QUIESCE", () => _proxy.QuiescePelvisReceiverPreserveTrace(), evidence);
                 TryAnkleCleanup("RECEIVER_BASELINE_RESTORE", () => _proxy.SetPelvisReceiver(PelvisDynamicReceiverIsolation.IdleArm), evidence);
             }
-            bool safe = _proxy != null && _proxy.PelvisReceiverSafeOff && (_legChain == null || (_legChain.NativeBodiesSafeOff &&
-                !_legChain.TraceEnabled && _legChain.FootRelativeReferenceMatches(false)));
+            bool safe = contactRestored && _proxy != null && _proxy.PelvisReceiverSafeOff && (_legChain == null || (_legChain.NativeBodiesSafeOff &&
+                !_legChain.TraceEnabled && _legChain.FreeSpaceReady && _legChain.FootRelativeReferenceMatches(false)));
             evidence.AppendLine("torsoSafeOffAndBaselineRestored=" + safe + " | legsNativeSafeOff=" + (_legChain == null || _legChain.NativeBodiesSafeOff));
             if (!safe) evidence.AppendLine("UNSAFE_RECEIVER_FULL_ROLLBACK | " + RollbackInternal("RECEIVER_RESTORE_NOT_SAFE"));
             return safe;
         }
 
         public static string GetPelvisTestStatus(bool detailed = true) => _pelvisTest.Status(detailed) + "\nruntimeStage=" + _runtimeStage +
-            "/cleanupPending=" + _cleanupPending + "/clockScope=TORSO_LEG_FOOT_SHARED_CONTEXT";
+            "/cleanupPending=" + _cleanupPending + "/clockScope=TORSO_LEG_FOOT_SHARED_CONTEXT" +
+            (_pelvisWithLegs && _legChain != null ? "\n" + (_pelvisWithContact && PelvisTestActive ? _legChain.DynamicContactBoundarySummary() : _legChain.FreeSpaceBoundarySummary()) : "");
 
         public static string StartAnkleTest() => AnkleTestCoordinator.TestInstructions;
         public static string StartAnkleTest(string requestedArm)
@@ -1333,7 +1348,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             // Keep the low-level switch for future feet/contact work, but fail closed while the active leg drive
             // depends on the frozen v0.2.122 contract.
             if (enabled && ((_proxy != null && _proxy.DriveEnabled) || (_legChain != null && _legChain.AnyDriveEnabled)))
-                return "ARL gravity：拒绝开启。v0.4.46只允许内部冻结的V04180/V04190在exact STANCE开启Foot/Lower gravity，V04200与V04210都固定B/ON；CCD固定ContinuousSpeculative，Foot接触裕量固定20mm，支撑面固定V04410静态Box，V04430 B膝部双体法向PD固定，两组仅对照V04450大腿自重OFF/逐级传递ON，V04260角阻尼B保持，V04290只读观测，V04310位置12、速度保持原值；通用arl_gravity(on)仍会同时影响torso/leg边界，因此drive活动时禁止。请先停止torso/leg drive。";
+                return "ARL gravity：拒绝开启。活动驱动的通用torso/leg gravity必须保持OFF；旧ankle承重仅由其内部exact-STANCE owner授权。请先停止当前测试或torso/leg drive。";
             string torso = _proxy.SetGravity(enabled);
             string leg = _legChain != null ? _legChain.SetGravity(enabled) : "leg=not-built";
             WriteAllReports();
@@ -1353,7 +1368,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             // Future full-body/GSP contact integration can establish a new explicit contact contract instead of
             // silently mutating the already-certified no-collider bilateral baseline.
             if (enabled && ((_proxy != null && _proxy.DriveEnabled) || (_legChain != null && _legChain.AnyDriveEnabled)))
-                return "ARL colliders：拒绝开启。v0.4.22仍冻结通用torso/leg collider开关；Foot contact只由V0470 exact STANCE lifecycle窄授权。请先停止torso/leg drive。";
+                return "ARL colliders：拒绝开启。活动驱动的通用torso/leg collider必须保持OFF；Foot contact仅由独立接触会话的exact-STANCE owner授权。请先停止当前测试或torso/leg drive。";
             string contactShadow = "footContactShadow=not-built";
             if (!enabled && _legChain != null)
                 contactShadow = _legChain.DisableFootContactShadowPreserveTrace();
@@ -1486,21 +1501,6 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             string stopped = torsoStop + " | " + legStop + (repaired != null ? " | " + repaired : string.Empty);
             _logger?.LogInfo("[ARL][TRACE_CONTROL] " + stopped);
             return stopped;
-        }
-
-        public static string WriteProxyReportAndGetSummary()
-        {
-            if (_proxy == null)
-                return "ARL proxy：尚无报告。";
-            WriteAllReports();
-            string result = _proxy.Report.GetConsoleSummary() + " | fullReport=" + ProxyReportPath;
-            if (_legChain != null)
-                result += "\n" + _legChain.GetStatus() +
-                          " | primaryReport=" + SingleLegReportPath +
-                          (_legChain.BilateralEnabled ? " | secondaryReport=" + SecondaryLegReportPath + " | bilateralReport=" + BilateralLegReportPath : string.Empty) +
-                          (_legChain.KneeSafetyReport != null ? " | kneeSafetyContextReport=" + KneeSafetyContextReportPath : string.Empty) +
-                          " | footFoundationReport=" + FootFoundationReportPath;
-            return result;
         }
 
         public static string Rollback(string reason)

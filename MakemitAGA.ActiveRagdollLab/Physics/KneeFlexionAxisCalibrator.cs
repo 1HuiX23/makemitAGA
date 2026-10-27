@@ -53,7 +53,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         public int AcceptedSamples => _accepted;
         public Vector3 CandidateAxisLowerLocal => _candidateAxisLowerLocal;
         public float PrincipalEnergyRatio => _principalEnergyRatio;
-        public float PrincipalRmsProjectionRatio => _principalRmsProjectionRatio;
         public float AngleFromInitialDegrees => _angleFromInitialDegrees;
         public string Reason => _reason;
 

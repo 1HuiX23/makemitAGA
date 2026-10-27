@@ -34,7 +34,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
     {
         internal const string StopCommand = "arl_ankle_test(stop)";
         internal const string Plan = "PREFLIGHT>FROZEN_SELECTORS>LEG_DRIVE>CCD_OFFSET_SOLVERS>SUPPORT>SHARED_TRACE>RUNNING";
-        internal const string TestInstructions = "ARL ankle v0.4.76：旧腿足组合的共享时钟与父级命令回归。重启游戏、同房同起点；arl_test_setup → arl_drive(on) → arl_knee_axis_calibrate(on)。同房走动采样，以arl_knee_axis_status确认双侧COLLECTING_QUALITY_READY_STOP_TO_FINALIZE后arl_knee_axis_calibrate(off)，确认双侧ready=True → arl_knee_axis_apply → arl_hip_stack(on)，确认READY；arl_ankle_test(b)，须started=True、phase=Running、sharedTraceReady=True、V04460ReceiverCaptured=True、auditFinite=True、sourceContextReady=True后arl_test_status；站立40秒、正常走动30秒、停下站立10秒；arl_ankle_test(stop) → arl_test_cleanup → arl_test_status各一次。拒绝启动或自动停止则直接收尾并保存完整日志。";
+        internal const string TestInstructions = "ARL ankle v0.4.89：旧腿足组合的共享时钟与父级命令回归。重启游戏、同房同起点；arl_test_setup → arl_drive(on) → arl_knee_axis_calibrate(on)。同房走动采样，以arl_knee_axis_status确认双侧COLLECTING_QUALITY_READY_STOP_TO_FINALIZE后arl_knee_axis_calibrate(off)，确认双侧ready=True → arl_knee_axis_apply → arl_hip_stack(on)，确认READY；arl_ankle_test(b)，须started=True、phase=Running、sharedTraceReady=True、V04460ReceiverCaptured=True、auditFinite=True、sourceContextReady=True后arl_test_status；站立40秒、正常走动30秒、停下站立10秒；arl_ankle_test(stop) → arl_test_cleanup → arl_test_status各一次。拒绝启动或自动停止则直接收尾并保存完整日志。";
         private readonly IAnkleRunPort _port;
         internal readonly RunSession Session = new RunSession();
         internal string CompletedAudit { get; private set; }
@@ -64,7 +64,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
                 Session.AwaitReadiness("BOTH_LEG_DRIVES_AND_SHARED_TRACE");
                 if (!_port.Ready) throw new InvalidOperationException("ANKLE_READY_READBACK_FAILED:" + _port.ReadinessSummary());
                 Session.MarkRunning(); CompletedAudit = null;
-                string result = "ARL ankle v0.4.76 | started=True | pending=False | runId=" + Session.RunId +
+                string result = "ARL ankle v0.4.89 | started=True | pending=False | runId=" + Session.RunId +
                     " | arm=" + Session.Arm + " | " + Session.Status() + " | " + _port.ReadinessSummary();
                 _port.Emit("[ARL][ANKLE_TEST_BUNDLE][STARTED] " + result + " | " + details, true, false);
                 try { _port.WriteReports(); }
@@ -140,10 +140,10 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
                 "\n[SESSION_AFTER_STOP]\n" + Session.Status(), !Session.Started, automatic);
             try { _port.WriteReports(); }
             catch (Exception e) { _port.Emit("[ARL][REPORT_WRITE_FAILED] " + e.GetType().Name, true, false); }
-            return "ARL ankle v0.4.76 | stopped=True | started=" + Session.Started + " | " + summary;
+            return "ARL ankle v0.4.89 | stopped=True | started=" + Session.Started + " | " + summary;
         }
 
-        internal string Status(bool detailed = true) => "ARL ankle v0.4.76 | stateScope=LIVE_STATE | ankleTestActive=" + Session.Active +
+        internal string Status(bool detailed = true) => "ARL ankle v0.4.89 | stateScope=LIVE_STATE | ankleTestActive=" + Session.Active +
             " | " + Session.Status() + " | plan=" + Plan + " | sessionLastStep=" + _lastStep.Status() + (detailed ? "\n" + _port.LiveDetails() : "");
         private static string Clean(string text) => (text ?? "<none>").Replace('\r', ' ').Replace('\n', ' ');
     }

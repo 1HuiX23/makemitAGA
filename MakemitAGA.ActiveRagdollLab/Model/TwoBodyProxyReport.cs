@@ -8,8 +8,11 @@ namespace MakemitAGA.ActiveRagdollLab.Model
     {
         internal PelvisReceiverReport PelvisReceiver;
         internal bool UseDynamicTorsoRecovery;
+        internal bool HipGoalGateOnlyHip;
+        internal bool UseCoherentHipNormalReference;
+        internal bool HipNormalSampleAgePrediction;
         internal TorsoRecoveryState DynamicTorsoRecovery;
-        // Legacy and standalone scopes retain their original qualification. Missing B state suppresses FF.
+        // Legacy and standalone scopes retain their original qualification. Both V04770 dynamic arms require current state; missing state suppresses FF.
         internal bool ControlRecoveryActive => UseDynamicTorsoRecovery
             ? !DynamicTorsoRecovery.Valid || DynamicTorsoRecovery.Active : FreezeRecoveryActive;
         public bool Built;

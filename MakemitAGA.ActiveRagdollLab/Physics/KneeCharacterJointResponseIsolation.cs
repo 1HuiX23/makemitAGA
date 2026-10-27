@@ -30,8 +30,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         private bool _enabled;
         private bool _deferredForce;
-        internal bool CurrentSupportNormalConstraint { get; private set; }
         internal bool DeferredForcePending => _deferredForce;
+        internal bool CurrentSupportNormalConstraint { get; private set; }
         internal void CancelDeferredForce()
         {
             if (_deferredForce)

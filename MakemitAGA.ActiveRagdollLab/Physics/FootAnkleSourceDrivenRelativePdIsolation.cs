@@ -115,17 +115,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         // v0.4.4.1 read-only diagnostic taps. These expose the already-computed controller state to the
         // contact-induced axial-debt observer; they do not add or modify any physical authority.
-        internal Vector3 CurrentPhysicalBindDeltaDegrees => _currentPhysicalBindDeltaDegrees;
         internal Vector3 CurrentPoseErrorLocal => _currentPoseErrorLocal;
         internal Vector3 CurrentTargetAccelerationFeedforwardLocal => _currentTargetAccelerationFeedforwardLocal;
         internal bool CurrentStaleTargetW => _currentStaleTargetW;
         internal Vector3 CurrentTargetRelativeWLocal => _currentTargetRelativeWLocal;
         internal Vector3 CurrentBodyRelativeWLocal => _currentBodyRelativeWLocal;
-        internal Vector3 CurrentRawRelativeAccelerationLocal => _currentRawRelativeAccelerationLocal;
         internal Vector3 CurrentAppliedRelativeAccelerationLocal => _currentAppliedRelativeAccelerationLocal;
         internal Vector3 CurrentTorqueWorld => _currentTorqueWorld;
-        internal float CurrentTrackingErrorDegrees => _currentTrackingError;
-        internal float CurrentAnchorErrorMeters => _currentAnchorError;
         internal bool CurrentAccelerationClamp => _currentAccelerationClamp;
         internal bool CurrentTorqueClamp => _currentTorqueClamp;
 

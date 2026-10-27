@@ -124,7 +124,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         public Quaternion StrictMechanicalRotation => _rotation;
         public Vector3 StrictMechanicalAngularVelocityWorld => _angularVelocityWorld;
         public Vector3 StrictMechanicalAngularAccelerationWorld => _currentVirtualAngularAccelerationWorld;
-        public float StrictMechanicalCurrentMaxAngularSpeed => _currentIntegratorMaxSpeed;
         public float StrictMechanicalCurrentMaxAngularAcceleration => _currentIntegratorMaxAcceleration;
         public bool Active => _phase == "SOURCE_TURN_INERTIALIZED" || _phase == "FRAME_RECOVERY_INERTIALIZED";
         public string Phase => _phase;

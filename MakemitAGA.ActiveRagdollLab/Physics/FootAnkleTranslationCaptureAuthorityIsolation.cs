@@ -75,7 +75,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal string InvalidReason => _invalidReason;
         internal float CurrentSelectedMaxAcceleration => _currentSelectedMaxAcceleration;
         internal bool CurrentEligible => _currentEligible;
-        internal bool CurrentReserveActive => _currentReserveActive;
 
         internal static float SelectMaxAcceleration(
             bool dynamicActive,

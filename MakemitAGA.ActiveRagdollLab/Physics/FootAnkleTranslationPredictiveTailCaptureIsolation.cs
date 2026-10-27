@@ -25,7 +25,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal const string ArmA = "A_V04171_FROZEN_V0373_60_80";
         internal const string ArmB = "B_V04171_PREDICTIVE_NEXT_STEP_DECLAMP_MAXA140";
 
-        // 140 is a deliberately experimental ceiling, not a promoted production parameter. It minimally envelopes
+        // 140 is frozen only in the legacy loaded scope; free-space explicitly retains ArmA.
+        // A future dynamic-contact scope must requalify this bound. It minimally envelopes
         // the two repeated pre-abort raw-demand tails observed before v0.4.17.1 (~121.9 and ~136.8 m/s^2) while
         // remaining bounded. The selector never exceeds rawMagnitude, so it cannot create extra command by itself.
         internal const float PredictiveReserveMaxAcceleration = 140f;

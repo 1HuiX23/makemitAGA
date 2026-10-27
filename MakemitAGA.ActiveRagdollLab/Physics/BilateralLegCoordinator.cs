@@ -10,7 +10,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     /// v0.3.x bilateral coordinator. It owns two instances of the already frozen SingleLegShadowChain.
     /// No controller math is duplicated here. Both sides share the same immutable profile and Two-Body parent.
     /// </summary>
-    internal sealed class BilateralLegCoordinator
+    internal sealed partial class BilateralLegCoordinator
     {
         private readonly ActiveRagdollLabProfile _profile;
         private readonly SingleLegTargetReport _primaryTarget;
@@ -75,9 +75,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private Collider _contactShadowSelfPairPrimary;
         private Collider _contactShadowSelfPairSecondary;
         private bool _contactShadowSelfPairOwned;
-        private bool _contactShadowSelfPairPreIgnored;
         private bool _contactShadowSelfPairReadback;
-        private bool _contactShadowSelfPairVerified;
         private int _contactShadowSelfPairRestoreFailures;
 
         public BilateralLegCoordinator(
@@ -104,7 +102,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         public FootAnkleFoundationReport PrimaryFootReport => _primary != null ? _primary.FootReport : null;
         public FootAnkleFoundationReport SecondaryFootReport => _secondary != null ? _secondary.FootReport : null;
         public bool IsBuilt => !_destroyed && _primary != null && _primary.IsBuilt && (!_bilateralEnabled || (_secondary != null && _secondary.IsBuilt));
-        public bool AnyBuilt => !_destroyed && ((_primary != null && _primary.IsBuilt) || (_secondary != null && _secondary.IsBuilt));
         public bool DriveEnabled => _primary != null && _primary.DriveEnabled && (!_bilateralEnabled || (_secondary != null && _secondary.DriveEnabled));
         public bool AnyDriveEnabled => (_primary != null && _primary.DriveEnabled) || (_secondary != null && _secondary.DriveEnabled);
         public bool LastRollbackSucceeded { get; private set; } = true;
@@ -118,11 +115,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         public bool AnyDriveAborted => (_primary != null && _primary.Report != null && _primary.Report.DriveAborted) || (_secondary != null && _secondary.Report != null && _secondary.Report.DriveAborted);
         public bool FootProductionBaselineReady => _primary != null && _primary.FootProductionBaselineReady && (!_bilateralEnabled || (_secondary != null && _secondary.FootProductionBaselineReady));
         public bool FootRuntimeContractReady => _primary != null && _primary.FootRuntimeContractReady && (!_bilateralEnabled || (_secondary != null && _secondary.FootRuntimeContractReady));
-        public bool AnyAnkleJointDestroyPending => (_primary != null && _primary.AnkleJointDestroyPending) || (_secondary != null && _secondary.AnkleJointDestroyPending);
         public string AnkleTransportArm => _primary != null ? _primary.AnkleTransportArm : FootAnkleTranslationTransportIsolation.ArmA;
         public string AnkleAngularTransportPolicy => _primary != null ? _primary.AnkleAngularTransportPolicy : FootAnkleAngularTransport.Production;
-        public float PrimaryFootAngularDrag => _primary != null ? _primary.FootAngularDrag : _profile.AngularDrag;
-        public float SecondaryFootAngularDrag => _secondary != null ? _secondary.FootAngularDrag : _profile.AngularDrag;
         public string FootAnkleDriveArm => _primary != null ? _primary.FootAnkleDriveArm : FootAnkleSourceDrivenRelativePdIsolation.ArmA;
         public string AnkleConstraintArm => _primary != null ? _primary.AnkleConstraintArm : FootAnkleConstraintTopologyIsolation.ArmA;
         public string AnkleTargetAccelerationMode => _primary != null ? _primary.AnkleTargetAccelerationMode : FootAnkleSourceDrivenRelativePdIsolation.ProductionTargetAccelerationMode;
@@ -135,11 +129,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         public string FootContactShadowArm => _primary != null ? _primary.FootContactShadowArm : FootQualifiedContactShadow.ArmA;
         public bool FootContactShadowActive => _primary != null && _primary.FootContactShadowActive && (!_bilateralEnabled || (_secondary != null && _secondary.FootContactShadowActive));
         public bool FootContactShadowFinite => _primary != null && _primary.FootContactShadowFinite && (!_bilateralEnabled || (_secondary != null && _secondary.FootContactShadowFinite));
-        public bool FootContactShadowBilateralSelfIgnoreReadback => !_bilateralEnabled || _contactShadowSelfPairReadback;
-        public bool FootContactShadowBilateralSelfIgnoreVerified => !_bilateralEnabled || _contactShadowSelfPairVerified;
-        public bool FootContactShadowBilateralSelfIgnoreOwned => _contactShadowSelfPairOwned;
-        public bool FootContactShadowBilateralSelfIgnorePreIgnored => _contactShadowSelfPairPreIgnored;
-        public int FootContactShadowBilateralSelfIgnoreRestoreFailures => _contactShadowSelfPairRestoreFailures;
         public bool StanceOnlyContactLifecycleEnabled => _primary != null && _primary.StanceContactLifecycleEnabled && (!_bilateralEnabled || (_secondary != null && _secondary.StanceContactLifecycleEnabled));
         public bool StanceOnlyContactLifecycleFinite => _primary != null && _primary.StanceContactLifecycleFinite && (!_bilateralEnabled || (_secondary != null && _secondary.StanceContactLifecycleFinite));
         public string StanceContactFrictionIsolationArm => _primary != null ? _primary.StanceContactFrictionIsolationArm : FootStanceContactFrictionIsolation.ArmA;
@@ -311,6 +300,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _primary.NativeBodiesSafeOff && _secondary.NativeBodiesSafeOff;
         internal bool DynamicParentsActive => _primary != null && _secondary != null &&
             _primary.DynamicParentActive && _secondary.DynamicParentActive;
+        internal bool HipNormalReferenceMatches(bool selected, bool sampleAgePrediction) => _primary != null && _secondary != null &&
+            _primary.HipNormalReferenceMatches(selected, sampleAgePrediction) && _secondary.HipNormalReferenceMatches(selected, sampleAgePrediction);
         internal bool FootRelativeReferenceMatches(bool enabled) => _primary != null && _secondary != null &&
             _primary.FootRelativeReferenceMatches(enabled) && _secondary.FootRelativeReferenceMatches(enabled);
         internal void SelectFootRelativeReference(bool enabled)
@@ -343,11 +334,19 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 throw new InvalidOperationException("FOOT_REFERENCE_V04730_BASELINE_RESTORE_FAILED");
             return "footReferenceBaselineRestored=True";
         }
-        internal bool FreeSpaceReady => _bilateralEnabled && _primary != null && _secondary != null && !_supportSurface.Active &&
+        internal bool FreeSpaceReady => !DynamicContactSelected && _bilateralEnabled && _primary != null && _secondary != null && _supportSurface.StoppedSafe && !_contactShadowSelfPairOwned &&
             _primary.FreeSpaceSelectorsOff && _secondary.FreeSpaceSelectorsOff &&
             _primary.FreeSpaceNativeReady && _secondary.FreeSpaceNativeReady;
         internal bool DynamicJoinReady => SourceContextReady && FreeSpaceReady &&
             _primary.DynamicJoinFoundationReady && _secondary.DynamicJoinFoundationReady;
+        // On-demand only. Existing owner state/readbacks are reused; no extra observer or native sampling loop.
+        internal string FreeSpaceBoundarySummary() => "freeSpaceBoundary=V04820" +
+            "/supportReleased=" + _supportSurface.StoppedSafe +
+            "/footPairReleased=" + !_contactShadowSelfPairOwned +
+            "/selectors(primary-secondary)=" + (_primary?.FreeSpaceSelectorIssue ?? FreeSpaceBoundaryIssue.MissingFoundation) + ":" +
+            (_secondary?.FreeSpaceSelectorIssue ?? FreeSpaceBoundaryIssue.MissingFoundation) +
+            "/predictiveCapture(primary-secondary)=" + (_primary?.TranslationPredictiveTailCaptureArm ?? "<missing>") + ":" +
+            (_secondary?.TranslationPredictiveTailCaptureArm ?? "<missing>") + "/loadedSupportCertified=False";
         internal string DynamicParentSummary() => "[DYNAMIC_LEG_PARENT]\n" + (_primary?.DynamicParentSummary() ?? "primary=missing") +
             "\n" + (_secondary?.DynamicParentSummary() ?? "secondary=missing") + "\n" + GetStepContextStatus() +
             "\nLEFT/" + (_primary?.FootRelativeReferenceStatus ?? "<missing>") +
@@ -396,6 +395,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (AnyDriveEnabled && (!_contextCursor.SourceMatches(step) || !_torso.TryGetLegParentCommand(step, out parent)))
                 throw new InvalidOperationException("LEG_PARENT_COMMAND_NOT_CURRENT");
 
+            if (DynamicParentsActive && !DynamicContactSelected && !_supportSurface.StoppedSafe)
+                throw new InvalidOperationException("DYNAMIC_FREE_SPACE_SUPPORT_NOT_RELEASED");
+            if (DynamicParentsActive && !DynamicContactSelected && _contactShadowSelfPairOwned)
+                throw new InvalidOperationException("DYNAMIC_FREE_SPACE_FOOT_PAIR_NOT_RELEASED");
             if (_supportSurface.Active && !_supportSurface.Validate(out string surfaceError))
             {
                 FailCloseStanceContactIsolation("V04410_SUPPORT_SCOPE_INVALID:" + surfaceError);
@@ -410,6 +413,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 FailCloseStanceContactIsolation("BILATERAL_FOOT_SELF_COLLISION_RUNTIME_READBACK_FAILED:" + (stanceSelfPairError ?? "<none>"));
                 return;
             }
+
+            if (DynamicContactSelected && !DynamicContactReady)
+                throw new InvalidOperationException("DYNAMIC_CONTACT_CONTRACT_LOST:" + DynamicContactIssue);
 
             _primary.FixedUpdate(step, parent);
             _secondary?.FixedUpdate(step, parent);
@@ -429,7 +435,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _kneeSafety.ObserveFixedStep(_kneeSafetyReport, _primary, _secondary);
                 bool primaryIsLeft = string.Equals(PrimarySide, "LEFT", StringComparison.OrdinalIgnoreCase);
                 _hipPelvisLoadPath.Observe(DriveEnabled, _torso,
-                    primaryIsLeft ? PrimaryReport : SecondaryReport, primaryIsLeft ? SecondaryReport : PrimaryReport);
+                    primaryIsLeft ? PrimaryReport : SecondaryReport, primaryIsLeft ? SecondaryReport : PrimaryReport,
+                    step, primaryIsLeft ? _primary.DynamicHipCommand : _secondary.DynamicHipCommand,
+                    primaryIsLeft ? _secondary.DynamicHipCommand : _primary.DynamicHipCommand);
             }
             else
             {
@@ -457,8 +465,17 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _hipPelvisLoadPath.EndTrace();
                 if (_primary == null && _secondary == null)
                     return "ARL leg drive | enabled=False | already-cleared=True";
-                string secondaryOff = _secondary != null ? _secondary.SetDrive(false) : "secondary=disabled";
-                string primaryOff = _primary != null ? _primary.SetDrive(false) : "primary=missing";
+                string secondaryOff = "secondary=disabled", primaryOff = "primary=missing";
+                Exception secondaryFailure = null, primaryFailure = null;
+                try { if (_secondary != null) secondaryOff = _secondary.SetDrive(false); }
+                catch (Exception e) { secondaryFailure = e; }
+                try { if (_primary != null) primaryOff = _primary.SetDrive(false); }
+                catch (Exception e) { primaryFailure = e; }
+                // Attempt BOTH native owners before formatting or reporting an exception. A failed OFF
+                // must propagate to session restore/full rollback, never be returned as a successful stop.
+                if (secondaryFailure != null || primaryFailure != null)
+                    throw new InvalidOperationException("BILATERAL_DRIVE_OFF_FAILED:secondary=" +
+                        (secondaryFailure?.GetType().Name ?? "<none>") + ":primary=" + (primaryFailure?.GetType().Name ?? "<none>"));
                 _diagnostics.CopyCurrent(_report, PrimaryReport, SecondaryReport);
                 return "ARL bilateral leg drive | enabled=False\nprimary: " + primaryOff + (_bilateralEnabled ? "\nsecondary: " + secondaryOff : string.Empty);
             }
@@ -690,8 +707,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _traceContextSamples = _traceContextMismatches = 0;
                 _diagnostics.Reset(_report, _bilateralEnabled, _distinctSourceChains, PrimarySide, SecondarySide);
                 _kneeSafety.BeginTrace(_kneeSafetyReport);
+                bool dynamicHipAudit = DynamicParentsActive && _bilateralEnabled && _secondary != null &&
+                    PelvisRunScopes.HasUpperWeight(_primary.DynamicScope) && PelvisRunScopes.HasUpperWeight(_secondary.DynamicScope);
                 _hipPelvisLoadPath.BeginTrace(_bilateralEnabled && UpperSelfWeightArmsMatch &&
-                    UpperSelfWeightArm == UpperSelfWeightSupportNormalLoadTransferIsolation.ArmB, _torso);
+                    UpperSelfWeightArm == UpperSelfWeightSupportNormalLoadTransferIsolation.ArmB &&
+                    (!DynamicParentsActive || dynamicHipAudit), _torso, dynamicHipAudit);
                 _report.Built = IsBuilt;
                 _report.TraceEnabled = true;
                 _diagnostics.CopyCurrent(_report, PrimaryReport, SecondaryReport);
@@ -1121,7 +1141,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             if (!IsBuilt) return "ARL bilateral Foot contact shadow A | built=False";
             int restoreFailures = DisableFootContactShadowPreserveTraceInternal();
-            _contactShadowSelfPairVerified = false;
             _contactShadowSelfPairRestoreFailures = 0;
             _primary?.SetFootContactShadowArmA();
             _secondary?.SetFootContactShadowArmA();
@@ -1188,18 +1207,19 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private bool PrepareBilateralFootSelfCollisionIsolation(out string error)
         {
             error = null;
-            RestoreBilateralFootSelfCollisionIsolation();
+            if (RestoreBilateralFootSelfCollisionIsolation() != 0)
+            {
+                error = "PREVIOUS_BILATERAL_FOOT_SELF_PAIR_NOT_RELEASED";
+                return false;
+            }
             _contactShadowSelfPairPrimary = _primary != null ? _primary.FootContactShadowCollider : null;
             _contactShadowSelfPairSecondary = _secondary != null ? _secondary.FootContactShadowCollider : null;
             _contactShadowSelfPairOwned = false;
-            _contactShadowSelfPairPreIgnored = false;
             _contactShadowSelfPairReadback = false;
-            _contactShadowSelfPairVerified = false;
 
             if (!_bilateralEnabled)
             {
                 _contactShadowSelfPairReadback = true;
-                _contactShadowSelfPairVerified = true;
                 return true;
             }
             if (_contactShadowSelfPairPrimary == null || _contactShadowSelfPairSecondary == null ||
@@ -1212,7 +1232,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             try
             {
                 bool alreadyIgnored = UnityEngine.Physics.GetIgnoreCollision(_contactShadowSelfPairPrimary, _contactShadowSelfPairSecondary);
-                _contactShadowSelfPairPreIgnored = alreadyIgnored;
                 if (!alreadyIgnored)
                 {
                     UnityEngine.Physics.IgnoreCollision(_contactShadowSelfPairPrimary, _contactShadowSelfPairSecondary, true);
@@ -1239,7 +1258,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (_contactShadowSelfPairPrimary == null || _contactShadowSelfPairSecondary == null)
             {
                 _contactShadowSelfPairReadback = false;
-                _contactShadowSelfPairVerified = false;
                 error = "BILATERAL_FOOT_SELF_PAIR_NOT_PREPARED";
                 return false;
             }
@@ -1248,17 +1266,14 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _contactShadowSelfPairReadback = UnityEngine.Physics.GetIgnoreCollision(_contactShadowSelfPairPrimary, _contactShadowSelfPairSecondary);
                 if (!_contactShadowSelfPairReadback)
                 {
-                    _contactShadowSelfPairVerified = false;
                     error = "BILATERAL_FOOT_SELF_PAIR_NOT_IGNORED";
                     return false;
                 }
-                _contactShadowSelfPairVerified = true;
                 return true;
             }
             catch (Exception e)
             {
                 _contactShadowSelfPairReadback = false;
-                _contactShadowSelfPairVerified = false;
                 error = "BILATERAL_FOOT_SELF_IGNORE_QUERY_EXCEPTION:" + e.GetType().Name + ":" + e.Message;
                 return false;
             }
@@ -1278,10 +1293,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             }
 
             _contactShadowSelfPairRestoreFailures += failures;
+            // Retain the exact owned pair after a native restore failure. A later retry must
+            // restore this pair, rather than forget it and capture the modified state as baseline.
+            if (failures != 0) return failures;
             _contactShadowSelfPairPrimary = null;
             _contactShadowSelfPairSecondary = null;
             _contactShadowSelfPairOwned = false;
-            _contactShadowSelfPairPreIgnored = false;
             _contactShadowSelfPairReadback = false;
             return failures;
         }
@@ -1382,7 +1399,14 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             _hipPelvisLoadPath.EndTrace();
             success = true;
-            string surfaceStop = StopFootSupportSurface();
+            string driveStop;
+            try { driveStop = SetDrive(false); }
+            catch (Exception e) { success = false; driveStop = "BILATERAL_DRIVE_OFF_EXCEPTION=" + e.GetType().Name; }
+            // Quiesce both feet before detaching support probes/restoring collision pairs. Teardown
+            // continues after a failed attempt; child destructors still get their independent attempts.
+            string surfaceStop;
+            try { surfaceStop = StopFootSupportSurface(); }
+            catch (Exception e) { success = false; surfaceStop = "SUPPORT_RELEASE_EXCEPTION=" + e.GetType().Name; }
             if (!_supportSurface.StoppedSafe) success = false;
             int contactShadowRestoreFailures = RestoreBilateralFootSelfCollisionIsolation();
             if (contactShadowRestoreFailures > 0)
@@ -1422,7 +1446,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _secondary = null;
             _primary = null;
             _traceEnabled = false;
-            return primary + " | " + secondary + " | contactShadowSelfPairRestoreFailures=" + contactShadowRestoreFailures + " | " + surfaceStop;
+            return primary + " | " + secondary + " | driveQuiesce=" + driveStop + " | contactShadowSelfPairRestoreFailures=" + contactShadowRestoreFailures + " | " + surfaceStop;
         }
 
         private void FailCloseStanceContactIsolation(string detail)
@@ -1437,12 +1461,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 Plugin.Logger?.LogError("[ARL][BILATERAL_FAIL_CLOSED] " + reason);
             }
 
-            _primary?.DisableStanceContactLifecycle();
-            _secondary?.DisableStanceContactLifecycle();
-            DisableFootContactShadowPreserveTraceInternal();
-            if (_primary != null && _primary.DriveEnabled) _primary.SetDrive(false);
-            if (_secondary != null && _secondary.DriveEnabled) _secondary.SetDrive(false);
-            _diagnostics.CopyCurrent(_report, PrimaryReport, SecondaryReport);
+            try
+            {
+                _primary?.DisableStanceContactLifecycle();
+                _secondary?.DisableStanceContactLifecycle();
+                DisableFootContactShadowPreserveTraceInternal();
+            }
+            finally { SetDrive(false); }
         }
 
         private void FailCloseBothSides(bool driveMismatch, bool anyAbort)
@@ -1464,12 +1489,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
             // v0.4.1.1/v0.4.7: a bilateral fail-close must also atomically close the phase-gated Foot
             // contact boundary and restore coordinator-owned self-isolation while preserving trace evidence.
-            _primary.DisableStanceContactLifecycle();
-            _secondary.DisableStanceContactLifecycle();
-            DisableFootContactShadowPreserveTraceInternal();
-            if (_primary.DriveEnabled) _primary.SetDrive(false);
-            if (_secondary.DriveEnabled) _secondary.SetDrive(false);
-            _diagnostics.CopyCurrent(_report, PrimaryReport, SecondaryReport);
+            try
+            {
+                _primary?.DisableStanceContactLifecycle();
+                _secondary?.DisableStanceContactLifecycle();
+                DisableFootContactShadowPreserveTraceInternal();
+            }
+            finally { SetDrive(false); }
         }
 
         private string CombineStatus(string header, Func<SingleLegShadowChain, string> get)

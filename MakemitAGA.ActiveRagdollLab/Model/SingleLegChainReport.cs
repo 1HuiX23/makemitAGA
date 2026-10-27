@@ -21,6 +21,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public bool Finite = true;
         public string Stage = "UNBUILT";
         public string Detail;
+        internal string HipNormalReferenceSummary;
         public string Side;
         public string ResolutionMode;
         public string UpperLegPath;
@@ -303,7 +304,11 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public float LegAngularAccelerationFeedforwardGain;
         public float LegAngularAccelerationFeedforwardMaxAcceleration;
         public float LegAngularAccelerationFeedforwardMaxSourceSampleAgeSeconds;
-        public bool LegAngularAccelerationFeedforwardActiveThisStep;
+        public bool LegAngularAccelerationFeedforwardActiveThisStep; // Any lane selected; per-lane state below is authoritative.
+        public bool HipAngularAccelerationFeedforwardActiveThisStep, KneeAngularAccelerationFeedforwardActiveThisStep;
+        public string KneeAngularAccelerationFeedforwardSuppressionReason;
+        public int TraceHipFeedforwardActiveSteps, TraceKneeFeedforwardActiveSteps;
+        public int TraceKneeHipGoalEligibleSteps, TraceKneeHipGoalNonzeroSelectedSteps;
         public string LegAngularAccelerationFeedforwardSuppressionReason;
         public float HipAngularAccelerationFeedforwardAppliedMagnitude;
         public float KneeAngularAccelerationFeedforwardAppliedSigned;
@@ -980,7 +985,9 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                 " | hipActuator=" + (HipAngularActuatorArm ?? "<none>") + "/A=" + F(HipAngularActuatorCurrentDesiredAcceleration) + "/w=" + F(HipAngularActuatorCurrentAngularSpeed) + "/tauI=" + F(HipAngularActuatorCurrentInertiaAlphaTorque) + "/gyro=" + F(HipAngularActuatorCurrentGyroTorque) + "/tau=" + F(HipAngularActuatorCurrentTotalTorque) + "/predA=" + F(HipAngularActuatorCurrentPredictedAcceleration) + "/predErr=" + F(HipAngularActuatorCurrentPredictionError) + "/align=" + F(HipAngularActuatorCurrentPredictionAlignment) +
                 " | legAFF=" + LegAngularAccelerationFeedforwardEnabled + "/" + (LegAngularAccelerationFeedforwardMode ?? "<none>") + "/normal=PRODUCTION_ON" +
                 "/gain/maxA=" + F(LegAngularAccelerationFeedforwardGain) + "/" + F(LegAngularAccelerationFeedforwardMaxAcceleration) +
-                "/active=" + LegAngularAccelerationFeedforwardActiveThisStep + "/suppress=" + (LegAngularAccelerationFeedforwardSuppressionReason ?? "<none>") +
+                "/anyActive=" + LegAngularAccelerationFeedforwardActiveThisStep +
+                "/hipActive-reason=" + HipAngularAccelerationFeedforwardActiveThisStep + ":" + (LegAngularAccelerationFeedforwardSuppressionReason ?? "<none>") +
+                "/kneeActive-reason=" + KneeAngularAccelerationFeedforwardActiveThisStep + ":" + (KneeAngularAccelerationFeedforwardSuppressionReason ?? "<none>") +
                 "/applied=" + F(HipAngularAccelerationFeedforwardAppliedMagnitude) + "/" + F(KneeAngularAccelerationFeedforwardAppliedSigned) +
                 "/clamp=" + HipAngularAccelerationFeedforwardClamped + "/" + KneeAngularAccelerationFeedforwardClamped +
                 " | kneeAnchorFF=" + (KneeAnchorAccelerationFeedforwardArm ?? "<none>") + ":" + F(KneeAnchorAccelerationFeedforwardCurrentAcceleration) + "/valid=" + KneeAnchorAccelerationFeedforwardCurrentValid +
@@ -1079,7 +1086,12 @@ namespace MakemitAGA.ActiveRagdollLab.Model
             sb.AppendLine("transportAttributionValid=" + TransportAttributionValid);
             sb.AppendLine("hipRelativeComTransportErrorMagnitude=" + F(HipRelativeComTransportErrorMagnitude));
             sb.AppendLine("kneeRelativeComTransportErrorMagnitude=" + F(KneeRelativeComTransportErrorMagnitude));
+            sb.AppendLine(HipNormalReferenceSummary ?? "HIP_NORMAL_REFERENCE_V04800=NO_COMPLETED_TRACE");
             sb.AppendLine("legAngularAccelerationFeedforwardEnabled=" + LegAngularAccelerationFeedforwardEnabled);
+            sb.AppendLine("LEG_FF_SPLIT_V04770/hipActive-kneeActive=" + HipAngularAccelerationFeedforwardActiveThisStep + "/" + KneeAngularAccelerationFeedforwardActiveThisStep +
+                "/hipReason=" + (LegAngularAccelerationFeedforwardSuppressionReason ?? "<none>") + "/kneeReason=" + (KneeAngularAccelerationFeedforwardSuppressionReason ?? "<none>") +
+                "/selectedSteps(hip-knee-goalKneeEligible-goalKneeNonzero)=" + TraceHipFeedforwardActiveSteps + "/" + TraceKneeFeedforwardActiveSteps + "/" + TraceKneeHipGoalEligibleSteps + "/" + TraceKneeHipGoalNonzeroSelectedSteps +
+                "/scope=PRE_ALLOCATOR_SELECTION_NOT_NATIVE_EFFECT/nonzeroEpsilon=0.0001");
             sb.AppendLine("legAngularAccelerationFeedforwardMode=" + (LegAngularAccelerationFeedforwardMode ?? "<none>"));
             sb.AppendLine("legAngularAccelerationFeedforwardGateMode=" + (LegAngularAccelerationFeedforwardGateMode ?? "<none>"));
             sb.AppendLine("legAngularAccelerationFeedforwardGain=" + F(LegAngularAccelerationFeedforwardGain));

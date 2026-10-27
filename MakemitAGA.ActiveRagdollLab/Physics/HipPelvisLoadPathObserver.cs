@@ -1,14 +1,15 @@
 using System;
 using MakemitAGA.ActiveRagdollLab.Model;
 using UnityEngine;
+using MakemitAGA.ActiveRagdollLab.Runtime;
 
 namespace MakemitAGA.ActiveRagdollLab.Physics
 {
     // One shared receiver audit, after BOTH leg controllers. It never writes a Rigidbody or controls drive.
-    internal sealed class HipPelvisLoadPathObserver
+    internal sealed partial class HipPelvisLoadPathObserver
     {
         internal readonly HipPelvisLoadPathReport Report = new HipPelvisLoadPathReport();
-        internal void BeginTrace(bool selected, TwoBodyShadowProxy torso)
+        internal void BeginTrace(bool selected, TwoBodyShadowProxy torso, bool dynamic = false)
         {
             Report.Selected = Report.Collecting = selected; Report.Finite = true; Report.Issue = null;
             Report.ReceiverCaptured = false; Report.Pelvis = Report.Chest = default;
@@ -16,7 +17,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             Report.BothLoaded = Report.NeitherLoaded = Report.LastFixed = Report.AbortedStepsSkipped = 0;
             Report.Next = Report.Count = 0; Array.Clear(Report.Ring, 0, Report.Ring.Length);
             Report.Idle.Reset(); Report.Motion.Reset();
+            Report.ResetDynamic(); Report.DynamicMode = selected && dynamic;
             if (!selected) return;
+            if (Report.DynamicMode) { BeginDynamicTrace(torso); return; }
             try
             {
                 if (torso == null || !torso.IsBuilt || !torso.DriveEnabled || !TorsoContract(torso.Report))
@@ -32,9 +35,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             catch (Exception e) { Invalid("HIP_PELVIS_RECEIVER_READ_EXCEPTION:" + e.GetType().Name); }
         }
         internal void EndTrace() { Report.Collecting = false; }
-        internal void Observe(bool bothDriving, TwoBodyShadowProxy torso, SingleLegChainReport left, SingleLegChainReport right)
+        internal void Observe(bool bothDriving, TwoBodyShadowProxy torso, SingleLegChainReport left, SingleLegChainReport right,
+            PhysicsStepContext step = default, HipCommandWrench leftWrench = default, HipCommandWrench rightWrench = default)
         {
             if (!Report.Collecting || !Report.Finite) return;
+            if (Report.DynamicMode) { ObserveDynamic(bothDriving, torso, left, right, step, leftWrench, rightWrench); return; }
             // The existing safety owner handles an abort. Do not report a queued/cancelled solve as valid input.
             if (!bothDriving || left == null || right == null || left.DriveAborted || right.DriveAborted)
             { Report.AbortedStepsSkipped++; return; }

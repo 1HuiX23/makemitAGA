@@ -67,7 +67,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             if (!HasNotice) return "<color=#9fe7ff>最近自动停机：无记录。</color>";
             string history = _recordedEpoch == _epoch ? "" : "（历史记录；之后已重新启动驱动）";
             string guidance = _recordedEpoch == _epoch
-                ? "请停止本轮动作，执行 " + _eventStopCommand + " → arl_test_status → arl_test_cleanup，并保存 output.log。"
+                ? "请停止本轮动作，执行 " + _eventStopCommand + " → arl_test_cleanup → arl_test_status，并保存 output.log。"
                 : "这是上一驱动阶段的停机记录，不代表当前驱动已停止；当前运行状态见同次 arl_test_status。";
             return "<color=#ff4d4f><b>【ARL 自动停机：" + Category(_reason) + "】</b></color>" + history +
                 "\n" + Explanation(_reason) + "\n来源：" + ForGame(_owner, 100) +

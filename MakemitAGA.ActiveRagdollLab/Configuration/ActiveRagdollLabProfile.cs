@@ -574,9 +574,9 @@ namespace MakemitAGA.ActiveRagdollLab.Configuration
         private static string GetTemplateText()
         {
             return
-                "# MakemitAGA Active Ragdoll Lab 0.4.2.1 - Mechanical Contact Causal Requalification\r\n" +
+                "# MakemitAGA Active Ragdoll Lab 0.4.89 - Dynamic Hip Wrench Input Audit\r\n" +
                 "# 保存后执行：arl_profile_reload\r\n" +
-                "# 当前主线：v0.4.76动态骨盆+实体腿足无接触躯干恢复A/B；以下保留旧承重基础配置，实际参考与接触/载荷范围由正式会话显式选择。\r\n" +
+                "# 当前主线：v0.4.89沿用arl_pelvis_upper_load_test(b)及88受载范围，仅增加只读Hip实际命令、COM/挂点力矩和候选功率审计；候选反力不执行，Torso重力、Hip反力和Foot-tether reciprocal关闭。其它入口保留原范围。\r\n" +
                 "# 本文件只保留仍由活动运行时消费的配置；历史实验参数与 A/B 细节请查长期版本记录或旧版本 ZIP。\r\n" +
                 "\r\n" +
                 "# --- 目标与 Two-Body 几何 ---\r\n" +
@@ -644,7 +644,7 @@ namespace MakemitAGA.ActiveRagdollLab.Configuration
                 "singleLegFootBonePath=\r\n" +
                 "upperLegMass=7.0\r\n" +
                 "lowerLegMass=4.0\r\n" +
-                "# v0.4.7：Profile键值继续不变；控制器仍继承v0.3.78 frozen production。当前 stance-only contact 复用冻结的v0.4.5 gait阈值与v0.4.0 exact-support identity阈值，不新增profile参数；v0.4.6 discontinuity reconciliation不推广，正式A/B均恢复raw native-gait reference。Gravity/GSP/增益/MaxA/MaxTau/hard gate不变。\r\n" +
+                "# v0.4.7：Profile键值继续不变；stance-only contact复用冻结的v0.4.5 gait阈值与v0.4.0 exact-support identity阈值，不新增参数。v0.4.6 discontinuity reconciliation不推广，正式A/B均恢复raw native-gait reference；Gravity/GSP/增益/MaxA/MaxTau/hard gate不变。\r\n" +
                 "footAnkleFoundationEnabled=true\r\n" +
                 "footMass=1.0\r\n" +
                 "legSegmentThickness=0.10\r\n" +

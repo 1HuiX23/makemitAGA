@@ -5,7 +5,8 @@ using MakemitAGA.ActiveRagdollLab.Runtime;
 namespace MakemitAGA.ActiveRagdollLab.Physics
 {
     // Scoped replacement for the legacy virtual-anchor recovery qualification, never a safety bypass.
-    // Both run arms observe it; only B consumes it. The old freeze validator remains intact.
+    // Both V04770 run arms consume it; their only difference is the Hip-goal FF gate scope.
+    // The old freeze validator remains intact for legacy scopes and historical acceptance.
     internal sealed class DynamicTorsoRecoveryGate
     {
         internal const string LegacyPolicy = "LEGACY_FREEZE_RECOVERY";

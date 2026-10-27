@@ -71,7 +71,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         public bool AuditCompleted => _auditCompleted;
         public bool BuildFoundationValidated => _buildFoundationValidated;
-        public string LastAction => _lastAction;
         public string LastError => _lastError;
         public Snapshot Upper => _upper;
         public Snapshot Lower => _lower;

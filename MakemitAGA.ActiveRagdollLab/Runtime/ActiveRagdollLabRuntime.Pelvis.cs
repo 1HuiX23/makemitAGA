@@ -11,9 +11,24 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
         private sealed class PelvisRunPort : IPelvisRunPort
         {
             public string Scene => _sceneName + "#" + _sceneHandle;
-            public static string ResolveRequestedArm(string requestedArm, bool withLegs)
+            public static string ResolveRequestedArm(string requestedArm, PelvisRunScope scope)
             {
-                if (withLegs)
+                if (PelvisRunScopes.HasUpperWeight(scope))
+                    return string.Equals(requestedArm, "b", StringComparison.OrdinalIgnoreCase) || requestedArm == PelvisDynamicReceiverIsolation.DynamicUpperLoadArm
+                        ? PelvisDynamicReceiverIsolation.DynamicUpperLoadArm : null;
+                if (PelvisRunScopes.HasKneeCoupling(scope))
+                    return string.Equals(requestedArm, "b", StringComparison.OrdinalIgnoreCase) || requestedArm == PelvisDynamicReceiverIsolation.DynamicKneeCouplingArm
+                        ? PelvisDynamicReceiverIsolation.DynamicKneeCouplingArm : null;
+                if (scope == PelvisRunScope.DynamicLegLowerSelfWeightContact)
+                    return string.Equals(requestedArm, "b", StringComparison.OrdinalIgnoreCase) || requestedArm == PelvisDynamicReceiverIsolation.DynamicLowerLoadArm
+                        ? PelvisDynamicReceiverIsolation.DynamicLowerLoadArm : null;
+                if (scope == PelvisRunScope.DynamicLegFootSelfWeightContact)
+                    return string.Equals(requestedArm, "b", StringComparison.OrdinalIgnoreCase) || requestedArm == PelvisDynamicReceiverIsolation.DynamicFootLoadArm
+                        ? PelvisDynamicReceiverIsolation.DynamicFootLoadArm : null;
+                if (scope == PelvisRunScope.DynamicLegUnloadedContact)
+                    return string.Equals(requestedArm, "b", StringComparison.OrdinalIgnoreCase) || requestedArm == PelvisDynamicReceiverIsolation.DynamicContactArm
+                        ? PelvisDynamicReceiverIsolation.DynamicContactArm : null;
+                if (scope == PelvisRunScope.DynamicLegFreeSpace)
                 {
                     if (string.Equals(requestedArm, "a", StringComparison.OrdinalIgnoreCase) || requestedArm == PelvisDynamicReceiverIsolation.DynamicLegArmA)
                         return PelvisDynamicReceiverIsolation.DynamicLegArmA;
@@ -24,9 +39,9 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
                 return string.Equals(requestedArm, "b", StringComparison.OrdinalIgnoreCase) || requestedArm == PelvisDynamicReceiverIsolation.ArmB
                     ? PelvisDynamicReceiverIsolation.ArmB : null;
             }
-            public string ResolveArm(string requestedArm) => ResolveRequestedArm(requestedArm, _pelvisWithLegs);
-            public string Scope => _pelvisWithLegs ? "DYNAMIC_PELVIS_LEGS_FREE_SPACE" : "TORSO_PAIR_ONLY";
-            public string StopInstruction => _pelvisWithLegs ? "arl_pelvis_leg_test(stop)" : "arl_pelvis_test(stop)";
+            public string ResolveArm(string requestedArm) => ResolveRequestedArm(requestedArm, _pelvisScope);
+            public string Scope => PelvisRunScopes.Name(_pelvisScope);
+            public string StopInstruction => PelvisRunScopes.Command(_pelvisScope) + "(stop)";
             public bool CleanupPending => _cleanupPending;
             public string Preflight()
             {
@@ -36,7 +51,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
                 if (_pelvisWithLegs)
                 {
                     if (_legChain == null || !_legChain.IsBuilt) return "BILATERAL_BUILD_REQUIRED | 先arl_test_setup及PCA、hip_stack。";
-                    if (!PelvisTestActive && !_legChain.DynamicJoinReady) return "DYNAMIC_JOIN_NOT_READY | 需要双侧PCA/stack、驱动OFF、接触及负载OFF、预览关节已移除；查看arl_test_status。";
+                    if (!PelvisTestActive && !_legChain.DynamicJoinReady) return "DYNAMIC_JOIN_NOT_READY | 需要双侧PCA/stack、驱动OFF、接触及负载OFF、预览关节已移除；查看arl_test_status。 | " + _legChain.FreeSpaceBoundarySummary();
                 }
                 else if (_legChain != null) return "TORSO_ONLY_BUILD_REQUIRED | 请先arl_test_cleanup。";
                 if (TraceActive && !PelvisTestActive) return "OTHER_TRACE_ACTIVE";
@@ -60,17 +75,36 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             {
                 if (_pelvisWithLegs && _proxy.PelvisReceiverReady && !_legChain.DynamicParentsActive)
                     _legChain.ActivateDynamicParents(step);
+                if (_pelvisWithContact && _legChain.DynamicParentsActive && !_legChain.DynamicContactSelected)
+                {
+                    string contact = _legChain.PrepareDynamicContact(_pelvisScope);
+                    _logger?.LogInfo("[ARL][DYNAMIC_CONTACT_PREPARED] " + contact);
+                }
             }
+            private bool EnvironmentReady => _legChain != null && (_pelvisWithContact
+                ? (_legChain.DynamicContactSelected ? _legChain.DynamicContactMatchesScope(_pelvisScope) : !_pelvisTest.Session.Started && _legChain.FreeSpaceReady)
+                : !_legChain.DynamicContactSelected && _legChain.FreeSpaceReady);
             public bool Healthy => _proxy != null && _proxy.DriveEnabled && _proxy.Report.FiniteState && _proxy.PelvisReceiver.Finite &&
-                (_pelvisWithLegs ? (_legChain != null && _legChain.FreeSpaceReady && !_legChain.AnyDriveAborted &&
+                (_pelvisWithLegs ? (_proxy.Report.UseDynamicTorsoRecovery &&
+                    _proxy.Report.HipGoalGateOnlyHip &&
+                    _proxy.Report.UseCoherentHipNormalReference &&
+                    _proxy.Report.HipNormalSampleAgePrediction == (_proxy.PelvisReceiver.Arm == PelvisDynamicReceiverIsolation.DynamicLegArmA) &&
+                    _legChain != null && EnvironmentReady && !_legChain.AnyDriveAborted &&
                     _legChain.FootRelativeReferenceMatches(true) &&
+                    (!_legChain.DynamicParentsActive || _legChain.HipNormalReferenceMatches(_proxy.Report.UseCoherentHipNormalReference, _proxy.Report.HipNormalSampleAgePrediction)) &&
                     (!_pelvisTest.Session.Started || _legChain.DynamicParentsActive)) : _legChain == null);
             public string Issue
             {
                 get
                 {
+                    if (_proxy == null) return "RECEIVER_MISSING";
                     if (_pelvisWithLegs && _legChain != null)
                     {
+                        if (!_proxy.Report.UseDynamicTorsoRecovery || !_proxy.Report.HipGoalGateOnlyHip ||
+                            !_proxy.Report.UseCoherentHipNormalReference ||
+                            _proxy.Report.HipNormalSampleAgePrediction != (_proxy.PelvisReceiver.Arm == PelvisDynamicReceiverIsolation.DynamicLegArmA) ||
+                            (_legChain.DynamicParentsActive && !_legChain.HipNormalReferenceMatches(_proxy.Report.UseCoherentHipNormalReference, _proxy.Report.HipNormalSampleAgePrediction)))
+                            return "HIP_NORMAL_REFERENCE_V04800_POLICY_CONTRACT_LOST";
                         if (_legChain.AnyDriveAborted)
                         {
                             string primary = _legChain.PrimaryReport?.DriveAbortReason;
@@ -79,7 +113,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
                             if (!string.IsNullOrEmpty(secondary)) return secondary;
                             return "LEG_DRIVE_ABORT";
                         }
-                        if (!_legChain.FreeSpaceReady) return "DYNAMIC_LEG_FREE_SPACE_CONTRACT_LOST";
+                        if (!EnvironmentReady) return _pelvisWithContact ? "DYNAMIC_CONTACT_CONTRACT_LOST | " + _legChain.DynamicContactBoundarySummary() : "DYNAMIC_LEG_FREE_SPACE_CONTRACT_LOST | " + _legChain.FreeSpaceBoundarySummary();
                         if (!_legChain.FootRelativeReferenceMatches(true))
                             return "FOOT_REFERENCE_V04730_BILATERAL_CONTRACT_LOST";
                         if (_pelvisTest.Session.Started && !_legChain.DynamicParentsActive) return "DYNAMIC_LEG_DRIVE_LOST";
@@ -88,19 +122,23 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
                 }
             }
             public bool Ready => _proxy != null && _proxy.PelvisReceiverReady && (!_pelvisWithLegs ||
-                (_legChain != null && _legChain.DynamicParentsActive));
+                (_legChain != null && _legChain.DynamicParentsActive && (!_pelvisWithContact || _legChain.DynamicContactMatchesScope(_pelvisScope))));
             public bool Tracing => _proxy != null && _proxy.Report.TraceEnabled && _proxy.PelvisReceiver.TraceRunning &&
                 (!_pelvisWithLegs || (_legChain != null && _legChain.TraceFullyEnabled));
             public string ReadinessSummary() => "passiveResolved=" + (_proxy?.PelvisReceiver?.PassiveResolved ?? 0) +
                 " | legReferenceBound=" + (_proxy != null && _proxy.LegParentReferenceBound) +
                 " | legsJoined=" + (_pelvisWithLegs && _legChain != null && _legChain.DynamicParentsActive) +
-                " | hipCommonDragCompensation=RETIRED_OFF" +
                 " | footStepAttribution=READ_ONLY_V04710" +
                 " | footRelativeReference=" + (_pelvisWithLegs ? FootRelativeReference.ArmB : "NOT_BUILT") +
                 " | footReferenceBilateralMatched=" + (_legChain != null && _legChain.FootRelativeReferenceMatches(true)) +
                 " | torsoRecoveryPolicy=" + (_proxy != null && _proxy.Report.UseDynamicTorsoRecovery ? DynamicTorsoRecoveryGate.DynamicPolicy : DynamicTorsoRecoveryGate.LegacyPolicy) +
+                " | hipGoalGate=" + (_pelvisWithLegs ? (_proxy != null && _proxy.Report.HipGoalGateOnlyHip ? "HIP_ONLY_KEEP_KNEE" : "HIP_AND_KNEE") : "LEGACY_SCOPE") +
+                " | hipNormalReference=" + HipNormalReference.ArmFor(_pelvisWithLegs && _proxy != null && _proxy.Report.UseCoherentHipNormalReference,
+                    _pelvisWithLegs && _proxy != null && _proxy.Report.HipNormalSampleAgePrediction) +
+                " | hipNormalRecoveryHandoff=" + (_pelvisWithLegs ? HipCompositeReferenceShockAbsorberIsolation.NormalRecoveryHandoffMode : "NOT_BUILT") +
                 " | referenceBudget=" + (_proxy?.PelvisReceiver?.ReferenceBudgetMode ?? "<none>") +
-                " | referencePlanner=" + (_proxy?.PelvisReceiver?.ReferencePlannerMode ?? "<none>") + " | sameInputComparison=" + _pelvisWithLegs;
+                " | referencePlanner=" + (_proxy?.PelvisReceiver?.ReferencePlannerMode ?? "<none>") + " | sameInputComparison=" + _pelvisWithLegs + "/scope=PELVIS_PLANNER_REFERENCE_ONLY" +
+                (_pelvisWithLegs && _legChain != null ? " | " + (_pelvisWithContact ? _legChain.DynamicContactBoundarySummary() : _legChain.FreeSpaceBoundarySummary()) : "");
             public void BeginTrace()
             {
                 _proxy.SetTrace(true);
@@ -126,14 +164,15 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             }
             private static string CaptureDynamicLegResult(bool started)
             {
-                if (_legChain == null) return "DYNAMIC_LEG_FREE_SPACE_DATASET_READY=False | legs=<missing>";
-                bool ready = started && _proxy != null && _proxy.PelvisReceiver.ExposureReady && _legChain.SharedTraceContextReady && _legChain.DynamicParentsActive && _legChain.FreeSpaceReady && !_legChain.AnyDriveAborted &&
+                if (_legChain == null) return PelvisRunScopes.Dataset(_pelvisScope) + "=False | legs=<missing>";
+                bool ready = started && _proxy != null && _proxy.PelvisReceiver.ExposureReady && _legChain.SharedTraceContextReady && _legChain.DynamicParentsActive && (_pelvisWithContact ? _legChain.DynamicContactMatchesScope(_pelvisScope) : _legChain.FreeSpaceReady) && !_legChain.AnyDriveAborted &&
                     _legChain.BilateralReport.ClockParityPass && FootRunSafety(_legChain.PrimaryFootReport) && FootRunSafety(_legChain.SecondaryFootReport);
-                return "DYNAMIC_LEG_FREE_SPACE_DATASET_READY=" + ready + " | scope=NO_CONTACT_NO_GRAVITY_NO_HIP_REACTION | loadedSupportCertified=False\n" +
-                    _legChain.DynamicParentSummary() + "\n[PRIMARY_LEG_AT_FINALIZE]\n" + _legChain.PrimaryReport.GetFullText() +
+                return (_pelvisWithContact ? _legChain.DynamicContactEvidence(ready, _pelvisScope) : "DYNAMIC_LEG_FREE_SPACE_DATASET_READY=" + ready + " | scope=NO_CONTACT_NO_GRAVITY_NO_HIP_REACTION | loadedSupportCertified=False\n" +
+                    _legChain.FreeSpaceBoundarySummary()) + "\n" + _legChain.DynamicParentSummary() + (PelvisRunScopes.HasUpperWeight(_pelvisScope) ? "\n[HIP_WRENCH_INPUT_AUDIT_AT_FINALIZE]\n" + _legChain.HipPelvisLoadPath.GetDetails() : "") +
+                    "\n[PRIMARY_LEG_AT_FINALIZE]\n" + _legChain.PrimaryReport.GetFullText() +
                     "\n[SECONDARY_LEG_AT_FINALIZE]\n" + _legChain.SecondaryReport.GetFullText() +
-                    "\n[PRIMARY_FOOT_AT_FINALIZE]\n" + _legChain.PrimaryFootReport.GetFullText() +
-                    "\n[SECONDARY_FOOT_AT_FINALIZE]\n" + _legChain.SecondaryFootReport.GetFullText();
+                    "\n[PRIMARY_FOOT_AT_FINALIZE]\n" + _legChain.PrimaryFootReport.GetFullText(_pelvisWithContact) +
+                    "\n[SECONDARY_FOOT_AT_FINALIZE]\n" + _legChain.SecondaryFootReport.GetFullText(_pelvisWithContact);
             }
             public bool Restore(StringBuilder cleanup)
             {
@@ -147,7 +186,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
                 }
             }
             public string LiveDetails() => (_proxy?.PelvisReceiver?.GetDetails() ?? "<no-receiver>") + "\n" + (_proxy?.TorsoRecoverySummary ?? "<no-recovery>") + "\n" + (_proxy?.GetPelvisReceiverNativeState() ?? "<no-native>") +
-                (_pelvisWithLegs ? "\n" + (_legChain?.DynamicParentSummary() ?? "<no-legs>") : "");
+                (_pelvisWithLegs ? "\n" + (_legChain?.DynamicParentSummary() ?? "<no-legs>") + (_pelvisWithContact && _legChain != null ? "\n" + _legChain.DynamicContactBoundarySummary() : "") : "");
             public string Notice() => _automaticStop.Status();
             public void BeginNoticeSession(string stopCommand) { _automaticStop.BeginDriveSession(stopCommand); }
             public void AutomaticStop(string reason) { RecordAutomaticStop("PELVIS_BUNDLE", reason); }

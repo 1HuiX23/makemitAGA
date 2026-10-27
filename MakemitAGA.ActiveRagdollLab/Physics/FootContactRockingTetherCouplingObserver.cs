@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using System.Text;
 using MakemitAGA.ActiveRagdollLab.Model;
+using MakemitAGA.ActiveRagdollLab.Runtime;
 using UnityEngine;
 
 namespace MakemitAGA.ActiveRagdollLab.Physics
@@ -31,6 +32,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal struct NormalLoad
         {
             internal bool Captured, Resolved, Loaded, NormalValid, DragModelValid, LowerGravityScheduled, ReciprocalApplied, SelfApplied, PlanarApplied, HipLinearApplied;
+            internal bool DynamicLowerSelfWeight, DynamicKneeNormalCoupling;
             internal int PreFixed, SettledFixed, HipLinearFixed;
             internal bool KneeReactionInputValid, KneeReactionUpperApplied;
             internal int KneeReactionFixed;
@@ -68,7 +70,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private struct NormalTotals
         {
             internal int Count, Fresh, Held, NoGround, DynamicResponses;
-            internal NormalStat Inertia, Knee, HipLinear, Ankle, UpperKnee, UpperAnkle, UpperFoot, Ground, LowerResidual, FootResidual, PairResidual, InternalClosure;
+            internal NormalStat Inertia, Knee, HipLinear, Ankle, UpperKnee, UpperAnkle, UpperFoot, Ground, LowerResidual, FootResidual, PairResidual, InternalClosure, ExternalFootTether;
             internal void Add(Frame frame)
             {
                 NormalLoad d = frame.Normal;
@@ -83,6 +85,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 UpperFoot.Add(Vector3.Dot(d.UpperLoadFootWorld, d.PreNormal));
                 Ground.Add(d.GroundJ); LowerResidual.Add(d.LowerResidual); FootResidual.Add(d.FootResidual);
                 PairResidual.Add(d.PairResidual); InternalClosure.Add(d.InternalClosure);
+                ExternalFootTether.Add(d.DynamicLowerSelfWeight && !d.ReciprocalApplied ? d.FootTetherJ : 0f);
             }
             internal string Format() => "n-fresh-held-noGround-dynamicResponse=" + Count + "-" + Fresh + "-" + Held + "-" + NoGround + "-" + DynamicResponses +
                 "/Ns(mean,min,max):lowerInertia=" + Inertia.Format() + "/externalKnee=" + Knee.Format() +
@@ -90,7 +93,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 "/upperLoad(lowerKnee-lowerAnkle-foot)=" + UpperKnee.Format() + "|" + UpperAnkle.Format() + "|" + UpperFoot.Format() +
                 "/internalAnkle=" + Ankle.Format() + "/callbackGround=" + Ground.Format() +
                 "/lowerResidual=" + LowerResidual.Format() + "/footResidual=" + FootResidual.Format() +
-                "/pairResidual=" + PairResidual.Format() + "/internalPairClosure=" + InternalClosure.Format();
+                "/pairResidual=" + PairResidual.Format() + "/internalPairClosure=" + InternalClosure.Format() + "/externalFootTether=" + ExternalFootTether.Format();
         }
 
         private struct Frame
@@ -114,6 +117,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private float _velocityClosureMax, _commandClosureMax, _pointClosureMax, _positionClosureMax;
         private bool _normalFinite = true;
         private string _normalInvalidReason;
+        private PelvisRunScope _traceScope;
         private int _normalCaptured, _normalCensored, _normalSkipped, _normalUnknownPhase;
         private NormalTotals _normalAll, _normalIdle, _normalMotion;
         private Frame _normalPeakLowerResidual, _normalPeakKnee;
@@ -129,8 +133,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             (_normalIdle.Count < 30 ? "IDLE_LOADED_SAMPLES_BELOW_30" :
             (_normalMotion.Count < 30 ? "NON_IDLE_LOADED_SAMPLES_BELOW_30" : "READY")));
 
-        internal void ResetTrace(FootAnkleFoundationReport report)
+        internal void ResetTrace(FootAnkleFoundationReport report, PelvisRunScope scope = PelvisRunScope.TorsoPairOnly)
         {
+            _traceScope = scope;
             Array.Clear(_ring, 0, _ring.Length);
             _next = _count = _evaluations = _written = _resolved = _responseResolved = _censored = _tails = _exitCallbacks = 0;
             _pending = -1;
@@ -280,13 +285,21 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         }
 
         internal void CaptureNormalLoadInputs(bool trace, int fixedSequence, SingleLegChainReport leg,
-            Rigidbody lower, Vector3 kneeAppliedAcceleration, string sourceMotionPhase, FootAnkleFoundationReport report)
+            Rigidbody lower, Vector3 kneeAppliedAcceleration, string sourceMotionPhase, FootAnkleFoundationReport report,
+            PelvisRunScope scope = PelvisRunScope.TorsoPairOnly, PhysicsStepContext step = default, PelvisParentFrame parent = default)
         {
             if (!trace || _pending < 0) return;
             Frame f = _ring[_pending];
             try
             {
                 if (f.Fixed != fixedSequence || f.Normal.Captured) return;
+                if (scope != _traceScope) { LedgerInputInvalid(f.Loaded, "AUDIT_TRACE_SCOPE_MISMATCH"); return; }
+                bool dynamicLower = PelvisRunScopes.HasLowerWeight(scope);
+                bool kneeCoupling = PelvisRunScopes.HasKneeCoupling(scope);
+                // This call is downstream of every successful selector evaluation in the same SingleLeg step.
+                // Explicit OFF is accepted only for this typed scope with matching shared/local identities.
+                if (dynamicLower && !DynamicLowerInputsCurrent(f, leg, report, fixedSequence, step, parent, kneeCoupling, kneeAppliedAcceleration, PelvisRunScopes.HasUpperWeight(scope)))
+                { LedgerInputInvalid(f.Loaded, "DYNAMIC_LOWER_AUDIT_COMMAND_CONTEXT_INVALID"); return; }
                 // All selectors have run this step and clear their current fields even on an OFF solve.
                 // False is an actual selector result here, not a replacement for an absent command sample.
                 UpperSelfWeightSupportReport ul = leg?.UpperSelfWeightSupport;
@@ -305,7 +318,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     (!leg.StanceFootLowerReciprocalCurrentApplied || leg.StanceFootLowerReciprocalCurrentFixed == fixedSequence) &&
                     (!leg.StanceLowerSelfWeightTransferCurrentApplied || leg.StanceLowerSelfWeightTransferCurrentFixed == fixedSequence) &&
                     (!report.StanceLowerGroundAuthorityCurrentApplied || report.StanceLowerGroundAuthorityLastAppliedFixed == fixedSequence) &&
-                    (!f.Loaded || (leg.StanceLowerNativeGravityCurrentApplied && leg.StanceFootLowerReciprocalCurrentApplied &&
+                    (!f.Loaded || (leg.StanceLowerNativeGravityCurrentApplied && (dynamicLower || leg.StanceFootLowerReciprocalCurrentApplied) &&
                         leg.StanceLowerSelfWeightTransferCurrentApplied));
                 if (!current) { LedgerInputInvalid(f.Loaded, "COMMAND_CLOCK_OR_LOAD_INPUT_MISSING"); return; }
                 // V04190 reads mass/environment on every completed selector step, including non-STANCE.
@@ -338,6 +351,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 NormalLoad d = new NormalLoad
                 {
                     Captured = true, Loaded = f.Loaded, NormalValid = f.Loaded, SourcePhase = sourceMotionPhase,
+                    DynamicLowerSelfWeight = dynamicLower, DynamicKneeNormalCoupling = kneeCoupling,
                     LowerMass = mass, FootMass = f.Mass, FootDrag = f.Drag,
                     LowerGravityScheduled = leg.StanceLowerNativeGravityCurrentApplied,
                     ReciprocalApplied = leg.StanceFootLowerReciprocalCurrentApplied,
@@ -375,8 +389,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 d.FootSelfJ = f.Mass * Vector3.Dot(f.LoadA, n) * f.Dt;
                 d.FootGravityJ = f.Mass * Vector3.Dot(f.GravityA, n) * f.Dt;
                 // Only the Lower-Ankle / Foot pair is internal here. The Upper-Knee input crosses this subsystem boundary.
-                d.InternalClosure = Vector3.Dot(d.FootTetherWorld + d.ReciprocalWorld + d.FootSelfWorld + d.SelfWorld +
-                    d.UpperLoadLowerAnkleWorld + d.UpperLoadFootWorld, n);
+                d.InternalClosure = Vector3.Dot(InternalAnkleImpulse(d), n);
                 if (!NormalInputsFinite(d)) { LedgerInputInvalid(f.Loaded, "IMPULSE_INPUT_NONFINITE"); return; }
                 CaptureDragModel(ref d, lower); // failure leaves the raw ledger intact and the model explicitly NA
                 f.Normal = d; _ring[_pending] = f;
@@ -385,6 +398,59 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             catch (Exception e) { LedgerInputInvalid(f.Loaded, "CAPTURE_EXCEPTION:" + e.GetType().Name); }
             finally { CopyToReport(report, false); }
         }
+
+        private static bool DynamicLowerInputsCurrent(Frame f, SingleLegChainReport leg, FootAnkleFoundationReport foot,
+            int fixedSequence, PhysicsStepContext step, PelvisParentFrame parent, bool kneeCoupling, Vector3 kneeAcceleration, bool upperWeight = false)
+        {
+            if (leg == null || foot == null || !step.Valid || !parent.Matches(step) || !parent.Finite() ||
+                !leg.RuntimeContext.Matches(step) || !foot.RuntimeContext.Matches(step) ||
+                leg.FixedUpdateSequence != fixedSequence || foot.FootControllerLastCompletedFixedSequence != fixedSequence || f.Dt != step.Dt ||
+                f.NativeGravity != f.Loaded || f.GravityScheduled != f.Loaded || f.LoadScheduled != f.Loaded)
+                return false;
+            UpperSelfWeightSupportReport upper = leg.UpperSelfWeightSupport;
+            KneeSupportNormalReactionReport knee = leg.KneeSupportReaction;
+            return leg.StanceFootLowerReciprocalArm == FootLowerSupportNormalReciprocalLoadTransferIsolation.ArmA &&
+                leg.StanceFootLowerReciprocalFinite && !leg.StanceFootLowerReciprocalEnabled &&
+                !leg.StanceFootLowerReciprocalCurrentApplied && leg.StanceFootLowerReciprocalCurrentFixed == 0 &&
+                leg.StanceLowerNativeGravityArm == LowerStanceNativeGravitySupportLoadIsolation.ArmB && leg.StanceLowerNativeGravityFinite && leg.StanceLowerNativeGravityEnabled &&
+                leg.StanceLowerNativeGravityCurrentApplied == f.Loaded &&
+                leg.StanceLowerNativeGravityCurrentScheduledFixed == (f.Loaded ? fixedSequence : 0) &&
+                leg.StanceLowerSelfWeightTransferArm == LowerSelfWeightSupportNormalLoadTransferIsolation.ArmB && leg.StanceLowerSelfWeightTransferFinite && leg.StanceLowerSelfWeightTransferEnabled &&
+                leg.StanceLowerSelfWeightTransferCurrentApplied == f.Loaded &&
+                leg.StanceLowerSelfWeightTransferCurrentFixed == (f.Loaded ? fixedSequence : 0) &&
+                foot.StanceFootNativeGravityArm == FootStanceNativeGravitySupportLoadIsolation.ArmB && foot.StanceFootNativeGravityFinite && foot.StanceFootNativeGravityEnabled &&
+                foot.StanceFootNativeGravityCurrentApplied == f.Loaded &&
+                foot.StanceFootNativeGravityCurrentScheduledFixed == (f.Loaded ? fixedSequence : 0) &&
+                foot.StanceLowerGroundAuthorityArm == FootStanceLowerGroundAnchorAuthority.ArmA && foot.StanceLowerGroundAuthorityFinite &&
+                !foot.StanceLowerGroundAuthorityEnabled && !foot.StanceLowerGroundAuthorityCurrentApplied &&
+                foot.StanceLowerGroundAuthorityAppliedAccelerationWorld == Vector3.zero &&
+                (upperWeight ? UpperSelfWeightSupportNormalLoadTransferIsolation.DynamicCommandMatches(upper, leg, foot, fixedSequence, f.Loaded) :
+                upper != null && upper.Finite && upper.Arm == UpperSelfWeightSupportNormalLoadTransferIsolation.IdleArm &&
+                !upper.Selected && !upper.Enabled && upper.CurrentFixed == fixedSequence &&
+                !upper.CurrentApplied && !upper.GravityReadback && upper.CurrentUpperForce == Vector3.zero &&
+                upper.CurrentLowerKneeForce == Vector3.zero && upper.CurrentLowerAnkleForce == Vector3.zero && upper.CurrentFootForce == Vector3.zero) &&
+                (kneeCoupling ? DynamicKneeInputsCurrent(f, leg, knee, fixedSequence, kneeAcceleration) :
+                knee != null && knee.Finite && knee.Arm == KneeSupportNormalReactionIsolation.ArmA && !knee.Enabled &&
+                knee.CurrentFixed == fixedSequence && !knee.CurrentApplied && knee.CurrentUpperForceWorld == Vector3.zero);
+        }
+
+        private static bool DynamicKneeInputsCurrent(Frame f, SingleLegChainReport leg,
+            KneeSupportNormalReactionReport knee, int fixedSequence, Vector3 kneeAcceleration)
+        {
+            if (knee == null || !knee.Finite || knee.Arm != KneeSupportNormalReactionIsolation.ArmB || !knee.Enabled ||
+                knee.CurrentFixed != fixedSequence || knee.CurrentSourceFixed != fixedSequence ||
+                knee.CurrentEligible != f.Loaded || knee.CurrentApplied != f.Loaded || knee.CurrentNormalConstraint != f.Loaded ||
+                !V(knee.CurrentUpperForceWorld) || !V(kneeAcceleration)) return false;
+            if (!f.Loaded) return knee.CurrentUpperForceWorld == Vector3.zero;
+            return F(knee.CurrentLowerMass) && knee.CurrentLowerMass > 0f && F(knee.CurrentUpperMass) && knee.CurrentUpperMass > 0f &&
+                Mathf.Abs(knee.CurrentLowerMass - leg.StanceLowerNativeGravityLowerMass) <= 0.0001f &&
+                V(knee.CurrentNormalWorld) && (knee.CurrentNormalWorld - f.LoadN).magnitude <= 0.0001f &&
+                (knee.CurrentUpperForceWorld + knee.CurrentLowerMass * Vector3.Dot(kneeAcceleration, f.LoadN) * f.LoadN).magnitude <= 0.0001f;
+        }
+
+        private static Vector3 InternalAnkleImpulse(NormalLoad d) =>
+            (d.DynamicLowerSelfWeight && !d.ReciprocalApplied ? Vector3.zero : d.FootTetherWorld) +
+            d.ReciprocalWorld + d.FootSelfWorld + d.SelfWorld + d.UpperLoadLowerAnkleWorld + d.UpperLoadFootWorld;
 
         private static Vector3 LinearDragModelImpulse(float mass, float drag, float dt, Vector3 preV, Vector3 commandJ)
             => (Mathf.Max(1f - drag * dt, 0f) - 1f) * (mass * preV + commandJ);
@@ -528,9 +594,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (!format) return;
             report.DynamicNormalLoadTraceSummary = "captured-resolved-censored-skipped-unknownSource=" + _normalCaptured + "-" + _normalAll.Count + "-" + _normalCensored + "-" + _normalSkipped + "-" + _normalUnknownPhase +
                 " | all={" + _normalAll.Format() + "} | sourceIDLE={" + _normalIdle.Format() + "} | sourceNON_IDLE={" + _normalMotion.Format() +
-                "} | scope=LOADED_FOOT_LOWER_COM_PRE_NORMAL/readyMin(total-IDLE-NON_IDLE)=50-30-30/readinessReason=" + NormalLoadReadinessReason + "/responseExposureDeltaV=0.02mps" +
+                "} | scope=LOADED_FOOT_LOWER_COM_PRE_NORMAL/traceScope=" + _traceScope + "/readyMin(total-IDLE-NON_IDLE)=50-30-30/readinessReason=" + NormalLoadReadinessReason + "/responseExposureDeltaV=0.02mps" +
                 "/knee=EXTERNAL_CHILD_ONLY_COM_COMMAND/hipLinear=EXTERNAL_COMMON_MODE_COM_COMMAND/ankle=INTERNAL_NORMAL_FORCE_PAIR/inputRevision=" + InputRevision +
-                "/residual=ENDPOINT_EXPLICIT_IMPULSE_LEDGER_NOT_MEASURED_MISSING_FORCE/callbackJ=NOT_COMPLETE_GRF/observerOnly=True" +
+                "/footTether=EXTERNAL_WHEN_RECIPROCAL_OFF_IN_DYNAMIC_LOWER_WEIGHT_SCOPE/knee=EXTERNAL_TO_LOWER_FOOT_PAIR_EVEN_WHEN_UPPER_RECIPROCAL_ON/residual=ENDPOINT_EXPLICIT_IMPULSE_LEDGER_NOT_MEASURED_MISSING_FORCE/callbackJ=NOT_COMPLETE_GRF/observerOnly=True" +
                 " | transitionWorldLedger={finite=" + _transitionFinite + "/reason=" + (_transitionInvalidReason ?? "<none>") +
                 "/captured-resolved-censored-skipped=" + _transitionCaptured + "-" + _transitionResolved + "-" + _transitionCensored + "-" + _transitionSkipped +
                 "/scope=UNLOADED_ACTUAL_INPUTS_NOT_LOADED_QUALIFICATION} | dragModel(valid-missing)=" + _dragModelValid + "-" + _dragModelMissing +
@@ -663,8 +729,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 ScalarProjectionMatches(d.LowerResidual, Vector3.Dot(lower, d.PreNormal)) &&
                 ScalarProjectionMatches(d.FootResidual, Vector3.Dot(foot, d.PreNormal)) &&
                 ScalarProjectionMatches(d.PairResidual, Vector3.Dot(lower + foot, d.PreNormal)) &&
-                ScalarProjectionMatches(d.InternalClosure, Vector3.Dot(d.FootTetherWorld + d.ReciprocalWorld + d.FootSelfWorld + d.SelfWorld +
-                    d.UpperLoadLowerAnkleWorld + d.UpperLoadFootWorld, d.PreNormal));
+                ScalarProjectionMatches(d.InternalClosure, Vector3.Dot(InternalAnkleImpulse(d), d.PreNormal));
         }
 
         private static bool ScalarProjectionMatches(float actual, float projected) => F(actual) && F(projected) &&
@@ -692,6 +757,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             string row = "pre-settled=" + d.PreFixed + "-" + d.SettledFixed + "/source=" + (d.SourcePhase ?? "<none>") +
                 "/massLowerFoot=" + S(d.LowerMass) + "-" + S(d.FootMass) + "/dt=" + S(d.Dt) +
                 "/scope=" + (d.Loaded ? "LOADED" : "UNLOADED_ACTUAL_COMMANDS") + "/inputRevision=" + InputRevision +
+                "/dynamicLowerSelfWeight=" + d.DynamicLowerSelfWeight + "/dynamicKneeNormalCoupling=" + d.DynamicKneeNormalCoupling +
                 "/hipLinear(active-fixed)=" + d.HipLinearApplied + "-" + d.HipLinearFixed +
                 "/actualSelectors(lowerGravity-reciprocal-self-planar)=" + d.LowerGravityScheduled + "-" + d.ReciprocalApplied + "-" + d.SelfApplied + "-" + d.PlanarApplied;
             if (d.NormalValid)
@@ -701,6 +767,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     "/lowerGravity=" + S(d.LowerGravityJ) + "/footTether=" + S(d.FootTetherJ) +
                     "/footSelf=" + S(d.FootSelfJ) + "/footGravity=" + S(d.FootGravityJ) + "/internalPairClosure=" + S(d.InternalClosure);
             else row += "/preN=NA_NO_LOADED_NORMAL/Ns:preNormalProjection=NA_USE_WINDOW_REFERENCE";
+            if (d.NormalValid && d.DynamicLowerSelfWeight)
+                row += "/externalFootTether=" + S(!d.ReciprocalApplied ? d.FootTetherJ : 0f);
+            if (d.NormalValid && d.DynamicKneeNormalCoupling)
+                row += "/kneeNormalCommandPairClosureNs=" + S(Vector3.Dot(d.KneeWorld + d.KneeReactionUpperWorld, d.PreNormal)) +
+                    "/kneePairScope=LOWER_UPPER_NORMAL_COMMANDS_NOT_LOWER_FOOT_INTERNAL_OR_ANGULAR_CLOSURE";
             row += "/worldComponentJ(knee-planar-reciprocal-self-lowerG)=" + W(d.KneeWorld) + "-" + W(d.PlanarWorld) + "-" +
                 W(d.ReciprocalWorld) + "-" + W(d.SelfWorld) + "-" + W(d.LowerGravityWorld) +
                 "/worldHipLinearJ=" + W(d.HipLinearWorld) +

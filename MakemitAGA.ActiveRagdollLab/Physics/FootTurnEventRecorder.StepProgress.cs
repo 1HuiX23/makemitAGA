@@ -125,8 +125,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 !V(l.HipFeedforwardInputA) || !V(l.HipFeedforwardSelectedA) ||
                 !F(l.HipFeedforwardAge) || !F(l.HipFeedforwardMaxAge) ||
                 !F(l.HipFeedforwardGain) || !F(l.HipFeedforwardBound))
-            { sb.Append(" hipFF_V04760=NA"); return; }
-            sb.Append(" hipFF_V04760(enabled-active-clamped-stateBits)=").Append(l.HipFeedforwardEnabled)
+            { sb.Append(" hipFF_V04770=NA"); return; }
+            sb.Append(" hipFF_V04770(enabled-active-clamped-stateBits)=").Append(l.HipFeedforwardEnabled)
                 .Append('/').Append(l.HipFeedforwardActive).Append('/').Append(l.HipFeedforwardClamped).Append('/').Append(l.HipFeedforwardStateBits)
                 .Append(" hipFFReason=").Append(l.HipFeedforwardReason)
                 .Append(" hipFF(age-maxAge-gain-bound)=").Append(S(l.HipFeedforwardAge)).Append('/').Append(S(l.HipFeedforwardMaxAge))
@@ -139,6 +139,39 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 .Append(" torsoRecoveryErrors(COMm-pelvisDeg-chestRelDeg-nativeM-legacyM)=").Append(S(r.ComErrorMeters))
                 .Append('/').Append(S(r.PelvisErrorDegrees)).Append('/').Append(S(r.ChestRelativeErrorDegrees))
                 .Append('/').Append(S(r.NativeAnchorGapMeters)).Append('/').Append(S(r.LegacyAnchorGapMeters));
+        }
+
+        private static void AppendHipNormalReferenceWitness(StringBuilder sb, Frame f)
+        {
+            HipNormalReferenceState r = f.Leg.HipNormalReference;
+            if (!f.LegValid || !r.Matches(f.Leg.Step) || r.Reason == null ||
+                !Q(r.PreviousR) || !Q(r.InputR) || !V(r.PreviousW) || !V(r.InputW) || !V(r.A) ||
+                !F(r.PredictionSeconds) || !F(r.MaxW) || !F(r.MaxA))
+            { sb.Append(" hipNormal_V04780=NA"); return; }
+            sb.Append(" hipNormal_V04780(selected-applied-alphaLimited-speedLimited)=").Append(r.Selected)
+                .Append('/').Append(r.Applied).Append('/').Append(r.AlphaLimited).Append('/').Append(r.SpeedLimited)
+                .Append(" hipNormalSampleAgePrediction=").Append(r.SampleAgePrediction)
+                .Append(" hipNormalRecoveryHandoff_V04810(started-active)=").Append(f.Leg.HipNormalRecoveryHandoffStarted)
+                .Append('/').Append(f.Leg.HipNormalRecoveryHandoffActive)
+                .Append(" hipNormalReason=").Append(r.Reason)
+                .Append(" hipNormal(prediction-maxW-maxA)=").Append(S(r.PredictionSeconds)).Append('/').Append(S(r.MaxW)).Append('/').Append(S(r.MaxA))
+                .Append(" hipNormalR(previous-input)=").Append(R(r.PreviousR)).Append('/').Append(R(r.InputR))
+                .Append(" hipNormalW(previous-input-plannedA)=").Append(T(r.PreviousW)).Append('/').Append(T(r.InputW)).Append('/').Append(T(r.A));
+        }
+
+        private static void AppendKneeFeedforwardWitness(StringBuilder sb, Frame f)
+        {
+            LegTurnStepEvidence l = f.Leg;
+            if (!f.LegValid || !l.KneeFeedforwardValid || !l.KneeCommitted || l.KneeFeedforwardReason == null ||
+                !F(l.KneeFeedforwardInputSigned) || !F(l.KneeFeedforwardSelectedSigned) ||
+                !F(l.KneeFeedbackSigned) || !F(l.KneeFeedforwardAllocatedSigned) || !F(l.KneeFlexionFinalSigned))
+            { sb.Append(" kneeFF_V04770=NA"); return; }
+            sb.Append(" kneeFF_V04770(independent-active-clamped)=").Append(l.HipGoalGateKneeIndependent)
+                .Append('/').Append(l.KneeFeedforwardActive).Append('/').Append(l.KneeFeedforwardClamped)
+                .Append(" kneeFFReason=").Append(l.KneeFeedforwardReason)
+                .Append(" kneeFFSigned(input-selected-allocated-feedback-finalFlexion)=").Append(S(l.KneeFeedforwardInputSigned))
+                .Append('/').Append(S(l.KneeFeedforwardSelectedSigned)).Append('/').Append(S(l.KneeFeedforwardAllocatedSigned))
+                .Append('/').Append(S(l.KneeFeedbackSigned)).Append('/').Append(S(l.KneeFlexionFinalSigned));
         }
 
         private void ResetStepProgress()

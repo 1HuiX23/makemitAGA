@@ -10,8 +10,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     {
         internal const string Mode = "PELVIS_RUNTIME_SESSION_PREFLIGHT_V04600";
         internal const string ArmB = "B_V04600_RUNTIME_SESSION_CONTEXT";
-        internal const string DynamicLegArmA = "A_V04760_LEGACY_TORSO_RECOVERY";
-        internal const string DynamicLegArmB = "B_V04760_DYNAMIC_TORSO_RECOVERY";
+        internal const string DynamicLegArmA = "A_V04830_COHERENT_HIP_NORMAL_AGE_PREDICTED";
+        internal const string DynamicLegArmB = "B_V04830_COHERENT_HIP_NORMAL_NO_AGE_PREDICTION";
         internal const string IdleArm = "OFF_V04470_PELVIS_RECEIVER";
         internal readonly PelvisReceiverReport Report = new PelvisReceiverReport();
         private Rigidbody _pelvis, _chest;
@@ -238,8 +238,14 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             }
         }
         // V04710 read-only Foot attribution uses the retained V04670 braking reference.
-        private static bool UsesBrakingReserve(string arm) => arm == DynamicLegArmA || arm == DynamicLegArmB;
-        internal static bool IsExperimentArm(string arm) => arm == ArmB || arm == DynamicLegArmA || arm == DynamicLegArmB;
+        internal const string DynamicContactArm = "B_V04830_DYNAMIC_UNLOADED_STANCE_CONTACT";
+        internal const string DynamicFootLoadArm = "B_V04840_DYNAMIC_FOOT_SELF_WEIGHT_CONTACT";
+        internal const string DynamicLowerLoadArm = "B_V04860_DYNAMIC_LOWER_SELF_WEIGHT_LEDGER_AUDIT";
+        internal const string DynamicKneeCouplingArm = "B_V04870_DYNAMIC_KNEE_NORMAL_COUPLING";
+        internal const string DynamicUpperLoadArm = "B_V04880_DYNAMIC_UPPER_SELF_WEIGHT";
+        internal static bool IsDynamicLegArm(string arm) => arm == DynamicUpperLoadArm || arm == DynamicLegArmA || arm == DynamicLegArmB || arm == DynamicContactArm || arm == DynamicFootLoadArm || arm == DynamicLowerLoadArm || arm == DynamicKneeCouplingArm;
+        private static bool UsesBrakingReserve(string arm) => IsDynamicLegArm(arm);
+        internal static bool IsExperimentArm(string arm) => arm == ArmB || IsDynamicLegArm(arm);
         internal string GetNativeState() { TryGetNativeState(out string state); return state; }
         internal bool TryGetNativeState(out string state)
         {

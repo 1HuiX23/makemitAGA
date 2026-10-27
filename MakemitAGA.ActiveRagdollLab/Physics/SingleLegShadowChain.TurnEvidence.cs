@@ -7,6 +7,37 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     internal sealed partial class SingleLegShadowChain
     {
         private LegTurnStepEvidence _legTurnCurrent;
+        private HipCommandWrench _hipWrenchCurrent;
+        internal HipCommandWrench DynamicHipCommand => _hipWrenchCurrent;
+
+        // Called only after the original force and physical AddTorque calls have returned.
+        // Optional diagnostic failure cannot alter the controller or its run safety.
+        private void CaptureDynamicHipCommand(Vector3 committedTorque)
+        {
+            if (!_traceEnabled || !_dynamicParentActive || !PelvisRunScopes.HasUpperWeight(_dynamicScope)) return;
+            try
+            {
+                if (!_hipCharacterJointResponseIsolation.Enabled || !_hipCharacterJointResponseIsolation.UpperOnlyTetherEnabled ||
+                    !_hipAngularActuator.Enabled || !_hipAngularActuator.CurrentValid || _hipJoint != null ||
+                    !_physicalParent.Matches(_runtimeStep) || _physicalParent.BodyId != _pelvisBody.GetInstanceID()) return;
+                Vector3 upperCom = _upperBody.worldCenterOfMass;
+                Vector3 childAnchor = GetHipChildAnchorWorld(), parentAnchor = GetHipParentAnchorWorld();
+                _hipWrenchCurrent = new HipCommandWrench
+                {
+                    Valid = true, Step = _runtimeStep, Fixed = _fixedUpdateSequence,
+                    UpperBodyId = _upperBody.GetInstanceID(), ParentBodyId = _pelvisBody.GetInstanceID(), Mass = _upperBody.mass,
+                    UpperCom = upperCom, ParentCom = _physicalParent.SettledPoint(_physicalParent.ComLocal),
+                    ChildAnchor = childAnchor, ParentAnchor = parentAnchor,
+                    UpperV = _upperBody.velocity, UpperW = _upperBody.angularVelocity,
+                    ParentV = _physicalParent.ComVelocity, ParentW = _physicalParent.W,
+                    ChildPointV = PointVelocity(_upperBody, childAnchor),
+                    ParentPointV = _physicalParent.SettledPointVelocity(_rawHipConnectedAnchorLocal),
+                    Force = _upperBody.mass * _hipCharacterJointResponseIsolation.CurrentAppliedAccelerationWorld,
+                    Torque = committedTorque
+                };
+            }
+            catch { _hipWrenchCurrent = default; }
+        }
         private SourceStepContext _legTurnRawSource;
         private bool _legTurnRawSourceValid;
         private float _legTurnRawSourceDt;
@@ -27,12 +58,14 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private void ResetLegTurnEvidence()
         {
             _legTurnCurrent = new LegTurnStepEvidence();
+            _hipWrenchCurrent = default;
             _legTurnRawSourceValid = false;
         }
 
         private void BeginLegTurnEvidence()
         {
             _legTurnCurrent = new LegTurnStepEvidence();
+            _hipWrenchCurrent = default;
             if (!_traceEnabled || !_dynamicParentActive) return;
             _legTurnCurrent.Step = _runtimeStep; _legTurnCurrent.Fixed = _fixedUpdateSequence;
             _legTurnCurrent.Source = _runtimeSource;
@@ -46,7 +79,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _legTurnCurrent.UpperW = _measuredUpperAngularVelocity;
         }
 
-        private void CaptureLegTurnHipFeedforward(bool stepValid, Vector3 inputA)
+        private void CaptureLegTurnHipFeedforward(bool stepValid, Vector3 inputA, float kneeInputA)
         {
             if (!_traceEnabled || !_dynamicParentActive) return;
             try
@@ -54,8 +87,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 // Called immediately after FF.Step, before any of its gate owners advance again.
                 // Read the actual first-match reason; do not create a second decision tree from the bits.
                 TwoBodyProxyReport torso = _torso.Report;
+                _legTurnCurrent.HipNormalReference = _hipNormalReference.Current;
+                _legTurnCurrent.HipNormalRecoveryHandoffStarted = _hipCompositeReferenceShockAbsorber.NormalRecoveryStartedThisStep;
+                _legTurnCurrent.HipNormalRecoveryHandoffActive = _hipCompositeReferenceShockAbsorber.NormalRecoveryHandoffActive;
                 _legTurnCurrent.HipFeedforwardEnabled = _legAngularAccelerationFeedforward.Enabled;
-                _legTurnCurrent.HipFeedforwardActive = _legAngularAccelerationFeedforward.ActiveThisStep;
+                _legTurnCurrent.HipFeedforwardActive = _legAngularAccelerationFeedforward.HipActiveThisStep;
                 _legTurnCurrent.HipFeedforwardClamped = _legAngularAccelerationFeedforward.HipClamped;
                 _legTurnCurrent.HipFeedforwardReason = _legAngularAccelerationFeedforward.SuppressionReason;
                 _legTurnCurrent.HipFeedforwardStateBits = (torso == null ? 1 : 0) |
@@ -70,6 +106,14 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _legTurnCurrent.TorsoRecoveryDynamicSelected = torso != null && torso.UseDynamicTorsoRecovery;
                 _legTurnCurrent.TorsoRecoveryLegacyActive = torso != null && torso.FreezeRecoveryActive;
                 if (torso != null) _legTurnCurrent.TorsoRecovery = torso.DynamicTorsoRecovery;
+                _legTurnCurrent.HipGoalGateKneeIndependent = _dynamicParentActive && torso != null && torso.HipGoalGateOnlyHip;
+                _legTurnCurrent.KneeFeedforwardActive = _legAngularAccelerationFeedforward.KneeActiveThisStep;
+                _legTurnCurrent.KneeFeedforwardClamped = _legAngularAccelerationFeedforward.KneeClamped;
+                _legTurnCurrent.KneeFeedforwardReason = _legAngularAccelerationFeedforward.KneeSuppressionReason;
+                _legTurnCurrent.KneeFeedforwardInputSigned = kneeInputA;
+                _legTurnCurrent.KneeFeedforwardSelectedSigned = _legAngularAccelerationFeedforward.KneeAppliedSigned;
+                _legTurnCurrent.KneeFeedforwardValid = stepValid && _legTurnCurrent.KneeFeedforwardReason != null &&
+                    IsFinite(kneeInputA) && IsFinite(_legTurnCurrent.KneeFeedforwardSelectedSigned);
                 _legTurnCurrent.HipFeedforwardAge = _report.TargetRenderSampleAgeSeconds;
                 _legTurnCurrent.HipFeedforwardMaxAge = _profile.LegAngularAccelerationFeedforwardMaxSourceSampleAgeSeconds;
                 _legTurnCurrent.HipFeedforwardGain = _profile.LegAngularAccelerationFeedforwardGain;
@@ -83,7 +127,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     IsFinite(_legTurnCurrent.HipFeedforwardAge) && IsFinite(_legTurnCurrent.HipFeedforwardMaxAge) &&
                     IsFinite(_legTurnCurrent.HipFeedforwardGain) && IsFinite(_legTurnCurrent.HipFeedforwardBound);
             }
-            catch { _legTurnCurrent.HipFeedforwardValid = false; } // Optional evidence cannot interrupt the controller.
+            catch { _legTurnCurrent.HipFeedforwardValid = _legTurnCurrent.KneeFeedforwardValid = false; } // Optional evidence cannot interrupt the controller.
         }
 
         private void CaptureLegTurnHip(bool frameActive, Quaternion parentR, Vector3 targetRelativeW,
@@ -100,16 +144,21 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _legTurnCurrent.Modes = (frameActive ? 1 : 0) |
                 (_hipSourceReferenceShockAbsorber.Active ? 2 : 0) | (_hipReferenceGovernor.Active ? 4 : 0) |
                 (_hipCompositeReferenceShockAbsorber.OutputAppliedThisStep ? 8 : 0) |
-                (_hipAuthority.PhysicalRecoveryPending ? 16 : 0) | (_legAngularAccelerationFeedforward.ActiveThisStep ? 32 : 0) |
+                (_hipAuthority.PhysicalRecoveryPending ? 16 : 0) | (_legAngularAccelerationFeedforward.HipActiveThisStep ? 32 : 0) |
                 (_hipMechanicalParentTransport.ActiveThisStep ? 64 : 0) | (clamped ? 128 : 0);
             _legTurnCurrent.HipCommitted = true;
         }
 
-        private void CaptureLegTurnKnee(Vector3 targetRelativeW, Vector3 relativeA, Vector3 totalA)
+        private void CaptureLegTurnKnee(Vector3 targetRelativeW, Vector3 relativeA, Vector3 totalA,
+            float feedbackSigned, float allocatedFeedforwardSigned, float finalFlexionSigned)
         {
             if (!_traceEnabled || !_dynamicParentActive) return;
             _legTurnCurrent.KneeTargetRelW = targetRelativeW;
             _legTurnCurrent.KneeRelativeA = relativeA; _legTurnCurrent.KneeTotalA = totalA;
+            // Values from the successful original allocator/native command, not a second allocation.
+            _legTurnCurrent.KneeFeedbackSigned = feedbackSigned;
+            _legTurnCurrent.KneeFeedforwardAllocatedSigned = allocatedFeedforwardSigned;
+            _legTurnCurrent.KneeFlexionFinalSigned = finalFlexionSigned;
             _legTurnCurrent.KneeCommitted = true;
         }
     }

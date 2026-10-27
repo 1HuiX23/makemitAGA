@@ -194,24 +194,27 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (!IsFinite(expectedNormalForce) || !IsFinite(expectedNormalImpulse) || !IsFinite(normalSpeedAbs) || !IsFinite(kneeSupportA))
                 return Invalidate("LOWER_NATIVE_GRAVITY_ATTRIBUTION_NONFINITE", report);
 
-            _eligibleSamples++;
-            _expectedNormalForceSum += expectedNormalForce;
-            _expectedNormalForceMax = Mathf.Max(_expectedNormalForceMax, expectedNormalForce);
-            _expectedNormalImpulseSum += expectedNormalImpulse;
-            _expectedNormalImpulseMax = Mathf.Max(_expectedNormalImpulseMax, expectedNormalImpulse);
-            _lowerSupportNormalSpeedAbsSum += normalSpeedAbs;
-            _lowerSupportNormalSpeedAbsMax = Mathf.Max(_lowerSupportNormalSpeedAbsMax, normalSpeedAbs);
-            _kneeTetherSupportNormalAccelerationSum += kneeSupportA;
-            if (!_kneeTetherSupportNormalAccelerationHasSample)
+            if (traceEnabled)
             {
-                _kneeTetherSupportNormalAccelerationMin = kneeSupportA;
-                _kneeTetherSupportNormalAccelerationMax = kneeSupportA;
-                _kneeTetherSupportNormalAccelerationHasSample = true;
-            }
-            else
-            {
-                _kneeTetherSupportNormalAccelerationMin = Mathf.Min(_kneeTetherSupportNormalAccelerationMin, kneeSupportA);
-                _kneeTetherSupportNormalAccelerationMax = Mathf.Max(_kneeTetherSupportNormalAccelerationMax, kneeSupportA);
+                _eligibleSamples++;
+                _expectedNormalForceSum += expectedNormalForce;
+                _expectedNormalForceMax = Mathf.Max(_expectedNormalForceMax, expectedNormalForce);
+                _expectedNormalImpulseSum += expectedNormalImpulse;
+                _expectedNormalImpulseMax = Mathf.Max(_expectedNormalImpulseMax, expectedNormalImpulse);
+                _lowerSupportNormalSpeedAbsSum += normalSpeedAbs;
+                _lowerSupportNormalSpeedAbsMax = Mathf.Max(_lowerSupportNormalSpeedAbsMax, normalSpeedAbs);
+                _kneeTetherSupportNormalAccelerationSum += kneeSupportA;
+                if (!_kneeTetherSupportNormalAccelerationHasSample)
+                {
+                    _kneeTetherSupportNormalAccelerationMin = kneeSupportA;
+                    _kneeTetherSupportNormalAccelerationMax = kneeSupportA;
+                    _kneeTetherSupportNormalAccelerationHasSample = true;
+                }
+                else
+                {
+                    _kneeTetherSupportNormalAccelerationMin = Mathf.Min(_kneeTetherSupportNormalAccelerationMin, kneeSupportA);
+                    _kneeTetherSupportNormalAccelerationMax = Mathf.Max(_kneeTetherSupportNormalAccelerationMax, kneeSupportA);
+                }
             }
 
             bool requested = Enabled;
@@ -220,7 +223,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
             _currentApplied = requested;
             _currentScheduledFixed = requested ? fixedSequence : 0;
-            if (requested)
+            if (traceEnabled && requested)
             {
                 _appliedSamples++;
                 if (_firstAppliedFixed == 0) _firstAppliedFixed = fixedSequence;

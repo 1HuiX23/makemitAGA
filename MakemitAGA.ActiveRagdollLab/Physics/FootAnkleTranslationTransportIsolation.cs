@@ -47,7 +47,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal string Arm => _enabled ? ArmB : ArmA;
         internal bool Finite => _finite;
         internal string InvalidReason => _invalidReason;
-        internal Vector3 CurrentFeedforwardAccelerationWorld => _currentFeedforwardAccelerationWorld;
 
         internal void FreezeProductionArm()
         {

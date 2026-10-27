@@ -50,7 +50,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal string Arm => _arm;
         internal string InvalidReason => _reason;
         internal Collider SelectedCollider => _arm == ArmB ? _box : _original;
-        internal int OriginalId => _originalId;
         internal int SelectedId => _selectedId;
         internal bool ExposureReady => _finite && _pairLeft >= MinPairSamples && _pairRight >= MinPairSamples &&
             _probeMatches > 0 && (_arm != ArmB || (_boxLeftCallbacks > 0 && _boxRightCallbacks > 0));

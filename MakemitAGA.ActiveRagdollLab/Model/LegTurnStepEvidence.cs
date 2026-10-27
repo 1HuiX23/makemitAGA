@@ -25,6 +25,12 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         internal Vector3 HipFeedforwardInputA, HipFeedforwardSelectedA;
         internal bool TorsoRecoveryDynamicSelected, TorsoRecoveryLegacyActive;
         internal TorsoRecoveryState TorsoRecovery;
+        internal bool HipGoalGateKneeIndependent, KneeFeedforwardValid, KneeFeedforwardActive, KneeFeedforwardClamped;
+        internal HipNormalReferenceState HipNormalReference;
+        internal bool HipNormalRecoveryHandoffStarted, HipNormalRecoveryHandoffActive;
+        internal string KneeFeedforwardReason;
+        internal float KneeFeedforwardInputSigned, KneeFeedforwardSelectedSigned;
+        internal float KneeFeedbackSigned, KneeFeedforwardAllocatedSigned, KneeFlexionFinalSigned;
 
         internal bool Matches(PhysicsStepContext step, int localFixed) =>
             HipCommitted && KneeCommitted && Step.Matches(step) && Fixed == localFixed &&
