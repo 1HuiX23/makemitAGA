@@ -419,6 +419,24 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
             _primary.FixedUpdate(step, parent);
             _secondary?.FixedUpdate(step, parent);
+            if (_primary != null && PelvisRunScopes.HasHipCoupling(_primary.DynamicScope) && DriveEnabled && !AnyDriveAborted)
+            {
+                if (!_primary.CommitBilateralHipPairs(step, _secondary))
+                    FailCloseStanceContactIsolation("HIP_BILATERAL_FORCE_COMPLETION_FAILED:" +
+                        (_primary.HipAnchorPair.Issue ?? (_secondary?.HipAnchorPair.Issue) ?? "INPUT_OR_CLOCK"));
+                else if (!_torso.CompleteHipTranslationReaction(step, _primary.HipAnchorPair, _secondary.HipAnchorPair))
+                    FailCloseStanceContactIsolation("HIP_PAIR_RECEIVER_ATTITUDE_COMPLETION_FAILED");
+                else if (!_primary.CompleteHipControllerStep(step) || !_secondary.CompleteHipControllerStep(step))
+                    FailCloseStanceContactIsolation("HIP_CONTROLLER_CONTINUATION_FAILED");
+                else
+                {
+                    // The receiver has committed the bounded same-step correction.
+                    // All actual commands are now known. Diagnostic composition writes no forces
+                    // and cannot become a second owner or a readiness/safety prerequisite.
+                    _primary.CompleteHipPointResponse(step, _secondary.HipAnchorPair);
+                    _secondary.CompleteHipPointResponse(step, _primary.HipAnchorPair);
+                }
+            }
             if (_traceEnabled)
             {
                 _traceContextSamples++;
@@ -708,7 +726,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _diagnostics.Reset(_report, _bilateralEnabled, _distinctSourceChains, PrimarySide, SecondarySide);
                 _kneeSafety.BeginTrace(_kneeSafetyReport);
                 bool dynamicHipAudit = DynamicParentsActive && _bilateralEnabled && _secondary != null &&
-                    PelvisRunScopes.HasUpperWeight(_primary.DynamicScope) && PelvisRunScopes.HasUpperWeight(_secondary.DynamicScope);
+                    PelvisRunScopes.HasUpperWeight(_primary.DynamicScope) && PelvisRunScopes.HasUpperWeight(_secondary.DynamicScope) && !PelvisRunScopes.HasHipCoupling(_primary.DynamicScope);
                 _hipPelvisLoadPath.BeginTrace(_bilateralEnabled && UpperSelfWeightArmsMatch &&
                     UpperSelfWeightArm == UpperSelfWeightSupportNormalLoadTransferIsolation.ArmB &&
                     (!DynamicParentsActive || dynamicHipAudit), _torso, dynamicHipAudit);
@@ -1451,6 +1469,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         private void FailCloseStanceContactIsolation(string detail)
         {
+            _primary?.CancelQueuedHipPair(_contextCursor.Fixed);
+            _secondary?.CancelQueuedHipPair(_contextCursor.Fixed);
             string reason = "stanceContactIsolation=True|" + (detail ?? "<none>");
             if (!_bilateralFailClosedLatched)
             {
@@ -1472,6 +1492,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         private void FailCloseBothSides(bool driveMismatch, bool anyAbort)
         {
+            _primary?.CancelQueuedHipPair(_contextCursor.Fixed);
+            _secondary?.CancelQueuedHipPair(_contextCursor.Fixed);
             string reason =
                 "driveMismatch=" + driveMismatch +
                 "|abort=" + anyAbort +

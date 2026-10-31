@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- ARL v0.4.89: Read-only dynamic Hip wrench input audit over the unchanged v0.4.88 Upper self-weight scope.
+  <!-- ARL v0.4.100: same-step Hip force / net Upper torque coordination, bounded correction and actual-command evidence.
        Shared clocks and session ownership; legacy loaded baseline retained. -->
   <!-- Load the user's path before deriving BepInExCore and InteropDir. -->
   <Import Project="LocalPaths.props" Condition="Exists('LocalPaths.props')" />
@@ -12,9 +12,9 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <AssemblyName>MakemitAGA.ActiveRagdollLab</AssemblyName>
     <RootNamespace>MakemitAGA.ActiveRagdollLab</RootNamespace>
-    <Version>0.4.89</Version>
-    <AssemblyVersion>0.4.89</AssemblyVersion>
-    <FileVersion>0.4.89</FileVersion>
+    <Version>0.4.100</Version>
+    <AssemblyVersion>0.4.100</AssemblyVersion>
+    <FileVersion>0.4.100</FileVersion>
     <CodePage>65001</CodePage>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <MiSideRoot Condition="'$(MiSideRoot)' == ''">C:\dpan\jgggggg\steam\steamapps\common\MiSide</MiSideRoot>

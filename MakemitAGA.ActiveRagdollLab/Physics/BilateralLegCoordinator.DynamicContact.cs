@@ -76,7 +76,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             "/requiredLowerWeight=" + (_primary != null && PelvisRunScopes.HasLowerWeight(_primary.DynamicScope) ? "NATIVE_GRAVITY_PLUS_NORMAL_FORCE_PAIR" : "OFF") +
             "/requiredKneeReaction=" + (_primary != null && PelvisRunScopes.HasKneeCoupling(_primary.DynamicScope) ? "REDUCED_MASS_NORMAL_PD_PAIR" : "OFF") +
             "/requiredUpperGravity=" + (_primary != null && PelvisRunScopes.HasUpperWeight(_primary.DynamicScope) ? "EXACT_STANCE_SERIAL_SELF_WEIGHT" : "OFF") +
-            "/requiredTorsoGravity=OFF/requiredReciprocal=OFF/hipReaction=NOT_ROUTED/loadedSupportCertified=False";
+            "/requiredTorsoGravity=OFF/requiredReciprocal=OFF/hipReaction=" + (_primary != null && PelvisRunScopes.HasHipCoupling(_primary.DynamicScope) ? "TRANSLATION_AT_HIP_ANCHORS" : "NOT_ROUTED") + "/hipAngularControllerReaction=OFF/loadedSupportCertified=False";
 
         // Read-only qualification of THIS scope. Historical kinematic Pelvis load-path readiness is not reused.
         internal string DynamicContactEvidence(bool runReady, PelvisRunScope scope)
@@ -94,12 +94,15 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 KneeCouplingEvidenceReady(SecondaryReport, SecondaryFootReport));
             bool upperWeight = PelvisRunScopes.HasUpperWeight(scope);
             bool upper = !upperWeight || (UpperWeightEvidenceReady(PrimaryReport, PrimaryFootReport) && UpperWeightEvidenceReady(SecondaryReport, SecondaryFootReport));
-            bool ready = upper && runReady && DynamicContactMatchesScope(scope) && surface && left && right && gravity && lower && knee;
+            bool hip = !PelvisRunScopes.HasHipCoupling(scope) || (_primary.HipAnchorPair.EvidenceReady && _secondary.HipAnchorPair.EvidenceReady &&
+                _primary.HipAnchorPair.Samples == PrimaryReport.TraceSamples && _secondary.HipAnchorPair.Samples == SecondaryReport.TraceSamples);
+            bool ready = hip && upper && runReady && DynamicContactMatchesScope(scope) && surface && left && right && gravity && lower && knee;
             return PelvisRunScopes.Dataset(scope) + "=" + ready +
                 " | runtimeAndSafetyReady=" + runReady + " | supportExposureReady=" + surface +
                 " | bilateralContactEvidence(primary-secondary)=" + left + ":" + right +
                 " | gravityScopeEvidenceReady=" + gravity + " | footSelfWeightEvidenceReady=" + (footSelfWeight && ready) +
                 " | lowerSelfWeightEvidenceReady=" + (lowerWeight && ready) +
+                " | hipAnchorTranslationPairEvidenceReady=" + (PelvisRunScopes.HasHipCoupling(scope) && ready) +
                 " | dynamicHipWrenchInputEvidenceReady=" + (upperWeight && ready && _hipPelvisLoadPath.Report.DynamicMode && _hipPelvisLoadPath.Report.EvidenceReady) +
                 " | upperSelfWeightEvidenceReady=" + (upperWeight && ready) +
                 " | upperLoadLedgerEvidenceReady=" + (upperWeight && ready && PrimaryReport.UpperSelfWeightSupport.LedgerFinite && SecondaryReport.UpperSelfWeightSupport.LedgerFinite) +
@@ -109,6 +112,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 "\n" + _supportSurface.Summary() + "\n" + ContactEvidenceSummary("PRIMARY", PrimaryFootReport) +
                 "\n" + ContactEvidenceSummary("SECONDARY", SecondaryFootReport);
         }
+
+        internal string HipAnchorPairDetails() => "[PRIMARY_HIP_PAIR]\n" + (_primary?.HipAnchorPair.GetDetails() ?? "<missing>") +
+            "\n" + (_primary?.HipPointResponseDetails ?? "<missing>") +
+            "\n[SECONDARY_HIP_PAIR]\n" + (_secondary?.HipAnchorPair.GetDetails() ?? "<missing>") +
+            "\n" + (_secondary?.HipPointResponseDetails ?? "<missing>");
 
         private static bool UpperWeightEvidenceReady(SingleLegChainReport leg, FootAnkleFoundationReport foot)
         {

@@ -1,6 +1,6 @@
-# MakemitAGA Active Ragdoll Lab 0.4.89 - Dynamic Hip Wrench Input Audit
+# MakemitAGA Active Ragdoll Lab 0.4.100 - Hip Motion Feasibility Allocation
 # 保存后执行：arl_profile_reload
-# 当前主线：v0.4.89沿用arl_pelvis_upper_load_test(b)及88受载范围，仅增加只读Hip实际命令、COM/挂点力矩和候选功率审计；候选反力不执行，Torso重力、Hip反力和Foot-tether reciprocal关闭。其它入口保留原范围。
+# 当前主线：v0.4.100在arl_pelvis_hip_test(b)验证纠偏优先的共同运动预算；先暂存双侧Hip角请求，联合削减骨盆共同COM与Upper净角请求，再继续Knee/Foot；完整纠偏不可行时显式标记fallback；保留Upper同拍-r×F和平移质量求力，遵守力诱导相对点加速度60m/s²、Upper补偿8Nm、实际执行器max(8Nm,原基线幅值)、骨盆总矩8Nm预算；原骨盆基础请求仍限2Nm；物理arm=B_V041000_HIP_MOTION_FEASIBILITY_ALLOCATION；双端点力对拓扑/目标链/安全门及95射线范围修复保持；纯Hip角控制器反力、Torso重力及Foot-tether reciprocal关闭。
 # 本文件只保留仍由活动运行时消费的配置；历史实验参数与 A/B 细节请查长期版本记录或旧版本 ZIP。
 
 # --- 目标与 Two-Body 几何 ---

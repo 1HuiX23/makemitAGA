@@ -42,6 +42,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     return FreeSpaceBoundaryIssue.LowerSelfWeight;
                 if (!UpperSelfWeightOff || !UpperSelfWeightFinite) return FreeSpaceBoundaryIssue.UpperSelfWeight;
                 if (!KneeSupportReactionOff || !KneeSupportReactionFinite) return FreeSpaceBoundaryIssue.KneeReaction;
+                if (!_hipAnchorPair.Off) return FreeSpaceBoundaryIssue.HipTranslationPair;
                 return FreeSpaceBoundaryIssue.None;
             }
         }
@@ -112,7 +113,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             "/parentBody=" + _physicalParent.BodyId + "/join=" + _joinStep.Status() + "/steps=" + _dynamicParentSteps +
             "/initialGapHipKnee=" + F(_joinHipGap) + ":" + F(_joinKneeGap) +
             "/initialVelocityGapHipKnee=" + F(_joinHipVelocityGap) + ":" + F(_joinKneeVelocityGap) +
-            "/hipTranslation=SETTLED_NATIVE_POINT_PD/kinematicPredictionFF=OFF/HipReaction=OFF" +
+            "/hipTranslation=" + (PelvisRunScopes.HasHipCoupling(_dynamicScope) ? "POINT_MOBILITY_PELVIS_CHEST_CONSTRAINED_COMMON_ACCEL_FF" : "SETTLED_NATIVE_POINT_PD") +
+            "/kinematicPredictionFF=OFF/HipReaction=" + (PelvisRunScopes.HasHipCoupling(_dynamicScope) ? "TRANSLATION_AT_HIP_ANCHORS" : "OFF") +
             "/relativeAngularFrame=" + (_dynamicParentActive ? "FEEDBACK_PARENT_BASIS" : "LEGACY_SOURCE_BASIS");
     }
 }

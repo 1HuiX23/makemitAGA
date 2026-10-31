@@ -145,8 +145,17 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     }
                 }
             }
-            if (trace) CaptureLedger(upper, fixedSequence, stance, dt, leg, hipAppliedAcceleration);
+            // Hip scope has only staged its force at this point. Capture its ledger
+            // after the bilateral commit; never record the pending command as zero.
+            if (trace && !PelvisRunScopes.HasHipCoupling(scope)) CaptureLedger(upper, fixedSequence, stance, dt, leg, hipAppliedAcceleration);
             return true;
+        }
+
+        internal void CompleteHipLedger(Rigidbody upper, int fixedSequence, bool stance, float dt, SingleLegChainReport leg, Vector3 hipA)
+        {
+            if (!Report.Selected || !Report.Finite || Report.CurrentFixed != fixedSequence || _pending >= 0)
+            { LedgerInvalid("UPPER_HIP_LEDGER_COMPLETION_INVALID"); return; }
+            CaptureLedger(upper, fixedSequence, stance, dt, leg, hipA);
         }
 
         internal bool Quiesce(Rigidbody upper)

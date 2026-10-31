@@ -50,6 +50,26 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private readonly HipCompositeReferenceShockAbsorberIsolation _hipCompositeReferenceShockAbsorber = new HipCompositeReferenceShockAbsorberIsolation();
         private readonly HipCharacterJointResponseIsolation _hipCharacterJointResponseIsolation = new HipCharacterJointResponseIsolation();
         private readonly HipPositionalParentAnchorAccelerationFeedforwardIsolation _hipAnchorAccelerationFeedforward = new HipPositionalParentAnchorAccelerationFeedforwardIsolation();
+        private readonly HipAnchorTranslationPair _hipAnchorPair = new HipAnchorTranslationPair();
+        internal HipAnchorPairReport HipAnchorPair => _hipAnchorPair.Report;
+        internal string HipPointResponseDetails => _hipAnchorPair.Response.GetDetails();
+        internal bool CancelQueuedHipPair(PhysicsStepContext step)
+        { _hipContinuationPending = false; return _hipAnchorPair.CancelQueued(step); }
+        internal bool CommitBilateralHipPairs(PhysicsStepContext step, SingleLegShadowChain peer) =>
+            peer != null && HipAnchorTranslationPair.CommitBilateral(step, _hipAnchorPair, peer._hipAnchorPair);
+        internal void CompleteHipPointResponse(PhysicsStepContext step, HipAnchorPairReport peer)
+        {
+            if (!_traceEnabled) return;
+            _upperSelfWeightTransfer.CompleteHipLedger(_upperBody, _fixedUpdateSequence,
+                _footFoundation.ExactAuthorizedStanceSupportLoadEligible, PhysicsDt, _report, HipLedgerAcceleration);
+            _hipAnchorPair.Response.CaptureGoalPath(_legTurnCurrent.HipGoalPath);
+            _hipAnchorPair.Response.CompleteInputs(step, _fixedUpdateSequence, peer,
+                _torso == null ? new PelvisHipAttitudeCommand() : _torso.HipAttitudeCommand);
+            _hipAnchorPair.Response.CompleteAttitudeBudget(step, _fixedUpdateSequence, _torso == null ? null : _torso.PelvisReceiver);
+        }
+        private Vector3 HipLedgerAcceleration => _dynamicParentActive && PelvisRunScopes.HasHipCoupling(_dynamicScope)
+            ? (_hipAnchorPair.Report.CurrentApplied ? _hipAnchorPair.Report.Current.Force / _hipAnchorPair.Report.Current.ChildMass : Vector3.zero)
+            : _hipCharacterJointResponseIsolation.CurrentAppliedAccelerationWorld;
         private readonly HipAngularActuatorInertiaSpaceResponseIsolation _hipAngularActuator = new HipAngularActuatorInertiaSpaceResponseIsolation();
         private readonly LegAngularDragContract _legAngularDragContract = new LegAngularDragContract();
         private readonly HipMechanicalParentProxy _hipMechanicalParent = new HipMechanicalParentProxy();
@@ -464,6 +484,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 if (boundary != FreeSpaceBoundaryIssue.None)
                     throw new InvalidOperationException("LEG_FREE_SPACE_SELECTOR_CONTRACT_LOST:" + boundary);
             }
+            if (_driveEnabled && _dynamicParentActive && PelvisRunScopes.HasHipCoupling(_dynamicScope) &&
+                !parent.HipCommand.Matches(step, parent.PhysicalParent.BodyId))
+                throw new InvalidOperationException("LEG_HIP_PARENT_COMMAND_NOT_CURRENT");
             if (_driveEnabled && _torso.Report.UseDynamicTorsoRecovery &&
                 (!_dynamicParentActive || !_torso.Report.DynamicTorsoRecovery.Matches(step)))
                 throw new InvalidOperationException("DYNAMIC_TORSO_RECOVERY_SHARED_CLOCK_MISMATCH");
@@ -475,6 +498,29 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             finally { _insidePhysicsStep = false; }
         }
 
+        private bool _hipContinuationPending;
+        private int _hipContinuationKneeFixed;
+
+        internal bool CompleteHipControllerStep(PhysicsStepContext step)
+        {
+            if (!_driveEnabled || !_hipContinuationPending || !_runtimeStep.Matches(step) ||
+                !_hipAnchorPair.Report.CurrentApplied || !_hipAnchorPair.Report.Current.Step.Matches(step) ||
+                !_torso.HipAttitudeCommand.Matches(_parentCommand.HipCommand)) return false;
+            _hipContinuationPending = false;
+            _lastHipAppliedAngularAccelerationWorld = _hipAnchorPair.Report.Current.AllocatedHipAlpha;
+            if (_traceEnabled)
+            {
+                _legTurnCurrent.HipFinalA = _lastHipAppliedAngularAccelerationWorld;
+                _legTurnCurrent.HipCommitted = true;
+                HipGoalPathEvidence path = _legTurnCurrent.HipGoalPath;
+                path.Committed = true; _legTurnCurrent.HipGoalPath = path;
+            }
+            _insidePhysicsStep = true;
+            try { CompleteControllerStep(_hipContinuationKneeFixed); }
+            finally { _insidePhysicsStep = false; }
+            return _driveEnabled;
+        }
+
         private void FixedUpdateCore()
         {
             if (!IsBuilt || !_driveEnabled)
@@ -482,6 +528,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
             try
             {
+                if (_hipContinuationPending) { AbortDrive("HIP_CONTROLLER_PREVIOUS_STEP_INCOMPLETE"); return; }
                 // V04450 resolves Upper momentum before clearing last-solve native gravity.
                 if (!_upperSelfWeightTransfer.PrepareControllerStep(_upperBody, _fixedUpdateSequence + 1))
                 {
@@ -807,6 +854,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     _controlTargetHipRelative,
                     _report);
 
+                CaptureHipGoalPath(compositeControlParentRotation, preCompositeAbsorberWorldTarget);
                 if (!UpdateHipNormalReference(compositeControlParentRotation, compositeControlParentW))
                 {
                     AbortDrive("HIP_NORMAL_REFERENCE_INVALID:" + _hipNormalReference.Issue);
@@ -859,7 +907,19 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 // v0.2.73-v0.2.74 B: with the Hip CharacterJoint removed, preserve only translational Hip-anchor attachment.
                 // v0.2.73 A applies the tether at Upper+Lower COMs; v0.2.74 B applies it at Upper COM only so Lower
                 // returns to the physical Upper -> Knee CharacterJoint -> Lower serial chain. No direct tether torque.
-                if (_hipCharacterJointResponseIsolation.Enabled)
+                if (_dynamicParentActive && PelvisRunScopes.HasHipCoupling(_dynamicScope))
+                {
+                    if (!_hipAnchorPair.Stage(_traceEnabled, _runtimeStep, _fixedUpdateSequence, _upperBody, _pelvisBody,
+                        GetHipChildAnchorWorld(), GetHipParentAnchorWorld(), _physicalParent.SettledPointVelocity(_rawHipConnectedAnchorLocal),
+                        _parentCommand.HipCommand))
+                    {
+                        // Include the rejected physical sample, rather than only the last accepted command.
+                        float rejectedGap = _hipAnchorPair.Report.RejectedGapM;
+                        if (IsFinite(rejectedGap)) _report.PeakHipAnchorErrorMeters = Mathf.Max(_report.PeakHipAnchorErrorMeters, rejectedGap);
+                        AbortDrive("HIP_ANCHOR_PAIR_INVALID:" + _hipAnchorPair.Report.Issue); return;
+                    }
+                }
+                else if (_hipCharacterJointResponseIsolation.Enabled)
                 {
                     Rigidbody tetherParent = GetActiveHipMechanicalParentBody();
                     if (tetherParent == null)
@@ -968,6 +1028,26 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
                 ApplyHipPd();
                 if (!_driveEnabled) return;
+                if (_dynamicParentActive && PelvisRunScopes.HasHipCoupling(_dynamicScope))
+                {
+                    _hipContinuationPending = true; _hipContinuationKneeFixed = kneeCommandFixed;
+                    return; // Both requests and receiver allocation must commit before Knee consumes Hip alpha.
+                }
+                CompleteControllerStep(kneeCommandFixed);
+            }
+            catch (Exception e)
+            {
+                Plugin.Logger?.LogError(
+                    "[ARL][LEG_FIXED_UPDATE_EXCEPTION] type=" + e.GetType().Name +
+                    " | message=" + e.Message + " | " + e);
+                AbortDrive("FIXED_UPDATE_EXCEPTION:" + e.GetType().Name);
+            }
+        }
+
+        private void CompleteControllerStep(int kneeCommandFixed)
+        {
+            try
+            {
                 ApplyKneePd();
                 if (!_driveEnabled) return;
                 UpdateReport();
@@ -1085,7 +1165,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                         _footFoundation.ExactAuthorizedStanceSupportLoadEligible,
                         _footFoundation.StanceContactZeroFriction, _upperBody, _lowerBody, _footFoundation.DynamicBody,
                         _footFoundation.CurrentAuthorizedSupportNormalWorld, PhysicsDt,
-                        _report, _footFoundation.Report, _hipCharacterJointResponseIsolation.CurrentAppliedAccelerationWorld,
+                        _report, _footFoundation.Report, HipLedgerAcceleration,
                         _dynamicParentActive ? _dynamicScope : PelvisRunScope.TorsoPairOnly))
                     {
                         AbortDrive("UPPER_SELF_WEIGHT_SCHEDULE_INVALID:" + _upperSelfWeightTransfer.Report.InvalidReason);
@@ -1178,6 +1258,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _previousFilteredTargetHipRelativeAngularVelocityLocal = _sampledTargetHipRelativeAngularVelocityLocal;
                 _previousFilteredTargetKneeRelativeAngularVelocityLocal = _sampledTargetKneeRelativeAngularVelocityLocal;
                 _hasPreviousFilteredTargetVelocitySample = true;
+                _hipContinuationPending = false;
                 _fixedUpdateSequence = 0;
                 _fixedStepsSinceTargetRenderSample = 0;
                 _bodyAngularVelocityPairStartFixedSequence = 0;
@@ -2364,9 +2445,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
             ResetLegTurnEvidence();
             _traceEnabled = enabled;
+            if (!enabled) _hipAnchorPair.Response.Stop();
             if (enabled)
             {
                 _footFoundation?.BeginTrace(_dynamicScope);
+                _hipAnchorPair.ResetTrace();
                 ResetTraceStats();
                 _nextTraceTime = CurrentUnscaledTime + _profile.TraceIntervalSeconds;
             }
@@ -3088,6 +3171,18 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 return;
             }
 
+            if (_dynamicParentActive && PelvisRunScopes.HasHipCoupling(_dynamicScope))
+            {
+                if (!_hipAngularActuator.Enabled || !_hipAnchorPair.StageHipTorque(_runtimeStep, _fixedUpdateSequence, hipActuatorVector, acceleration))
+                { AbortDrive("HIP_PAIR_TORQUE_REQUEST_INVALID"); return; }
+                CaptureLegTurnHip(inertialized, controlParentRotation, targetRelativeW,
+                    relativeControlRaw, controlRaw, acceleration, effectiveHipMaxA, clamped);
+                // Request provenance is retained, but not labelled committed before the native writes.
+                _legTurnCurrent.HipCommitted = false;
+                HipGoalPathEvidence path = _legTurnCurrent.HipGoalPath;
+                path.Committed = false; _legTurnCurrent.HipGoalPath = path;
+                return;
+            }
             _lastHipAppliedAngularAccelerationWorld = acceleration;
             if (_hipAngularActuator.Enabled)
                 _upperBody.AddTorque(hipActuatorVector, ForceMode.Force);
@@ -4047,7 +4142,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         private int ForceDriveOffSafe()
         {
+            _hipContinuationPending = false;
             int failures = 0;
+            if (!_hipAnchorPair.Quiesce(_insidePhysicsStep ? _runtimeStep : new PhysicsStepContext())) failures++;
             _driveEnabled = false; _dynamicParentActive = false;
             _hipNormalReference.DisablePreserveTrace();
             try { _collidersEnabled = false; ApplyColliderState(); } catch { failures++; }

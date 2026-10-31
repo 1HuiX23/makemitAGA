@@ -39,10 +39,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private float _offset, _height;
         private int _layer, _originalId, _selectedId;
         private string _originalPath, _originalType, _arm = IdleArm, _reason;
-        private string _originalFailureEvidence;
+        private string _originalFailureEvidence, _probeFailureEvidence;
         private bool _active, _finite = true, _stoppedSafe = true;
         private int _pairLeft, _pairRight, _probeMatches, _originalMisses, _isolationRepairs, _unexpectedCallbacks;
         private int _boxLeftCallbacks, _boxRightCallbacks;
+        private int _originalRangeMisses, _boxRangeMisses;
+        private float _originalRangeExcessPeak, _boxRangeExcessPeak;
 
         internal bool Active => _active;
         internal bool Finite => _finite;
@@ -60,7 +62,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             error = null;
             if (!StoppedSafe) return Fail("PREVIOUS_SUPPORT_NOT_RELEASED", out error);
-            _finite = true; _reason = null; _originalFailureEvidence = null;
+            _finite = true; _reason = null; _originalFailureEvidence = _probeFailureEvidence = null;
             ResetExposure();
             if (!IsExperimentArm(arm)) return Fail("UNKNOWN_SUPPORT_ARM", out error);
             if (original == null || otherGround != original || left == null || right == null || left == right ||
@@ -88,7 +90,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     return Fail("ORIGINAL_FLOOR_BOUNDS_OR_OFFSET_INVALID", out error);
                 Vector3 center = (left.transform.position + right.transform.position) * 0.5f;
                 Ray ray = new Ray(new Vector3(center.x, bounds.max.y + 1f, center.z), Vector3.down);
-                if (!original.Raycast(ray, out RaycastHit hit, 2f + bounds.size.y) || !Horizontal(hit.normal))
+                float setupDistance = 2f + bounds.size.y;
+                if (!FiniteFloat(setupDistance) || setupDistance <= 0f ||
+                    !original.Raycast(ray, out RaycastHit hit, setupDistance) || InvalidHitPredicate(hit) != null ||
+                    hit.distance > setupDistance || !Horizontal(hit.normal))
                     return Fail("REQUIRES_HORIZONTAL_ORIGINAL_FLOOR", out error);
                 _height = hit.point.y;
                 if (!FiniteFloat(_height)) return Fail("NONFINITE_SUPPORT_HEIGHT", out error);
@@ -120,7 +125,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     UnityEngine.Physics.SyncTransforms();
                     RegisterSceneColliders(Object.FindObjectsOfType<Collider>(true));
                     if (!AuditBoxIsolation(out error)) return false;
-                    if (!_box.Raycast(ray, out RaycastHit boxHit, 2f + bounds.size.y) || !MatchingPlane(hit, boxHit))
+                    if (!_box.Raycast(ray, out RaycastHit boxHit, setupDistance) || InvalidHitPredicate(boxHit) != null ||
+                        boxHit.distance > setupDistance || !MatchingPlane(hit, boxHit))
                         return Fail("BOX_TOP_ALIGNMENT_READBACK_FAILED", out error);
                 }
                 _selectedId = SelectedCollider.GetInstanceID();
@@ -235,19 +241,105 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             selectedHit = default;
             if (!_active || !_finite || _original == null) return false; // never fall back to an unpinned scene hit
+            Ray ray = default; RaycastHit originalHit = default;
+            bool rayReady = false, originalFound = false, boxPresent = false, boxFound = false;
+            string stage = "REQUEST_VALIDATION";
             try
             {
-                Ray ray = new Ray(origin, direction);
-                if (!_original.Raycast(ray, out RaycastHit originalHit, maxDistance)) { _originalMisses++; return false; }
-                if (!Horizontal(originalHit.normal)) { Fail("ORIGINAL_SUPPORT_NOT_HORIZONTAL", out _); return false; }
+                float directionLengthSquared = direction.sqrMagnitude;
+                if (!FiniteVector(origin) || !FiniteVector(direction) || !FiniteFloat(directionLengthSquared) ||
+                    directionLengthSquared <= 0f || !FiniteFloat(maxDistance) || maxDistance < 0f)
+                    return FailProbe("PINNED_PROBE_REQUEST_INVALID", stage, origin, direction, maxDistance, ray, rayReady,
+                        originalFound, originalHit, boxPresent, boxFound, selectedHit);
+                stage = "RAY_CONSTRUCTION";
+                ray = new Ray(origin, direction); rayReady = true; stage = "ORIGINAL_RAYCAST";
+                originalFound = _original.Raycast(ray, out originalHit, maxDistance);
+                if (!originalFound) { _originalMisses++; return false; }
+                string invalidHit = InvalidHitPredicate(originalHit);
+                if (invalidHit != null)
+                    return FailProbe("PINNED_PROBE_HIT_INVALID", "ORIGINAL_" + invalidHit, origin, direction, maxDistance, ray, rayReady,
+                        originalFound, originalHit, boxPresent, boxFound, selectedHit);
+                stage = "ORIGINAL_NORMAL";
+                if (!Horizontal(originalHit.normal))
+                    return FailProbe("ORIGINAL_SUPPORT_NOT_HORIZONTAL", stage, origin, direction, maxDistance, ray, rayReady,
+                        originalFound, originalHit, boxPresent, boxFound, selectedHit);
+                // V04950: the 94 MeshCollider returned a hit 0.571 mm beyond a 330 mm ray,
+                // while the coplanar Box correctly missed. Admit support only inside the
+                // requested segment (inclusive endpoint); no range padding or ground snap.
+                // An ordinary range miss leaves the pinned surface healthy, not grounded.
+                if (originalHit.distance > maxDistance)
+                {
+                    _originalRangeMisses++;
+                    _originalRangeExcessPeak = Mathf.Max(_originalRangeExcessPeak, originalHit.distance - maxDistance);
+                    return false;
+                }
                 if (_arm == ArmA) selectedHit = originalHit;
-                else if (_box == null || !_box.Raycast(ray, out selectedHit, maxDistance) || !MatchingPlane(originalHit, selectedHit))
-                { Fail("ORIGINAL_BOX_PROBE_PLANE_MISMATCH", out _); return false; }
+                else
+                {
+                    stage = "BOX_EXISTENCE"; boxPresent = _box != null;
+                    if (boxPresent) { stage = "BOX_RAYCAST"; boxFound = _box.Raycast(ray, out selectedHit, maxDistance); }
+                    if (!boxPresent || !boxFound)
+                        return FailProbe("ORIGINAL_BOX_PROBE_PLANE_MISMATCH", boxPresent ? "BOX_MISS" : "BOX_MISSING",
+                            origin, direction, maxDistance, ray, rayReady, originalFound, originalHit, boxPresent, boxFound, selectedHit);
+                    invalidHit = InvalidHitPredicate(selectedHit);
+                    if (invalidHit != null)
+                        return FailProbe("PINNED_PROBE_HIT_INVALID", "BOX_" + invalidHit, origin, direction, maxDistance, ray, rayReady,
+                            originalFound, originalHit, boxPresent, boxFound, selectedHit);
+                    stage = "PLANE_COMPARISON";
+                    if (!MatchingPlane(originalHit, selectedHit))
+                        return FailProbe("ORIGINAL_BOX_PROBE_PLANE_MISMATCH", stage, origin, direction, maxDistance, ray, rayReady,
+                            originalFound, originalHit, boxPresent, boxFound, selectedHit);
+                    // Even a plane-matched Box hit must be in range. Keep plane validation
+                    // first here: an out-of-range return must not hide a real plane mismatch
+                    // against the original hit that was already admitted inside the segment.
+                    if (selectedHit.distance > maxDistance)
+                    {
+                        _boxRangeMisses++;
+                        _boxRangeExcessPeak = Mathf.Max(_boxRangeExcessPeak, selectedHit.distance - maxDistance);
+                        selectedHit = default;
+                        return false;
+                    }
+                }
                 _probeMatches++;
                 return true;
             }
-            catch (Exception e) { Fail("PINNED_PROBE_EXCEPTION:" + e.GetType().Name, out _); return false; }
+            catch (Exception e)
+            { return FailProbe("PINNED_PROBE_EXCEPTION:" + e.GetType().Name, "EXCEPTION_AT_" + stage, origin, direction, maxDistance,
+                ray, rayReady, originalFound, originalHit, boxPresent, boxFound, selectedHit); }
         }
+
+        private bool FailProbe(string reason, string stage, Vector3 origin, Vector3 direction, float maxDistance,
+            Ray ray, bool rayReady, bool originalFound, RaycastHit originalHit, bool boxPresent, bool boxFound, RaycastHit boxHit)
+        {
+            // First perform the original safety action. Formatting failure cannot leave the Box on.
+            // Only serialize the query/hits already obtained; never retry a ray or query another floor.
+            Fail(reason, out _);
+            if (_probeFailureEvidence != null) return false;
+            try
+            {
+                string predicate = stage;
+                if (stage == "PLANE_COMPARISON")
+                    predicate = !FiniteFloat(originalHit.distance) ? "ORIGINAL_DISTANCE_NONFINITE" :
+                        !FiniteFloat(boxHit.distance) ? "BOX_DISTANCE_NONFINITE" :
+                        Mathf.Abs(originalHit.distance - boxHit.distance) > PlaneToleranceMeters ? "DISTANCE_DELTA" :
+                        !Horizontal(originalHit.normal) ? "ORIGINAL_NORMAL" : "BOX_NORMAL";
+                _probeFailureEvidence = "V04950_ONE_SHOT_ALREADY_QUERIED/firstReason=" + (_reason ?? reason) + "/predicate=" + predicate +
+                    "/originalId-selectedId=" + _originalId + "|" + _selectedId + "/requestedOrigin-direction=" + VectorText(origin) + "|" + VectorText(direction) +
+                    "/maxDistance=" + F(maxDistance) + "/rayReady=" + rayReady + "/queryRay=" + (rayReady ? VectorText(ray.origin) + "|" + VectorText(ray.direction) : "NA") +
+                    "/originalHitObtained=" + originalFound + "/boxQueryState=" +
+                    (boxPresent ? (boxFound ? "HIT" : stage == "BOX_MISS" ? "MISS" : "QUERY_INCOMPLETE") : stage == "BOX_MISSING" ? "MISSING" : "NA_NOT_CHECKED") +
+                    "/originalHit(distance-point-normal)=" + (originalFound ? HitText(originalHit) : "NA_NOT_OBTAINED") +
+                    "/boxHit(distance-point-normal)=" + (boxFound ? HitText(boxHit) : "NA_NOT_OBTAINED") +
+                    "/distanceDelta=" + (originalFound && boxFound ? F(Mathf.Abs(originalHit.distance - boxHit.distance)) : "NA") +
+                    "/tolerance=" + F(PlaneToleranceMeters) + "/configuredHeight=" + F(_height) +
+                    "/configuredBoxPosition-size=" + VectorText(_boxPosition) + "|" + VectorText(_boxSize);
+            }
+            catch (Exception e) { _probeFailureEvidence = "V04950_SNAPSHOT_INCOMPLETE:" + e.GetType().Name + "/stage=" + stage; }
+            try { Plugin.Logger?.LogWarning("[ARL][SUPPORT_PROBE_FAILURE_V04950] " + _probeFailureEvidence); }
+            catch { } // The original reason and safety state have already been latched.
+            return false;
+        }
+        private static string HitText(RaycastHit hit) => F(hit.distance) + "|" + VectorText(hit.point) + "|" + VectorText(hit.normal);
 
         internal bool NotifyBoxCollision(string phase, Collision collision)
         {
@@ -267,6 +359,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             _pairLeft = _pairRight = _probeMatches = _originalMisses = _isolationRepairs = _unexpectedCallbacks = 0;
             _boxLeftCallbacks = _boxRightCallbacks = 0;
+            _originalRangeMisses = _boxRangeMisses = 0;
+            _originalRangeExcessPeak = _boxRangeExcessPeak = 0f;
         }
 
         internal string Stop()
@@ -311,10 +405,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             "/groundOffset=" + F(_offset) + "/sameLayer=" + _layer +
             "/pairSamples(left-right)=" + _pairLeft + "-" + _pairRight +
             "/matchingProbePoints=" + _probeMatches + "/originalMisses=" + _originalMisses +
+            "/probeRangePolicy=V04950_FINITE_SEGMENT_NO_PADDING/rangeMisses(original-box)=" + _originalRangeMisses + "-" + _boxRangeMisses +
+            "/rangeExcessPeakMm(original-box)=" + F(_originalRangeExcessPeak * 1000f) + "|" + F(_boxRangeExcessPeak * 1000f) +
             "/boxCallbacks(left-right)=" + _boxLeftCallbacks + "-" + _boxRightCallbacks +
             "/isolationRegistry=" + _others.Count + "/isolationRepairs=" + _isolationRepairs +
             "/unexpectedBoxCallbacks=" + _unexpectedCallbacks + "/exposure=" + ExposureReady + "/stoppedSafe=" + StoppedSafe +
-            "/originalFailure={" + (_originalFailureEvidence ?? "<none>") + "}";
+            "/originalFailure={" + (_originalFailureEvidence ?? "<none>") + "}" +
+            "/probeFailure={" + (_probeFailureEvidence ?? "<none>") + "}";
 
         private bool Fail(string reason, out string error)
         {
@@ -401,6 +498,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         private static bool ProbeReady(FootAnkleFoundationReport r) => r != null && r.GroundGeometryReady &&
             r.GroundProbeHitCount == 5 && r.GroundFootprintSameSurface && !r.GroundColliderHasAttachedRigidbody;
+        private static string InvalidHitPredicate(RaycastHit hit) =>
+            !FiniteFloat(hit.distance) ? "DISTANCE_NONFINITE" : hit.distance < 0f ? "DISTANCE_NEGATIVE" :
+            !FiniteVector(hit.point) ? "POINT_NONFINITE" : null;
         private static bool MatchingPlane(RaycastHit a, RaycastHit b) => FiniteFloat(a.distance) && FiniteFloat(b.distance) &&
             Mathf.Abs(a.distance - b.distance) <= PlaneToleranceMeters && Horizontal(a.normal) && Horizontal(b.normal);
         private static bool Horizontal(Vector3 n) => FiniteVector(n) && n.y > 0.9999f && Mathf.Abs(n.x) < 0.0001f && Mathf.Abs(n.z) < 0.0001f;

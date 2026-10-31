@@ -330,6 +330,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal Rigidbody PelvisBody => _pelvisBody;
         internal Rigidbody ChestBody => _chestBody; // V04460 read-only receiver audit; no new controller authority.
         internal PelvisReceiverReport PelvisReceiver => _pelvisReceiver.Report;
+        internal PelvisHipAttitudeCommand HipAttitudeCommand => _pelvisReceiver.HipAttitudeCommand;
+        internal bool CompleteHipTranslationReaction(PhysicsStepContext step, HipAnchorPairReport left, HipAnchorPairReport right) =>
+            _runtimeStep.Matches(step) && _legParentCommand.Matches(step) && _pelvisReceiver.CompleteHipTranslationReaction(step, left, right);
         internal bool DynamicPelvisReceiverSelected => _pelvisReceiver.DynamicSelected;
         private string CurrentParentTranslationReference => DynamicPelvisReceiverSelected ? "TWO_BODY_COMMON_COM_PD" : ParentFeedforwardReferencePoseBridge;
         internal bool PelvisReceiverReady => _pelvisReceiver.ReadyForRun;
@@ -826,14 +829,21 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 if (_fixedUpdateStage == "COMPLETE" && IsBuilt && _sampleValid && _report.FiniteState && _driveEnabled &&
                     (!DynamicPelvisReceiverSelected || _pelvisReceiver.ReadyForRun))
                 {
-                    _legParentCommand = new LegParentCommandFrame { Step = step,
+                    var command = new LegParentCommandFrame { Step = step,
                         Position = CurrentPelvisCommandPosition, Rotation = CurrentPelvisCommandRotation };
                     if (DynamicPelvisReceiverSelected)
                     {
                         PelvisParentFrame physical = RequireDynamicParentFrame();
                         if (!physical.Matches(step)) throw new InvalidOperationException("DYNAMIC_PARENT_SHARED_CLOCK_MISMATCH");
-                        _legParentCommand.PhysicalParent = physical;
+                        command.PhysicalParent = physical;
+                        if (_pelvisReceiver.Report.Arm == PelvisDynamicReceiverIsolation.DynamicHipArm)
+                        {
+                            PelvisHipCommandFrame common = _pelvisReceiver.HipCommand;
+                            if (!common.Matches(step, physical.BodyId)) throw new InvalidOperationException("HIP_PARENT_COMMAND_NOT_CURRENT");
+                            command.HipCommand = common;
+                        }
                     }
+                    _legParentCommand = command;
                 }
             }
             finally { _insideRuntimeStep = false; }
@@ -911,7 +921,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     if (!_pelvisReceiver.Step(_traceEnabled, _motionPhase, controlReceiverReference.PelvisPosition, controlReceiverReference.PelvisRotation,
                         controlReceiverReference.PelvisVelocity, controlReceiverReference.PelvisW,
                         controlReceiverReference.ChestPosition, controlReceiverReference.ChestRotation, controlReceiverReference.ChestComVelocity,
-                        PhysicsDt, _profile.DriveDisableDistance))
+                        PhysicsDt, _profile.DriveDisableDistance, _runtimeStep))
                         throw new InvalidOperationException("PELVIS_RECEIVER_INVALID:" + _pelvisReceiver.Report.Issue);
                 }
                 else

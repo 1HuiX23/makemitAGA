@@ -287,7 +287,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal string GetDetails()
         {
             var sb = new StringBuilder(8192);
-            sb.Append("FOOT_TURN_V04650/readOnly=True/scope=").Append(PelvisRunScopes.HasUpperWeight(_traceScope) ? "DYNAMIC_PARENT_UPPER_SELF_WEIGHT_CONTACT" : PelvisRunScopes.HasKneeCoupling(_traceScope) ? "DYNAMIC_PARENT_KNEE_NORMAL_COUPLING_CONTACT" : _traceScope == PelvisRunScope.DynamicLegLowerSelfWeightContact ? "DYNAMIC_PARENT_LOWER_SELF_WEIGHT_CONTACT" : _traceScope == PelvisRunScope.DynamicLegFootSelfWeightContact ? "DYNAMIC_PARENT_FOOT_SELF_WEIGHT_CONTACT" : _traceScope == PelvisRunScope.DynamicLegUnloadedContact ? "DYNAMIC_PARENT_UNLOADED_CONTACT" : "DYNAMIC_PARENT_FREE_SPACE").Append("/sealed=").Append(_sealed)
+            sb.Append("FOOT_TURN_V04650/readOnly=True/scope=").Append(PelvisRunScopes.HasHipCoupling(_traceScope) ? "DYNAMIC_PARENT_HIP_ANCHOR_PAIR_CONTACT" : PelvisRunScopes.HasUpperWeight(_traceScope) ? "DYNAMIC_PARENT_UPPER_SELF_WEIGHT_CONTACT" : PelvisRunScopes.HasKneeCoupling(_traceScope) ? "DYNAMIC_PARENT_KNEE_NORMAL_COUPLING_CONTACT" : _traceScope == PelvisRunScope.DynamicLegLowerSelfWeightContact ? "DYNAMIC_PARENT_LOWER_SELF_WEIGHT_CONTACT" : _traceScope == PelvisRunScope.DynamicLegFootSelfWeightContact ? "DYNAMIC_PARENT_FOOT_SELF_WEIGHT_CONTACT" : _traceScope == PelvisRunScope.DynamicLegUnloadedContact ? "DYNAMIC_PARENT_UNLOADED_CONTACT" : "DYNAMIC_PARENT_FREE_SPACE").Append("/sealed=").Append(_sealed)
                 .Append("/captured-resolved-censored-pending=").Append(_captured).Append('/').Append(_resolved).Append('/').Append(_censored).Append('/').Append(_pending)
                 .Append("/invalid-gaps=").Append(_invalid).Append('/').Append(_gaps)
                 .Append("/normalHipCandidates=").Append(_normalHipCandidates)
@@ -363,7 +363,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 .Append(" legW(upper-hipParent-hipTarget-kneeTargetRel)=").Append(T(l.UpperW)).Append('/').Append(T(l.HipParentW))
                 .Append('/').Append(T(l.HipTargetW)).Append('/').Append(T(l.KneeTargetRelW))
                 .Append(" legA(hipFinal-hipParentPreCap-kneeRelative-kneeTotal)=").Append(T(l.HipFinalA)).Append('/').Append(T(l.HipParentPreCapA))
-                .Append('/').Append(T(l.KneeRelativeA)).Append('/').Append(T(l.KneeTotalA));
+                .Append('/').Append(T(l.KneeRelativeA)).Append('/').Append(T(l.KneeTotalA))
+                .Append(" hipGoalPath={").Append(l.HipGoalPath.Details()).Append('}');
 
         }
 

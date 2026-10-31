@@ -30,7 +30,17 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (PelvisRunScopes.HasUpperWeight(scope) ? !DynamicUpperWeightMatches() : (!UpperSelfWeightOff || !UpperSelfWeightFinite)) return DynamicContactBoundaryIssue.UpperSelfWeight;
             if (PelvisRunScopes.HasKneeCoupling(scope) ? !DynamicKneeCouplingMatches() :
                 (!KneeSupportReactionOff || !KneeSupportReactionFinite)) return DynamicContactBoundaryIssue.KneeReaction;
+            if (!DynamicHipPairMatches(scope)) return DynamicContactBoundaryIssue.HipTranslationPair;
             return DynamicContactBoundaryIssue.None;
+        }
+        private bool DynamicHipPairMatches(PelvisRunScope scope)
+        {
+            if (!PelvisRunScopes.HasHipCoupling(scope)) return _hipAnchorPair.Off;
+            HipAnchorPairReport r = _hipAnchorPair.Report;
+            if (!r.Selected || !r.Finite || r.RollbackFailures != 0 || r.ChildId != _upperBody.GetInstanceID() || r.ParentId != _pelvisBody.GetInstanceID()) return false;
+            if (r.Current.Fixed == 0) return _dynamicParentSteps == 0 && !r.CurrentApplied;
+            return r.CurrentApplied && r.Current.Fixed == _fixedUpdateSequence && r.Current.Step.Matches(_runtimeStep) &&
+                r.Current.ChildId == r.ChildId && r.Current.ParentId == r.ParentId;
         }
 
         // A narrow preparation boundary, called synchronously just after continuous join, before
@@ -48,6 +58,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 throw new InvalidOperationException("DYNAMIC_KNEE_COUPLING_SELECTOR_READBACK_FAILED");
             if (PelvisRunScopes.HasUpperWeight(scope) && !_upperSelfWeightTransfer.Select(UpperSelfWeightSupportNormalLoadTransferIsolation.ArmB, _upperBody))
                 throw new InvalidOperationException("DYNAMIC_UPPER_LOAD_SELECTOR_READBACK_FAILED");
+            if (PelvisRunScopes.HasHipCoupling(scope) && !_hipAnchorPair.Prepare(_upperBody, _pelvisBody))
+                throw new InvalidOperationException("DYNAMIC_HIP_PAIR_PREPARATION_FAILED");
         }
 
         private bool DynamicUpperWeightMatches()
@@ -132,7 +144,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         internal bool RestoreDynamicContactSelectors(StringBuilder evidence)
         {
-            bool ok = RestoreContactSelector("UPPER_WEIGHT_OFF", () => SetUpperSelfWeightTransfer(UpperSelfWeightSupportNormalLoadTransferIsolation.IdleArm, out _) && UpperSelfWeightOff, evidence);
+            bool ok = RestoreContactSelector("HIP_TRANSLATION_PAIR_OFF", () => _hipAnchorPair.Quiesce(new PhysicsStepContext()) && _hipAnchorPair.Off, evidence);
+            ok &= RestoreContactSelector("UPPER_WEIGHT_OFF", () => SetUpperSelfWeightTransfer(UpperSelfWeightSupportNormalLoadTransferIsolation.IdleArm, out _) && UpperSelfWeightOff, evidence);
             ok &= RestoreContactSelector("KNEE_NORMAL_COUPLING_OFF", () => SetKneeSupportNormalReaction(false, out _) && KneeSupportReactionOff, evidence);
             ok &= RestoreContactSelector("LOWER_GRAVITY_OFF", () => SetStanceLowerNativeGravityArm(LowerStanceNativeGravitySupportLoadIsolation.ArmA, out _), evidence);
             ok &= RestoreContactSelector("LOWER_WEIGHT_TRANSFER_OFF", () => SetStanceLowerSelfWeightTransferArm(LowerSelfWeightSupportNormalLoadTransferIsolation.ArmA, out _), evidence);

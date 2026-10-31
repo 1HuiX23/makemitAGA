@@ -71,6 +71,15 @@ namespace MakemitAGA.ActiveRagdollLab
                 RunTestCleanupBundle();
                 return true;
             }
+            if (IsBare(command, "arl_pelvis_hip_test"))
+            {
+                PrintGame(ActiveRagdollLabRuntime.StartPelvisHipTest()); return true;
+            }
+            if (TryParseCall(command, "arl_pelvis_hip_test", out string[] pelvisHipArgs))
+            {
+                PrintGame(pelvisHipArgs.Length == 1 ? ActiveRagdollLabRuntime.StartPelvisHipTest(pelvisHipArgs[0]) : ActiveRagdollLabRuntime.StartPelvisHipTest());
+                return true;
+            }
             if (IsBare(command, "arl_pelvis_upper_load_test"))
             {
                 PrintGame(ActiveRagdollLabRuntime.StartPelvisUpperLoadTest()); return true;
@@ -363,7 +372,7 @@ namespace MakemitAGA.ActiveRagdollLab
             }
             PrintGame(torsoOnly
                 ? "<color=#9fe7ff><b>arl_pelvis_test_setup 完成</b></color>：仅创建Pelvis与Chest及两体CharacterJoint，无腿/足刚体或关节。双侧Hip源引用已解析；下一步arl_pelvis_test(b)，无需PCA/drive/Hip stack。"
-                : "<color=#9fe7ff><b>arl_test_setup 完成</b></color>：profile / audit / build / colliders OFF / gravity OFF / trace OFF 已一次执行。" + ActiveRagdollLabRuntime.StartPelvisKneeTest());
+                : "<color=#9fe7ff><b>arl_test_setup 完成</b></color>：profile / audit / build / colliders OFF / gravity OFF / trace OFF 已一次执行。" + ActiveRagdollLabRuntime.StartPelvisHipTest());
         }
 
         private static void RunTestStatusBundle(bool detailed = false)
@@ -420,11 +429,11 @@ namespace MakemitAGA.ActiveRagdollLab
 
         private static void PrintHelp()
         {
-            PrintGame("<b>MakemitAGA Active Ragdoll Lab v0.4.89</b>\n" +
-                "本轮：独立膝部法向耦合，保留Foot/Lower自重；Upper/Torso重力及Hip反力关闭。\n" +
-                "arl_test_setup / arl_pelvis_upper_load_test(b|stop) / arl_test_status / arl_test_cleanup\n" +
+            PrintGame("<b>MakemitAGA Active Ragdoll Lab v0.4.100</b>\n" +
+                "本轮：髋锚点纠偏优先的共同运动预算；Upper补偿8Nm、总矩max(8Nm,原基线)，骨盆baseline 2Nm/总矩8Nm；原安全门保留。\n" +
+                "arl_test_setup / arl_pelvis_hip_test(b|stop) / arl_test_status / arl_test_cleanup\n" +
                 "arl_test_report（仅需重新展开完整诊断时使用）\n" +
-                ActiveRagdollLabRuntime.StartPelvisKneeTest() + "\n小腿自重回归arl_pelvis_lower_load_test(b|stop)，Foot自重对照arl_pelvis_foot_load_test(b|stop)，无载荷接触对照arl_pelvis_contact_test(b|stop)，无接触对照arl_pelvis_leg_test(a|b|stop)。\n\n" +
+                ActiveRagdollLabRuntime.StartPelvisHipTest() + "\nUpper只读审计回归arl_pelvis_upper_load_test(b|stop)，小腿自重回归arl_pelvis_lower_load_test(b|stop)，Foot自重对照arl_pelvis_foot_load_test(b|stop)，无载荷接触对照arl_pelvis_contact_test(b|stop)，无接触对照arl_pelvis_leg_test(a|b|stop)。\n\n" +
                 "骨盆独立范围保留arl_pelvis_test_setup与arl_pelvis_test(b|stop)；两个会话互斥。\n" +
                 "arl_profile_template / arl_profile_reload / arl_profile_status\n" +
                 "arl_audit[(对象完整名称)] / arl_audit_report / arl_build[(对象完整名称)]\n" +

@@ -10,7 +10,10 @@ namespace MakemitAGA.ActiveRagdollLab.Model
     {
         internal string Arm = "OFF_V04470_PELVIS_RECEIVER", TraceArm, Issue;
         internal bool Selected, Dynamic, Active, Ready, Quiesced, Finite = true, BaselineCaptured, BaselineRestored = true;
-        internal bool TraceRunning, TraceDynamic;
+        internal bool TraceRunning, TraceDynamic, TraceHipTranslation;
+        internal int HipReactionRecords;
+        internal int HipAttitudeClamps;
+        internal float HipAttitudeRequestedPeak, HipAttitudeAppliedPeak, HipAttitudeResidualPeak;
         internal Vector3 LastPdA, LastFeedforwardA;
         internal int PassiveIssued, PassiveResolved, Samples, IdleSamples, MotionSamples, ForcePairWrites, TorqueWrites;
         internal int Resolved, Censored, LinearClamps, AngularClamps, TorqueClamps, FaultEvents, RestoreFailures, CurrentTraceFixed;
@@ -55,7 +58,10 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         }
         internal struct AngularActuationSample
         {
+            // Baseline request captured before bilateral completion. In Hip scope,
+            // final torque is in Frame.HipAttitude / HipPointResponse, not this field.
             internal bool Valid, ReferenceFeedforward;
+            internal PhysicsStepContext Step; // Optional diagnostic provenance; not a drive gate.
             internal int Fixed;
             internal Vector3 PAlpha, DAlpha, FeedforwardAlpha, AppliedAlpha, InertiaAlphaTorque, GyroTorque, Torque;
             internal float ReducedMass;
@@ -225,15 +231,16 @@ namespace MakemitAGA.ActiveRagdollLab.Model
 
         internal struct Frame
         {
+            internal PelvisHipAttitudeCommand HipAttitude;
             internal int Fixed, Settled;
-            internal bool Resolved, Censored;
+            internal bool Resolved, Censored, HipReactionRecorded;
             internal float Dt, PelvisMass, ChestMass;
-            internal Vector3 PrePelvisV, PreChestV, PostPelvisV, PostChestV, PelvisJ, ChestJ, TorqueJ, SystemDeltaP, SystemResidual;
+            internal Vector3 PrePelvisV, PreChestV, PostPelvisV, PostChestV, PelvisJ, ChestJ, TorqueJ, SystemDeltaP, SystemResidual, HipLeftJ, HipRightJ, HipMomentJ;
         }
         internal readonly Frame[] Ring = new Frame[12];
         internal int Next, Count;
         internal bool ExposureReady => Selected && Dynamic && Finite && Ready && Samples >= 50 && IdleSamples >= 50 && MotionSamples >= 30 &&
-            ForcePairWrites == Samples && TorqueWrites == Samples && Resolved >= 50 && PassiveResolved == 2;
+            ForcePairWrites == Samples && TorqueWrites == Samples && (!TraceHipTranslation || HipReactionRecords == Samples) && Resolved >= 50 && PassiveResolved == 2;
         internal string GetSummary() => "mode=PELVIS_RUNTIME_SESSION_PREFLIGHT_V04600/arm=" + Arm + "/traceArm=" + (TraceArm ?? "<none>") +
             "/selected-dynamic-active-ready-quiesced-finite=" + Selected + "-" + Dynamic + "-" + Active + "-" + Ready + "-" + Quiesced + "-" + Finite +
             "/issue=" + (Issue ?? "<none>") + "/baselineCaptured-restored=" + BaselineCaptured + "-" + BaselineRestored +
@@ -254,7 +261,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
             "/mass(pelvis-chest)=" + F(PelvisMass) + "-" + F(ChestMass) + "/localCOM(pelvis-chest)=" + V(PelvisComLocal) + "|" + V(ChestComLocal) +
             "/inertia(pelvis-chest)=" + V(PelvisInertia) + "|" + V(ChestInertia) +
             "/nativeAnchors(chest-pelvis)=" + V(NativeChestAnchor) + "|" + V(NativePelvisAnchor) +
-            "/peaks(positionMm-rotationDeg-forceSumN-torqueNm-systemResidualNs)=" + F(PositionErrorPeak * 1000f) + "-" + F(RotationErrorPeak) + "-" + F(ForceSumPeak) + "-" + F(TorquePeak) + "-" + F(SystemResidualPeak) +
+            "/peaks(positionMm-rotationDeg-forceSumN-baselineTorqueNm-systemResidualNs)=" + F(PositionErrorPeak * 1000f) + "-" + F(RotationErrorPeak) + "-" + F(ForceSumPeak) + "-" + F(TorquePeak) + "-" + F(SystemResidualPeak) +
             "/angularReference=" + (Dynamic ? "RELATIVE_W_STOP_OFFSET" : "OFF") +
             "/traceAngularReference=" + (TraceDynamic ? "RELATIVE_W_STOP_OFFSET" : "NO_TRACE") +
             "/pelvisInertia=" + (Dynamic ? "SELF_PLUS_PAIR_ORBITAL" : "OFF") +
@@ -263,7 +270,11 @@ namespace MakemitAGA.ActiveRagdollLab.Model
             "/traceAngularTargetAFF=" + (TraceDynamic ? "GOVERNED_REFERENCE_ALPHA_GAIN1" : "NO_TRACE") +
             "/positionOwner=" + (Dynamic ? "TWO_BODY_COMMON_COM_PD_20_9_PLUS_ARM_AFF_MAXA12" : "LEGACY_KINEMATIC_POSE_BRIDGE") +
             "/rotationOwner=" + (Dynamic ? "PELVIS_INERTIA_GYRO_PD_55_12_MAXA40_MAXTAU2" : "LEGACY_KINEMATIC_POSE_BRIDGE") +
-            "/torsoGravity=OFF/HipParentReaction=NOT_ROUTED/commonTargetAFF=" + (Dynamic ? "GOVERNED_COM_A_GAIN1" : "OFF") + "/traceCommonTargetAFF=" + (TraceDynamic ? "GOVERNED_COM_A_GAIN1" : "OFF") + "/ChestRelativeAngular=EXISTING_CHILD_ONLY/wholeBodySupport=NOT_QUALIFIED";
+            "/traceHipAttitude=" + (TraceHipTranslation ? "V04960_SAME_STEP_BASELINE2_PLUS_NET_HIP_COMPENSATION_TOTAL8" : "OFF") +
+            "/hipAttitude(commits-clamps)=" + HipReactionRecords + "-" + HipAttitudeClamps +
+            "/hipAttitudePeakNm(request-total-residual)=" + F(HipAttitudeRequestedPeak) + "|" + F(HipAttitudeAppliedPeak) + "|" + F(HipAttitudeResidualPeak) +
+            "/torqueStatsMeaning=BASELINE2_EXCEPT_HIP_ATTITUDE_AND_RECEIVER_TOTAL_TORQUE_J" +
+            "/torsoGravity=OFF/HipParentReaction=" + (TraceHipTranslation ? "TRANSLATION_AT_HIP_ANCHORS" : "NOT_ROUTED") + "/hipReactionInputRecords=" + HipReactionRecords + "/hipAngularControllerReaction=OFF/commonTargetAFF=" + (Dynamic ? "GOVERNED_COM_A_GAIN1" : "OFF") + "/traceCommonTargetAFF=" + (TraceDynamic ? "GOVERNED_COM_A_GAIN1" : "OFF") + "/ChestRelativeAngular=EXISTING_CHILD_ONLY/wholeBodySupport=NOT_QUALIFIED";
         internal string GetDetails()
         {
             var sb = new StringBuilder(GetSummary());
@@ -272,6 +283,14 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                 Frame f = Ring[(Next - Count + k + Ring.Length) % Ring.Length];
                 sb.Append("\nreceiverRow=").Append(f.Fixed).Append('>').Append(f.Settled).Append("/dt=").Append(F(f.Dt))
                     .Append("/knownCommonJ(pelvis-chest)=").Append(V(f.PelvisJ)).Append('|').Append(V(f.ChestJ)).Append("/pelvisTorqueJ=").Append(V(f.TorqueJ))
+                    .Append("/externalHipTranslationJ(left-right)=").Append(V(f.HipLeftJ)).Append('|').Append(V(f.HipRightJ))
+                    .Append("/externalHipMomentJ=").Append(V(f.HipMomentJ)).Append("/hipInputJoined=").Append(f.HipReactionRecorded)
+                    .Append("/hipAttitudeNm(baseline-effectiveHip-request-total-delta-residual)=").Append(f.HipAttitude.Committed ?
+                        V(f.HipAttitude.Baseline.ReceiverTorque) + "|" + V(f.HipAttitude.EffectiveHipTorque) + "|" + V(f.HipAttitude.RequestedTorque) + "|" +
+                        V(f.HipAttitude.AppliedTorque) + "|" + V(f.HipAttitude.CorrectionTorque) + "|" + V(f.HipAttitude.ResidualTorque) : "NA_NOT_COMMITTED")
+                    .Append("/hipMotionScale-requestedCommonA-finalCommonA=").Append(f.HipAttitude.Committed ?
+                        F(f.HipAttitude.MotionScale) + "|" + V(f.HipAttitude.Baseline.Acceleration) + "|" + V(f.HipAttitude.CommonAcceleration) : "NA_NOT_COMMITTED")
+                    .Append("/hipAttitudeClamped=").Append(f.HipAttitude.Clamped)
                     .Append("/preV(pelvis-chest)=").Append(V(f.PrePelvisV)).Append('|').Append(V(f.PreChestV))
                     .Append("/postV(pelvis-chest)=").Append(f.Resolved ? V(f.PostPelvisV) + "|" + V(f.PostChestV) : "NA")
                     .Append("/systemDeltaP-residual=").Append(f.Resolved ? V(f.SystemDeltaP) + "|" + V(f.SystemResidual) : "NA")
@@ -292,8 +311,8 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                 .Append("/issue=").Append(ParentReferenceIssue ?? "<none>")
                 .Append("/scope=REFERENCE_CONTRACT_ONLY/legBodies-joints-forces=RUNTIME_SCOPE_OWNED/nativeV=COM_V/commandV=ORIGIN_V/UpperTarget=SOURCE_RELATIVE_POSE_ONLY");
             AppendStops(sb);
-            sb.Append("\nAngularEvidenceReady qualifies reference/command/body clock coverage; joint availability is counted separately. Angular evidence: sampledInputW is the held/filtered bridge input, sourceW is the raw render derivative; bridge pose correction and reference braking correction are separate. The retained V04580 arrival reference subtracts relativeW*(|relativeW|/(2*sameStepBrakeCap)+dt) from the phase-aligned shortest rotation vector before gain4. Both retained V04670 planners keep that arrival estimate and ordinary alpha4. B may remove additional previous world W up to total alpha8 inside the same full-vector inertial budget1; it cannot spend that reserve accelerating through zero. The paired alternative uses the same actual-run native tensor, not a second physical plant. Its bounded motion cannot predict future source stops. V04590 publishes settled native COM kinematics and final governed command N for the two Hip points. This reference contract does not create bodies or apply leg forces; the runtime scope and combined bundle report physical leg participation. Hip reaction to Pelvis remains OFF. Pelvis inertiaTau/gyroTau remain the self-body terms; pelvisInertiaN adds the applied orbital terms, reduced mass, current native parent COM lever and pre-cap summed torque. The baseline uses mu=mp*mc/(mp+mc), with Chest COM at the joint; Chest self-spin inertia is independent. Angular AFF uses the current FINAL governed world-W derivative with dt_N, gain1 in the fixed baseline; its physical cache is independent of these diagnostics. P/D/AFF are summed before alpha40 and total-torque2 caps. Joint readback is diagnostic only and never fed back as compensation. Final issued commands without a following solve are not given a synthetic cleanup response. Reference and committed P/C commands belong to N; body delta-W/previous commands and native joint readback belong to solve N-1. Delta-W uses the previous interval dt. First/gapped responses and unavailable joint getters are NA. Native joint values are uncalibrated raw readback, not signed Pelvis torque or a closed angular ledger. Child AddTorque is Acceleration; its command remains rad/s^2, not Nm. Positive direction rates mean distance opening under the stated held velocities; source clocks and source/bridge motion remain visible. The quiet-source peak is one retained frame, with no new observer/ring/per-step output. Diagnostic gaps never alter physics or the existing tracking metrics.");
-            return sb + "\nThe two-body linear ledger includes the committed common COM forces; native joint forces are internal to the free two-body subsystem. Angular/whole-body closure and natural support are separate questions. This receiver ledger excludes child leg commands; physical leg participation is reported by the runtime scope and combined bundle. Hip reaction to Pelvis is not routed. The legacy freeze verdict is a reference, not receiver certification.";
+            sb.Append("\nAngularEvidenceReady qualifies reference/command/body clock coverage; joint availability is counted separately. Angular evidence: sampledInputW is the held/filtered bridge input, sourceW is the raw render derivative; bridge pose correction and reference braking correction are separate. The retained V04580 arrival reference subtracts relativeW*(|relativeW|/(2*sameStepBrakeCap)+dt) from the phase-aligned shortest rotation vector before gain4. Both retained V04670 planners keep that arrival estimate and ordinary alpha4. B may remove additional previous world W up to total alpha8 inside the same full-vector inertial budget1; it cannot spend that reserve accelerating through zero. The paired alternative uses the same actual-run native tensor, not a second physical plant. Its bounded motion cannot predict future source stops. V04590 publishes settled native COM kinematics and final governed command N for the two Hip points. This reference contract does not create bodies or apply leg forces; the runtime scope and combined bundle report physical leg participation. Hip translation reaction is routed only in the typed Hip scope; pure Upper angular-controller reaction remains OFF. Pelvis inertiaTau/gyroTau remain the self-body terms; pelvisInertiaN adds the applied orbital terms, reduced mass, current native parent COM lever and pre-cap summed torque. The baseline uses mu=mp*mc/(mp+mc), with Chest COM at the joint; Chest self-spin inertia is independent. Angular AFF uses the current FINAL governed world-W derivative with dt_N, gain1 in the fixed baseline; its physical cache is independent of these diagnostics. P/D/AFF are summed before the baseline alpha40/torque2 caps. Baseline angular tracking fields exclude the later same-step Hip compensation; its committed total torque, delta and residual are in receiverRow and hipPointResponseFrame. The typed Hip scope limits the complete receiver torque to 8Nm after combining both actual Hip inputs. Joint readback is diagnostic only and never fed back as compensation. Final issued commands without a following solve are not given a synthetic cleanup response. Reference and committed P/C commands belong to N; body delta-W/previous commands and native joint readback belong to solve N-1. Delta-W uses the previous interval dt. First/gapped responses and unavailable joint getters are NA. Native joint values are uncalibrated raw readback, not signed Pelvis torque or a closed angular ledger. Child AddTorque is Acceleration; its command remains rad/s^2, not Nm. Positive direction rates mean distance opening under the stated held velocities; source clocks and source/bridge motion remain visible. The quiet-source peak is one retained frame, with no new observer/ring/per-step output. Diagnostic gaps never alter physics or the existing tracking metrics.");
+            return sb + "\nThe two-body linear ledger includes the committed common COM forces; native joint forces are internal to the free two-body subsystem. Angular/whole-body closure and natural support are separate questions. In the typed Hip scope this ledger includes both committed Hip translation impulses and their parent moments; pelvisTorqueJ is the final receiver total, including the bounded compensation. Other leg forces are outside the P/C subsystem. Other scopes have no Hip reaction input. The legacy freeze verdict is a reference, not receiver certification.";
         }
 
         internal void ResetTracking()
@@ -557,12 +576,12 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                 .Append("/angularBodies(chestW-chestErrorRad)=").Append(V(f.ChestW)).Append('|').Append(V(f.ChestRotationErrorVector))
                 .Append("/renderToReferenceRad=").Append(V(f.RenderReferenceErrorVector))
                 .Append("/directionRatesRad(bridgeToRef-renderToRef-controlToBody)=").Append(f.ReferenceRotationErrorVector.magnitude > 0.00001f ? F(f.BridgeReferenceRate) : "NA_ZERO_ERROR").Append('|').Append(f.RenderReferenceErrorVector.magnitude > 0.00001f ? F(f.RenderReferenceRate) : "NA_ZERO_ERROR").Append('|').Append(f.RotationErrorVector.magnitude > 0.00001f ? F(f.BodyControlRate) : "NA_ZERO_ERROR")
-                .Append("/pelvisCommandN(Palpha-Dalpha-appliedAlpha-inertiaTau-gyroTau-tau)=").Append(V(a.PAlpha)).Append('|').Append(V(a.DAlpha)).Append('|').Append(V(a.AppliedAlpha)).Append('|').Append(V(a.InertiaAlphaTorque)).Append('|').Append(V(a.GyroTorque)).Append('|').Append(V(a.Torque))
+                .Append("/pelvisBaselineCommandN(Palpha-Dalpha-appliedAlpha-inertiaTau-gyroTau-tau)=").Append(V(a.PAlpha)).Append('|').Append(V(a.DAlpha)).Append('|').Append(V(a.AppliedAlpha)).Append('|').Append(V(a.InertiaAlphaTorque)).Append('|').Append(V(a.GyroTorque)).Append('|').Append(V(a.Torque))
                 .Append("/angularTargetAFFN(enabled-alphaRad)=").Append(a.ReferenceFeedforward).Append('|').Append(V(a.FeedforwardAlpha))
                 .Append("/pelvisInertiaN(model-mu-lever-orbitalAlphaTau-orbitalGyroTau-rawTau)=SELF_PLUS_PAIR_ORBITAL|").Append(F(a.ReducedMass)).Append('|').Append(V(a.ParentLever)).Append('|').Append(V(a.OrbitalAlphaTorque)).Append('|').Append(V(a.OrbitalGyroTorque)).Append('|').Append(V(a.RawTorque))
                 .Append("/chestCommandN(Palpha-Dalpha-appliedAlpha-targetRelW-measuredRelW)=").Append(V(f.ChildPAlpha)).Append('|').Append(V(f.ChildDAlpha)).Append('|').Append(V(f.ChildAppliedAlpha)).Append('|').Append(V(f.ChildTargetRelativeW)).Append('|').Append(V(f.ChildMeasuredRelativeW))
                 .Append("/responseInterval=").Append(f.AngularResponseAvailable ? f.ResponseFromFixed + ">" + f.Fixed + "/dt=" + F(f.ResponseDt) : "NA_FIRST_OR_GAP")
-                .Append("/responsePreviousSolve(Palpha-Calpha-previousPtau-previousCalpha)=").Append(f.AngularResponseAvailable ? V(f.PelvisResponseAlpha) + "|" + V(f.ChestResponseAlpha) + "|" + V(f.PreviousPelvisTorque) + "|" + V(f.PreviousChildAlpha) : "NA")
+                .Append("/responsePreviousSolve(Palpha-Calpha-previousBaselinePtau-previousCalpha)=").Append(f.AngularResponseAvailable ? V(f.PelvisResponseAlpha) + "|" + V(f.ChestResponseAlpha) + "|" + V(f.PreviousPelvisTorque) + "|" + V(f.PreviousChildAlpha) : "NA")
                 .Append("/previousPelvisCommand(alphaAfterCap40-affBeforeCaps)=").Append(f.AngularResponseAvailable ? V(f.PreviousPelvisCommandAlpha) + "|" + V(f.PreviousPelvisFeedforwardAlpha) : "NA")
                 .Append("/jointReadbackPreviousSolve=").Append(f.JointReactionAvailable ? "AVAILABLE/fromFixed=" + (f.Fixed > 1 ? (f.Fixed - 1) + "" : "PRE_TRACE") + "/rawForce=" + V(f.JointForce) + "|rawTorque=" + V(f.JointTorque) + "|parentLever=" + V(f.JointParentLever) : "NA_UNAVAILABLE");
         }
@@ -707,7 +726,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                 .Append("/source(seq-fresh-event-active-recovery)=").Append(f.SourceSequence).Append('-').Append(f.SourceFresh).Append('-').Append(f.SourceEventId).Append('-').Append(f.SourceActive).Append('-').Append(f.RecoveryEventId)
                 .Append("/source(dt-age-Wrad-Alpharad)=").Append(F(f.SourceDt)).Append('-').Append(F(f.SourceAge)).Append('-').Append(F(f.SourceW)).Append('-').Append(F(f.SourceAlpha))
                 .Append("/rawReceiver(a-alpha-tau)=").Append(f.Dynamic ? F(f.RawA) + "-" + F(f.RawAlpha) + "-" + F(f.RawTorque) : "NA_INACTIVE_OR_LEGACY")
-                .Append("/appliedReceiver(a-tau)=").Append(f.Dynamic ? F(f.AppliedA) + "-" + F(f.AppliedTorque) : "NA_INACTIVE_OR_LEGACY")
+                .Append("/appliedBaselineReceiver(a-tau)=").Append(f.Dynamic ? F(f.AppliedA) + "-" + F(f.AppliedTorque) : "NA_INACTIVE_OR_LEGACY")
                 .Append("/receiverClamps(L-A-T)=").Append(f.Dynamic ? f.LinearClamped + "-" + f.AngularClamped + "-" + f.TorqueClamped : "NA_INACTIVE_OR_LEGACY")
                 .Append("/childAngularClamp=").Append(f.ChildAngularClamped);
             AppendAngularEvidence(sb, f); AppendParentReference(sb, f);

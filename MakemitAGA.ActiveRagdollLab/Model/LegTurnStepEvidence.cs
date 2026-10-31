@@ -10,6 +10,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         internal PhysicsStepContext Step;
         internal SourceStepContext Source;
         internal int Fixed, Modes;
+        internal HipGoalPathEvidence HipGoalPath; // Optional; deliberately excluded from Matches.
         internal bool HipCommitted, KneeCommitted, RawWorldWValid;
         internal float RawSourceDt, HipMaxA;
         internal Quaternion RawUpperR, RawLowerR, UpperR, HipTargetR;

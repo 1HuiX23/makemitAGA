@@ -15,6 +15,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private void CaptureDynamicHipCommand(Vector3 committedTorque)
         {
             if (!_traceEnabled || !_dynamicParentActive || !PelvisRunScopes.HasUpperWeight(_dynamicScope)) return;
+            // Hip scope stages the real torque independently of trace; its audit is
+            // captured after the bilateral force commit at the end of this same step.
+            if (PelvisRunScopes.HasHipCoupling(_dynamicScope)) return;
             try
             {
                 if (!_hipCharacterJointResponseIsolation.Enabled || !_hipCharacterJointResponseIsolation.UpperOnlyTetherEnabled ||
@@ -130,6 +133,21 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             catch { _legTurnCurrent.HipFeedforwardValid = _legTurnCurrent.KneeFeedforwardValid = false; } // Optional evidence cannot interrupt the controller.
         }
 
+        // After composite conversion, before the ordinary world-reference stage. Use cached
+        // settled parent/Upper and the exact already-computed targets, never native rereads.
+        private void CaptureHipGoalPath(Quaternion parentR, Quaternion afterGovernor)
+        {
+            if (!_traceEnabled || !_dynamicParentActive) return;
+            _legTurnCurrent.HipGoalPath = new HipGoalPathEvidence
+            {
+                Prepared = true, Step = _runtimeStep, Source = _runtimeSource, Fixed = _fixedUpdateSequence,
+                RawUpper = _sampledUpperRotation, PhysicalParent = _previousMeasuredPelvisRotation,
+                ControlParent = parentR, RawInControl = parentR * _sampledTargetHipRelative,
+                AfterSource = parentR * _sourceControlTargetHipRelative,
+                AfterGovernor = afterGovernor, AfterComposite = parentR * _controlTargetHipRelative
+            };
+        }
+
         private void CaptureLegTurnHip(bool frameActive, Quaternion parentR, Vector3 targetRelativeW,
             Vector3 relativeRawA, Vector3 combinedRawA, Vector3 finalA, float maxA, bool clamped)
         {
@@ -147,6 +165,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 (_hipAuthority.PhysicalRecoveryPending ? 16 : 0) | (_legAngularAccelerationFeedforward.HipActiveThisStep ? 32 : 0) |
                 (_hipMechanicalParentTransport.ActiveThisStep ? 64 : 0) | (clamped ? 128 : 0);
             _legTurnCurrent.HipCommitted = true;
+            HipGoalPathEvidence path = _legTurnCurrent.HipGoalPath;
+            path.Final = _legTurnCurrent.HipTargetR; path.PhysicalUpper = _legTurnCurrent.UpperR;
+            path.Modes = _legTurnCurrent.Modes; path.NormalApplied = _hipNormalReference.Current.Applied;
+            path.Committed = true; _legTurnCurrent.HipGoalPath = path;
         }
 
         private void CaptureLegTurnKnee(Vector3 targetRelativeW, Vector3 relativeA, Vector3 totalA,

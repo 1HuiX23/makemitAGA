@@ -13,6 +13,9 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             public string Scene => _sceneName + "#" + _sceneHandle;
             public static string ResolveRequestedArm(string requestedArm, PelvisRunScope scope)
             {
+                if (PelvisRunScopes.HasHipCoupling(scope))
+                    return string.Equals(requestedArm, "b", StringComparison.OrdinalIgnoreCase) || requestedArm == PelvisDynamicReceiverIsolation.DynamicHipArm
+                        ? PelvisDynamicReceiverIsolation.DynamicHipArm : null;
                 if (PelvisRunScopes.HasUpperWeight(scope))
                     return string.Equals(requestedArm, "b", StringComparison.OrdinalIgnoreCase) || requestedArm == PelvisDynamicReceiverIsolation.DynamicUpperLoadArm
                         ? PelvisDynamicReceiverIsolation.DynamicUpperLoadArm : null;
@@ -157,7 +160,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
                 bool ready = started && _proxy != null && _proxy.PelvisReceiver.ExposureReady && nativeReadback;
                 return (started ? "resultScope=COMPLETED_RUN" : "resultScope=REJECTED_SETUP") + " | " + header +
                     " | RECEIVER_EXPOSURE_DATASET_READY=" + ready + " | RECEIVER_TRACKING_DATASET_READY=" +
-                    (ready && _proxy.PelvisReceiver.TrackingComplete) + " | scope=" + Scope + " | HipReaction=NOT_ROUTED | torsoGravity=OFF\n" +
+                    (ready && _proxy.PelvisReceiver.TrackingComplete) + " | scope=" + Scope + " | HipReaction=" + (PelvisRunScopes.HasHipCoupling(_pelvisScope) ? "TRANSLATION_AT_HIP_ANCHORS" : "NOT_ROUTED") + " | hipAngularControllerReaction=OFF | torsoGravity=OFF\n" +
                     "PELVIS_LEG_REFERENCE_DATASET_READY=" + (ready && _proxy.PelvisReceiver.ParentReferenceReady) + " | scope=VIRTUAL_BILATERAL_HIP_REFERENCE_ONLY\n" +
                     (_proxy?.PelvisReceiver?.GetDetails() ?? "<no-receiver>") + "\n" + native +
                     "\n" + recovery + "\n[TORSO_AT_FINALIZE]\n" + (_proxy?.Report?.GetConsoleSummary() ?? "<not-built>") + "\n" + legs;
@@ -168,7 +171,8 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
                 bool ready = started && _proxy != null && _proxy.PelvisReceiver.ExposureReady && _legChain.SharedTraceContextReady && _legChain.DynamicParentsActive && (_pelvisWithContact ? _legChain.DynamicContactMatchesScope(_pelvisScope) : _legChain.FreeSpaceReady) && !_legChain.AnyDriveAborted &&
                     _legChain.BilateralReport.ClockParityPass && FootRunSafety(_legChain.PrimaryFootReport) && FootRunSafety(_legChain.SecondaryFootReport);
                 return (_pelvisWithContact ? _legChain.DynamicContactEvidence(ready, _pelvisScope) : "DYNAMIC_LEG_FREE_SPACE_DATASET_READY=" + ready + " | scope=NO_CONTACT_NO_GRAVITY_NO_HIP_REACTION | loadedSupportCertified=False\n" +
-                    _legChain.FreeSpaceBoundarySummary()) + "\n" + _legChain.DynamicParentSummary() + (PelvisRunScopes.HasUpperWeight(_pelvisScope) ? "\n[HIP_WRENCH_INPUT_AUDIT_AT_FINALIZE]\n" + _legChain.HipPelvisLoadPath.GetDetails() : "") +
+                    _legChain.FreeSpaceBoundarySummary()) + "\n" + _legChain.DynamicParentSummary() + (PelvisRunScopes.HasHipCoupling(_pelvisScope) ? "\n[HIP_ANCHOR_PAIR_AT_FINALIZE]\n" + _legChain.HipAnchorPairDetails() :
+                    PelvisRunScopes.HasUpperWeight(_pelvisScope) ? "\n[HIP_WRENCH_INPUT_AUDIT_AT_FINALIZE]\n" + _legChain.HipPelvisLoadPath.GetDetails() : "") +
                     "\n[PRIMARY_LEG_AT_FINALIZE]\n" + _legChain.PrimaryReport.GetFullText() +
                     "\n[SECONDARY_LEG_AT_FINALIZE]\n" + _legChain.SecondaryReport.GetFullText() +
                     "\n[PRIMARY_FOOT_AT_FINALIZE]\n" + _legChain.PrimaryFootReport.GetFullText(_pelvisWithContact) +

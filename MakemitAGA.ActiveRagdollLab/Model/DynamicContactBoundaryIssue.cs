@@ -6,6 +6,6 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         None, MissingFoundation, Scope, NativeState, SupportSurface, FootSelfPair,
         ContactLifecycle, ContactAuthorization, Friction, GroundAuthority, PredictiveCapture,
         FootGravity, CollisionMode, ContactOffset, Solver, SupportAngular, PlanarDamping,
-        LowerGravity, ReciprocalLoad, LowerSelfWeight, UpperSelfWeight, KneeReaction
+        LowerGravity, ReciprocalLoad, LowerSelfWeight, UpperSelfWeight, KneeReaction, HipTranslationPair
     }
 }
