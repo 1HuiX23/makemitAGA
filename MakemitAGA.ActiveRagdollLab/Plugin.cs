@@ -13,11 +13,12 @@ namespace MakemitAGA.ActiveRagdollLab
     [BepInPlugin(
         "com.alex.miside.activeragdolllab",
         "MakemitAGA Active Ragdoll Lab",
-        "0.4.100")]
+        Plugin.PluginVersion)]
     public sealed class Plugin : BepInEx.Unity.IL2CPP.BasePlugin
     {
-        // V04930 uses the Chest-COM-constrained parent point response and retains committed common acceleration FF.
-        internal const string SourceRevision = "V041000_HIP_MOTION_FEASIBILITY_ALLOCATION_20261031";
+        internal const string PluginVersion = "0.4.119";
+        // Near-surface full serial stance-load admission; fixed attachment and actuator budgets.
+        internal const string SourceRevision = "V041190_STANCE_LOAD_ADMISSION_20261102";
         internal static ManualLogSource Logger;
         private Harmony _harmony;
         private Action<Scene, LoadSceneMode> _sceneLoadedHandler;
@@ -26,9 +27,9 @@ namespace MakemitAGA.ActiveRagdollLab
         public override void Load()
         {
             Logger = Log;
-            Logger.LogInfo("[ARL] Active Ragdoll Lab 0.4.100 loaded | sourceRevision=" + SourceRevision +
-                " | V041000 feedback-priority common COM and Upper torque allocation before Knee/Foot; explicit bounded fallback" +
-                " | shared session/clock; explicit free-space/unloaded/Foot/Lower-self-weight/Knee-normal/Upper-self-weight/Hip-anchor-pair scopes. The Knee scope retains Foot/Lower weight and adds the existing exact-stance Knee normal pair; Upper gravity only in the Upper/Hip scopes; Torso gravity and tether reciprocal OFF; Hip translation reaction only in the new Hip scope; angular-controller reaction OFF; legacy ankle regression retained.");
+            Logger.LogInfo("[ARL] Active Ragdoll Lab " + PluginVersion + " loaded | sourceRevision=" + SourceRevision +
+                " | V041190 near-surface full stance-load admission A/B" +
+                " | shared session/clock; explicit free-space/unloaded/Foot/Lower-self-weight/Knee-normal/Upper-self-weight/Hip-anchor-pair scopes. The Knee scope retains Foot/Lower weight and adds the existing exact-stance Knee normal pair; Upper gravity only in the Upper/Hip scopes; Torso gravity and tether reciprocal OFF; Hip translation reaction only in the new Hip scope; joint-relative angular reaction ON in both Hip arms; both Hip arms share continuous Knee R/W/A and the same Foot ground goal; both use bounded planned Knee A during source/torso recovery; B alone delays full serial load until current and one-step predicted sole geometry qualify; legacy ankle regression retained.");
             try
             {
                 ClassInjector.RegisterTypeInIl2Cpp<RagdollProxyContactTracker>();
@@ -56,7 +57,7 @@ namespace MakemitAGA.ActiveRagdollLab
 
             _harmony = new Harmony("com.alex.miside.activeragdolllab");
             _harmony.PatchAll(typeof(ActiveRagdollConsolePatch));
-            Logger.LogInfo("[ARL][BASELINE] build=V041000_HIP_MOTION_FEASIBILITY_ALLOCATION | supportProbe=FINITE_SEGMENT_NO_PADDING | hipAttitude=BASELINE2_PLUS_NET_HIP_FF_TOTAL8_NM | evidence=MOTION_SCALE_FEEDBACK_DEFICIT_FINAL_COMMAND_RESPONSE | physicalArm=B_V041000_HIP_MOTION_FEASIBILITY_ALLOCATION | command=arl_pelvis_hip_test(b|stop) | scope=DYNAMIC_PELVIS_LEGS_HIP_ANCHOR_PAIR_CONTACT | parent=DYNAMIC_PELVIS_SETTLED_POINT | contact=EXACT_STANCE | footGravity=EXACT_STANCE_NATIVE | lowerGravity=EXACT_STANCE_NATIVE | upperGravity=EXACT_STANCE_NATIVE | torsoGravity=OFF | loadTransfer=LOWER_AND_UPPER_SELF_WEIGHT_SERIAL_PAIRS | kneeNormalCoupling=V04430_REDUCED_MASS_PD_PAIR | clocks=TORSO_LEG_FOOT_SHARED_CONTEXT | hipTranslation=FEEDBACK_PRIORITY_BILATERAL_MOTION_ALLOCATION | HipReactionToPelvis=TRANSLATION_AT_HIP_ANCHORS | hipAngularControllerReaction=OFF | gsp=False");
+            Logger.LogInfo("[ARL][BASELINE] build=V041190_STANCE_LOAD_ADMISSION | supportProbe=FINITE_SEGMENT_NO_PADDING | hipAttitude=BASELINE2_POINT_COMPENSATION_RELATIVE_REACTION_EXTERNAL_AND_TOTAL8_NM | evidence=RAW_PRE24_POST8_STOP_PRE8_POST48_PREVIOUS_RECEIPT_NEXT_RESPONSE | comReference=V105_A_RELATIVE_V_ARRIVAL_DEFICIT_FEEDBACK_ON | physicalArms=A_V041190_DIRECT_STANCE_LOAD/B_V041190_NEAR_SURFACE_LOAD_ADMISSION | logFormat=HIP_COM_V041060 | periodicLogMinSeconds=5 | authorityAudit=STOP_TIME_RETAINED_RECEIPTS | command=arl_pelvis_hip_test(a|b|stop) | scope=DYNAMIC_PELVIS_LEGS_HIP_ANCHOR_PAIR_CONTACT | parent=DYNAMIC_PELVIS_SETTLED_POINT | contact=EXACT_STANCE | footGravity=EXACT_STANCE_NATIVE | lowerGravity=EXACT_STANCE_NATIVE | upperGravity=EXACT_STANCE_NATIVE | torsoGravity=OFF | loadTransfer=LOWER_AND_UPPER_SELF_WEIGHT_SERIAL_PAIRS | kneeNormalCoupling=V04430_REDUCED_MASS_PD_PAIR | clocks=TORSO_LEG_FOOT_SHARED_CONTEXT | hipTranslation=FEEDBACK_PRIORITY_SYSTEM_COM_RESPONSE | HipReactionToPelvis=TRANSLATION_AT_HIP_ANCHORS | hipAngularControllerReaction=BOTH_RELATIVE_ONLY | hipNormalParent=BOTH_RECEIVER_TARGET_NORMAL_ONLY | contactEntry=BOTH_SHALLOW_REQUALIFICATION | footGroundReference=BOTH_FEASIBLE_OR_PARTIAL_RENDER_GOAL | kneeReference=BOTH_CONTINUOUS_UPPER_LOCAL_RWA | kneePlannedFF=BOTH_SOURCE_TORSO_RECOVERY | loadAdmission=A_DIRECT_B_NEAR_SURFACE_TWO_FIXED | physicalFrameAgeGates=BOTH_RETAINED | entryReferenceAudit=SAME_CORNER_UPSTREAM_PARENT_PLACEMENT_KNEE_RECEIPT | entryWindows=FIRST_ANY_THEN_RESERVE_SOURCE_MOTION | gsp=False");
         }
 
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
@@ -84,7 +85,12 @@ namespace MakemitAGA.ActiveRagdollLab
             catch { }
 
             try { ActiveRagdollLabRuntime.Shutdown(reason); }
-            catch (Exception e) { Logger?.LogWarning("[ARL] Shutdown failed: " + e); }
+            catch (Exception e)
+            {
+                // Diagnostic delivery must not prevent the remaining teardown attempt.
+                try { Logger?.LogWarning("[ARL] Shutdown failed: " + e); }
+                catch { }
+            }
             try { _harmony?.UnpatchSelf(); }
             catch { }
         }

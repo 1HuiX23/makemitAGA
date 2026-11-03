@@ -127,6 +127,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 return Vector3.zero;
             }
 
+            // Keep the 30 mm test below as a distance contract. Non-finite input is a different
+            // failure: reject it before any native force write and let the owning drive abort.
+            if (!IsFinite(fixedDeltaTime) || !IsFinite(childAnchorWorld) || !IsFinite(parentAnchorWorld) ||
+                !IsFinite(accelerationFeedforwardWorld) ||
+                (settledParentVelocityWorld.HasValue && !IsFinite(settledParentVelocityWorld.Value)))
+                return RejectNonFiniteCommand("HIP_TETHER_INPUT_NONFINITE");
+
             Vector3 childLever = childAnchorWorld - upper.worldCenterOfMass;
             Vector3 parentLever = parentAnchorWorld - parent.worldCenterOfMass;
             Vector3 childVelocity = upper.velocity + Vector3.Cross(upper.angularVelocity, childLever);
@@ -144,6 +151,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 applied = raw * (TetherMaxAcceleration / rawMag);
                 clamped = true;
             }
+
+            if (!IsFinite(pdRaw) || !IsFinite(raw) || !IsFinite(rawMag) || !IsFinite(applied))
+                return RejectNonFiniteCommand("HIP_TETHER_COMMAND_NONFINITE");
 
             _currentAppliedWorld = applied;
             upper.AddForce(applied, ForceMode.Acceleration);
@@ -186,6 +196,18 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             CopyToReport(report, applied);
             return applied;
         }
+
+        private Vector3 RejectNonFiniteCommand(string reason)
+        {
+            // An abort report must not attribute the preceding step's command to this rejected write.
+            _currentAppliedWorld = Vector3.zero;
+            _currentAppliedAcceleration = 0f;
+            _currentClamped = false;
+            throw new System.InvalidOperationException(reason);
+        }
+
+        private static bool IsFinite(Vector3 value) => IsFinite(value.x) && IsFinite(value.y) && IsFinite(value.z);
+        private static bool IsFinite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);
 
         internal void CaptureAbort(SingleLegChainReport report, string reason)
         {

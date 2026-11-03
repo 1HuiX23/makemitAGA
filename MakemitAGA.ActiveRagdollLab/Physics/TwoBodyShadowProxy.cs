@@ -9,54 +9,43 @@ using Object = UnityEngine.Object;
 
 namespace MakemitAGA.ActiveRagdollLab.Physics
 {
-    internal enum TwoBodyMassPropertyMode
+    internal sealed partial class TwoBodyShadowProxy
     {
-        LegacyUnityDefault = 0,
-        ExplicitCenterOfMassOnly = 1,
-        ExplicitInertiaOnly = 2,
-        ExplicitUniformBox = 3
-    }
-
-    internal enum TwoBodyCharacterJointAnchorMode
-    {
-        CalibratedSourceJoint = 0,
-        ChestCenterOfMass = 1
-    }
-
-    internal sealed class TwoBodyShadowProxy
-    {
-        private sealed class IgnoredPair
-        {
-            public Collider A;
-            public Collider B;
-        }
-
         private readonly ActiveRagdollLabProfile _profile;
         private readonly BoneAuditReport _audit;
-        private readonly List<IgnoredPair> _ignoredPairs = new List<IgnoredPair>();
+        private readonly OwnedCollisionIgnorePairs _ignoredPairs = new OwnedCollisionIgnorePairs();
+        // Lifetime registration-failure count; rollback retries do not reset it.
+        // The report is a projection, never the authority for the Build gate.
+        private int _ignoreFailureCount;
+        // A freshly created object is ours before any native property/parenting call can fail.
+        // Successful parenting transfers cleanup to the root; failed transfers stay retryable here.
+        private readonly List<GameObject> _unparentedObjects = new List<GameObject>();
         private readonly RenderToPhysicsPoseBridge _poseBridge = new RenderToPhysicsPoseBridge();
         private readonly SourceTurnDiscontinuityDiagnostics _sourceTurnDiagnostics = new SourceTurnDiscontinuityDiagnostics();
         private readonly PelvisDynamicReceiverIsolation _pelvisReceiver = new PelvisDynamicReceiverIsolation();
         private readonly PelvisLegReference _pelvisLegReference = new PelvisLegReference();
-        private readonly DynamicTorsoRecoveryGate _dynamicTorsoRecovery = new DynamicTorsoRecoveryGate();
-        internal string TorsoRecoverySummary => _dynamicTorsoRecovery.GetSummary(_report.UseDynamicTorsoRecovery);
+        private readonly TorsoControlState _controlState = new TorsoControlState();
+        internal TorsoControlPolicy ControlPolicy => _controlState.Policy;
+        internal TorsoRecoveryState PublishedTorsoRecovery => _controlState.PublishedRecovery;
+        internal TorsoControlPhase ControlPhase => _controlState.Phase;
+        internal TorsoControlState ControlState => _controlState;
+        internal bool ControlRecoveryActive => _controlState.RecoveryActive;
+        internal string TorsoRecoverySummary => _controlState.RecoverySummary;
+
         private void ResetTorsoRecoveryState()
         {
-            _dynamicTorsoRecovery.ResetState();
-            _report.DynamicTorsoRecovery = _dynamicTorsoRecovery.Current;
+            _report.DynamicTorsoRecovery = _controlState.ResetRecovery();
         }
+
         private void PublishTorsoRecoveryState()
         {
             if (!DynamicPelvisReceiverSelected || !_driveEnabled) return;
-            _dynamicTorsoRecovery.Step(_runtimeStep, _insideRuntimeStep && _pelvisReceiver.ReadyForRun &&
-                _pelvisReceiver.ControlErrorsValid && _report.FiniteState && _report.CharacterJointConnectedBodyMatch &&
-                _report.CharacterJointAnchorModeValidated, _report.SourceTurnEventActive,
-                _pelvisReceiver.ControlComErrorMeters, _pelvisReceiver.ControlPelvisErrorDegrees,
-                _report.RotationErrorDegrees, _report.CharacterJointConstraintAnchorErrorMeters, _report.AnchorErrorMeters);
-            _report.DynamicTorsoRecovery = _dynamicTorsoRecovery.Current;
-            if (_traceEnabled) _dynamicTorsoRecovery.Record(_report.FreezeRecoveryActive);
-            if (_report.UseDynamicTorsoRecovery && _pelvisReceiver.ReadyForRun &&
-                !_report.DynamicTorsoRecovery.Matches(_runtimeStep))
+            _report.DynamicTorsoRecovery = _controlState.ObserveRecovery(_runtimeStep, _insideRuntimeStep,
+                _pelvisReceiver.ReadyForRun, _pelvisReceiver.ControlErrorsValid,
+                _pelvisReceiver.ControlComErrorMeters, _pelvisReceiver.ControlPelvisErrorDegrees);
+            _controlState.RecordRecovery(_traceEnabled);
+            if (_controlState.Policy.UseDynamicTorsoRecovery && _pelvisReceiver.ReadyForRun &&
+                !_controlState.PublishedRecovery.Matches(_runtimeStep))
                 throw new InvalidOperationException("DYNAMIC_TORSO_RECOVERY_CURRENT_INPUT_INVALID");
         }
         private readonly StepContextCursor _contextCursor = new StepContextCursor();
@@ -70,11 +59,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private float CurrentUnscaledTime => _insideRuntimeStep ? _runtimeStep.UnscaledTime :
             _insideRuntimeSource ? _runtimeSource.Time : Time.unscaledTime;
         private readonly SourceAwareFreezeValidation _freezeValidation = new SourceAwareFreezeValidation();
-        private readonly TwoBodyMassPropertyMode _massPropertyMode;
-        private readonly string _instanceTag;
-        private readonly bool _emitLogs;
-        private readonly TwoBodyCharacterJointAnchorMode _characterJointAnchorMode;
-        private bool _massPropertyModeValidated;
         private bool _characterJointAnchorModeValidated;
 
         private GameObject _root;
@@ -158,12 +142,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private Vector3 _fixedStepPelvisTransportLinearVelocity;
         private Vector3 _fixedStepPelvisTransportAngularVelocity;
         private Vector3 _fixedStepTargetChestComVelocity;
-        private Vector3 _fixedStepTargetRelativeAngularVelocity;
         private Vector3 _fixedStepBodyRelativeAngularVelocity;
         private Vector3 _previousCommandedPelvisPosition;
         private Quaternion _previousCommandedPelvisRotation;
         private Vector3 _previousCommandedTargetChestComPosition;
-        private Quaternion _previousCommandedTargetRelativeRotation;
         private Quaternion _previousSettledBodyRelativeRotation;
         private Quaternion _settledBodyRelativeRotation = Quaternion.identity;
         private Quaternion _settledPelvisRotation = Quaternion.identity;
@@ -257,19 +239,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         // v0.3.11 read-only torso controller/solver taps. These fields never feed back into control.
         private Vector3 _angularPAcceleration;
         private Vector3 _angularDAcceleration;
-        private float _angularAccelerationHeadroom;
         private Vector3 _jointCurrentForceWorld;
         private bool _jointReactionReadbackValid;
         private Vector3 _jointCurrentTorqueWorld;
-        private Vector3 _jointChestComLeverWorld;
         // v0.3.15 read-only same-phase parent-side reaction geometry snapshot.
         private Vector3 _jointPelvisComLeverWorld;
-        private float _jointReactionConstraintAnchorErrorMeters;
-        private Vector3 _jointForceMomentWorld;
-        private Vector3 _jointCombinedMomentWorld;
-        private Vector3 _jointTorqueAngularAccelerationProxyWorld;
-        private Vector3 _jointForceMomentAngularAccelerationProxyWorld;
-        private Vector3 _jointCombinedAngularAccelerationProxyWorld;
         private Quaternion _jointReferenceRelativeRotation = Quaternion.identity;
         private Vector3 _jointTwistAxis = Vector3.up;
         private Vector3 _jointSwing1Axis = Vector3.right;
@@ -294,31 +268,19 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private bool _collidersEnabled;
         private bool _visualEnabled = true;
         private bool _destroyed;
+        private bool _rootReleaseCommitted;
         private string _buildPhase = "NOT_STARTED";
 
         private readonly TwoBodyProxyReport _report = new TwoBodyProxyReport();
 
+        // One legacy torso plant is built here. The dynamic receiver owns its
+        // separate explicit-box mass properties and Chest-COM constraint migration.
+        // Retired v0.3.x sandbox construction is intentionally not a runtime option.
         public TwoBodyShadowProxy(ActiveRagdollLabProfile profile, BoneAuditReport audit)
-            : this(profile, audit, TwoBodyMassPropertyMode.LegacyUnityDefault, "PRODUCTION", true, TwoBodyCharacterJointAnchorMode.CalibratedSourceJoint)
-        {
-        }
-
-        internal TwoBodyShadowProxy(ActiveRagdollLabProfile profile, BoneAuditReport audit, TwoBodyMassPropertyMode massPropertyMode, string instanceTag, bool emitLogs)
-            : this(profile, audit, massPropertyMode, instanceTag, emitLogs, TwoBodyCharacterJointAnchorMode.CalibratedSourceJoint)
-        {
-        }
-
-        // v0.3.14 experiment-only CharacterJoint constraint-anchor override.
-        // Source/control anchors and Parent-FF semantics remain frozen and are not redirected by this mode.
-        internal TwoBodyShadowProxy(ActiveRagdollLabProfile profile, BoneAuditReport audit, TwoBodyMassPropertyMode massPropertyMode, string instanceTag, bool emitLogs, TwoBodyCharacterJointAnchorMode characterJointAnchorMode)
         {
             _profile = profile;
             _audit = audit;
-            _massPropertyMode = massPropertyMode;
-            _instanceTag = string.IsNullOrWhiteSpace(instanceTag) ? "SHADOW" : instanceTag.Trim();
-            _emitLogs = emitLogs;
-            _characterJointAnchorMode = characterJointAnchorMode;
-            _sourceTurnDiagnostics.Enabled = emitLogs;
+            _sourceTurnDiagnostics.Enabled = true;
             _report.PelvisReceiver = _pelvisReceiver.Report;
         }
 
@@ -330,6 +292,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal Rigidbody PelvisBody => _pelvisBody;
         internal Rigidbody ChestBody => _chestBody; // V04460 read-only receiver audit; no new controller authority.
         internal PelvisReceiverReport PelvisReceiver => _pelvisReceiver.Report;
+        internal PelvisReceiverControlStatus PelvisReceiverControl => _pelvisReceiver.ControlStatus;
         internal PelvisHipAttitudeCommand HipAttitudeCommand => _pelvisReceiver.HipAttitudeCommand;
         internal bool CompleteHipTranslationReaction(PhysicsStepContext step, HipAnchorPairReport left, HipAnchorPairReport right) =>
             _runtimeStep.Matches(step) && _legParentCommand.Matches(step) && _pelvisReceiver.CompleteHipTranslationReaction(step, left, right);
@@ -355,7 +318,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 return "ARL pelvis receiver | success=False | reason=RETIRED_OR_INVALID_ARM";
             _pelvisLegReference.Clear();
             ResetTorsoRecoveryState();
-            _dynamicTorsoRecovery.ResetDiagnostics();
+            _controlState.ResetRecoveryDiagnostics();
             SampleSourcePoseSnapshotOnly();
             if (!_sampleValid && arm != PelvisDynamicReceiverIsolation.IdleArm) return "ARL pelvis receiver | success=False | reason=SOURCE_POSE_INVALID";
             if (arm != PelvisDynamicReceiverIsolation.IdleArm)
@@ -375,10 +338,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _characterJointPelvisAnchorLocal = _characterJoint.connectedAnchor;
             }
             _characterJointAnchorModeValidated = ok && ValidateConfiguredCharacterJointAnchors();
-            _report.UseDynamicTorsoRecovery = ok && PelvisDynamicReceiverIsolation.IsDynamicLegArm(arm);
-            _report.HipGoalGateOnlyHip = _report.UseDynamicTorsoRecovery;
-            _report.UseCoherentHipNormalReference = _report.UseDynamicTorsoRecovery;
-            _report.HipNormalSampleAgePrediction = _report.UseCoherentHipNormalReference && arm == PelvisDynamicReceiverIsolation.DynamicLegArmA;
+            _controlState.SelectPolicy(ok, arm);
             UpdateReport("receiver-selected");
             return "ARL pelvis receiver | success=" + ok + " | " + _pelvisReceiver.Report.GetSummary();
         }
@@ -401,8 +361,18 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         }
         internal Collider[] OwnedColliders => new Collider[] { _pelvisCollider, _chestCollider };
         internal bool DriveEnabled => _driveEnabled;
+        internal bool TraceEnabled => _traceEnabled;
         internal bool LastRollbackSucceeded { get; private set; } = true;
+        internal bool HasPendingCleanup => _root != null || _previewMaterial != null || _ignoredPairs.Count > 0 || _unparentedObjects.Count > 0;
         internal Quaternion SampledPelvisTargetRotation => _sampledPelvisRotation;
+        // Optional diagnostic access to the completed held Render sample. These
+        // values already include bone-to-proxy calibration; never reread Hips here.
+        internal bool TryGetHeldPelvisTargetPose(SourceStepContext source, out Vector3 position, out Quaternion rotation)
+        {
+            position = _sampledPelvisPosition; rotation = _sampledPelvisRotation;
+            return _sampleValid && CompletedSource.Matches(source) &&
+                PelvisParentFrame.V(position) && PelvisParentFrame.Q(rotation);
+        }
         // Legacy consumers retain their kinematic pose. Dynamic consumers must receive
         // the FINAL governed command, with no fallback to the faster raw pose bridge.
         internal Vector3 CurrentPelvisCommandPosition => DynamicPelvisReceiverSelected ? RequireDynamicParentFrame().CommandPosition :
@@ -437,12 +407,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (!TryGetDynamicParentFrame(out PelvisParentFrame frame)) throw new InvalidOperationException("DYNAMIC_PARENT_FRAME_NOT_CURRENT");
             return frame;
         }
-        // v0.3.8 read-only geometry exposure for isolated Two-Body COM/inertia factorization.
-        internal bool CharacterJointAnchorModeValidated => _characterJointAnchorModeValidated;
-        internal TwoBodyCharacterJointAnchorMode CharacterJointAnchorMode => DynamicPelvisReceiverSelected ? TwoBodyCharacterJointAnchorMode.ChestCenterOfMass : _characterJointAnchorMode;
+        private string CharacterJointAnchorMode => DynamicPelvisReceiverSelected ? "ChestCenterOfMass" : "CalibratedSourceJoint";
 
         public string Build()
         {
+            if (_destroyed)
+                return "ARL build failed：该代理已进入回滚终止状态；请先完成 cleanup，再创建新代理。";
             if (_audit == null || !_audit.Success || _audit.Pelvis == null || _audit.Chest == null)
                 return "ARL build failed：没有可用的成功骨骼审计。";
 
@@ -465,12 +435,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 Vector3 chestSize = ClampSize(Vector3.Scale(_profile.ChestSizeScale, Vector3.one * torso));
 
                 EnterBuildPhase("CREATE_ROOT");
-                _root = new GameObject("ARL_TwoBodyShadowProxy_" + Sanitize(_audit.TargetName) + (_instanceTag == "PRODUCTION" ? string.Empty : "_" + Sanitize(_instanceTag)));
+                _root = new GameObject("ARL_TwoBodyShadowProxy_" + Sanitize(_audit.TargetName));
                 _root.hideFlags = HideFlags.DontSave;
                 _root.layer = _audit.TargetRoot != null ? _audit.TargetRoot.gameObject.layer : 0;
 
                 EnterBuildPhase("CREATE_PREVIEW_MATERIAL");
-                _previewMaterial = CreatePreviewMaterial(_profile.PreviewAlpha);
+                CreatePreviewMaterial(_profile.PreviewAlpha);
 
                 EnterBuildPhase("CREATE_PELVIS_OBJECT");
                 _pelvisObject = CreateBody(
@@ -500,12 +470,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     out _chestCollider,
                     out _chestVisual);
 
-                _massPropertyModeValidated = _massPropertyMode == TwoBodyMassPropertyMode.LegacyUnityDefault ||
-                    ValidateBodyMassPropertyMode(_pelvisBody, _pelvisCollider, _profile.PelvisMass, _massPropertyMode) &&
-                    ValidateBodyMassPropertyMode(_chestBody, _chestCollider, _profile.ChestMass, _massPropertyMode);
-                if (_massPropertyMode != TwoBodyMassPropertyMode.LegacyUnityDefault && !_massPropertyModeValidated)
-                    throw new InvalidOperationException("TWOBODY_MASS_PROPERTY_MODE_READBACK_MISMATCH:" + _massPropertyMode);
-
                 EnterBuildPhase("PARENT_PROXY_OBJECTS");
                 _pelvisObject.transform.SetParent(_root.transform, true);
                 _chestObject.transform.SetParent(_root.transform, true);
@@ -521,22 +485,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _virtualPelvisAnchorLocal = _pelvisObject.transform.InverseTransformPoint(jointWorld);
                 _virtualChestAnchorLocal = _chestObject.transform.InverseTransformPoint(jointWorld);
 
-                // v0.3.14: keep the frozen source/control anchor semantics above untouched.
-                // Only the native CharacterJoint constraint point may move in an isolated experiment lane.
-                if (CharacterJointAnchorMode == TwoBodyCharacterJointAnchorMode.ChestCenterOfMass)
-                {
-                    Vector3 constraintWorld = _chestBody.worldCenterOfMass;
-                    _characterJointChestAnchorLocal = _chestBody.centerOfMass;
-                    _characterJointPelvisAnchorLocal = _pelvisObject.transform.InverseTransformPoint(constraintWorld);
-                }
-                else
-                {
-                    _characterJointChestAnchorLocal = _virtualChestAnchorLocal;
-                    _characterJointPelvisAnchorLocal = _virtualPelvisAnchorLocal;
-                }
+                // Build the frozen legacy anchor. Dynamic receiver selection later
+                // migrates only the native constraint; virtual/source anchors stay here.
+                _characterJointChestAnchorLocal = _virtualChestAnchorLocal;
+                _characterJointPelvisAnchorLocal = _virtualPelvisAnchorLocal;
                 _characterJointAnchorModeValidated = ValidateCharacterJointAnchorMode();
                 if (!_characterJointAnchorModeValidated)
-                    throw new InvalidOperationException("TWOBODY_CHARACTERJOINT_ANCHOR_MODE_READBACK_MISMATCH:" + _characterJointAnchorMode);
+                    throw new InvalidOperationException("TWOBODY_CHARACTERJOINT_ANCHOR_MODE_READBACK_MISMATCH:" + CharacterJointAnchorMode);
 
                 _lastLinearAcceleration = Vector3.zero;
                 _lastAngularAcceleration = Vector3.zero;
@@ -554,7 +509,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 ConfigureCharacterJoint();
                 _characterJointAnchorModeValidated = ValidateConfiguredCharacterJointAnchors();
                 if (!_characterJointAnchorModeValidated)
-                    throw new InvalidOperationException("TWOBODY_CHARACTERJOINT_CONFIGURED_ANCHOR_READBACK_MISMATCH:" + _characterJointAnchorMode);
+                    throw new InvalidOperationException("TWOBODY_CHARACTERJOINT_CONFIGURED_ANCHOR_READBACK_MISMATCH:" + CharacterJointAnchorMode);
 
                 EnterBuildPhase("ADD_PELVIS_CONTACT_TRACKER");
                 RagdollProxyContactTracker pelvisTracker =
@@ -575,8 +530,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
                 EnterBuildPhase("REGISTER_SOURCE_COLLISION_FILTER");
                 IgnoreSourceCharacterColliders(_audit.TargetRoot);
-                if (_report.IgnoreFailureCount > 0)
-                    throw new InvalidOperationException("COLLISION_ISOLATION_FAILED count=" + _report.IgnoreFailureCount);
+                if (_ignoreFailureCount > 0)
+                    throw new InvalidOperationException("COLLISION_ISOLATION_FAILED count=" + _ignoreFailureCount);
 
                 EnterBuildPhase("APPLY_SAFE_INITIAL_STATE");
                 _gravityEnabled = _profile.DefaultGravity;
@@ -619,7 +574,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     " | poseBridge=" + RenderToPhysicsPoseBridge.ModeName +
                     " | constraintBackend=" + ConstraintBackend +
                     " | characterJoint=True" +
-                    " | characterJointAnchorMode=" + _characterJointAnchorMode +
+                    " | characterJointAnchorMode=" + CharacterJointAnchorMode +
                     " | characterJointAnchorValidated=" + _characterJointAnchorModeValidated +
                     " | connectedBodyMatch=" + (_characterJoint != null && _characterJoint.connectedBody == _pelvisBody) +
                     " | jointLimitMode=" + (_profile.WideJointLimitIsolation ? "WIDE_ISOLATION" : "ANATOMICAL") +
@@ -631,7 +586,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             {
                 string failedPhase = _buildPhase;
                 string exceptionText = Il2CppComponentFactory.DescribeException(e);
-                if (_emitLogs) Plugin.Logger?.LogWarning(
+                LogCleanupFailure(
                     "[ARL][TWO_BODY][BUILD_FAILURE] phase=" + failedPhase +
                     " | exception=" + exceptionText);
                 Rollback("build-exception:" + failedPhase);
@@ -640,7 +595,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 return
                     "ARL build failed | phase=" + failedPhase +
                     " | exception=" + exceptionText +
-                    " | rollback=True | sourceObjectUnchanged=True";
+                    " | rollback=" + LastRollbackSucceeded + " | sourceObjectUnchanged=True";
             }
         }
 
@@ -820,13 +775,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             _contextCursor.AcceptFixed(step);
             _legParentCommand = new LegParentCommandFrame();
-            _report.DynamicTorsoRecovery = new TorsoRecoveryState { Active = true, Reason = "STEP_NOT_PUBLISHED" };
+            _report.DynamicTorsoRecovery = _controlState.BeginFixedStep();
             _runtimeStep = step; _insideRuntimeStep = true;
             try
             {
                 _fixedUpdateStage = "CONTEXT_ACCEPTED";
                 FixedUpdateCore();
-                if (_fixedUpdateStage == "COMPLETE" && IsBuilt && _sampleValid && _report.FiniteState && _driveEnabled &&
+                if (_fixedUpdateStage == "COMPLETE" && IsBuilt && _sampleValid && _controlState.FiniteState && _driveEnabled &&
                     (!DynamicPelvisReceiverSelected || _pelvisReceiver.ReadyForRun))
                 {
                     var command = new LegParentCommandFrame { Step = step,
@@ -836,7 +791,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                         PelvisParentFrame physical = RequireDynamicParentFrame();
                         if (!physical.Matches(step)) throw new InvalidOperationException("DYNAMIC_PARENT_SHARED_CLOCK_MISMATCH");
                         command.PhysicalParent = physical;
-                        if (_pelvisReceiver.Report.Arm == PelvisDynamicReceiverIsolation.DynamicHipArm)
+                        if (PelvisDynamicReceiverIsolation.IsDynamicHipArm(_pelvisReceiver.ControlStatus.Arm))
                         {
                             PelvisHipCommandFrame common = _pelvisReceiver.HipCommand;
                             if (!common.Matches(step, physical.BodyId)) throw new InvalidOperationException("HIP_PARENT_COMMAND_NOT_CURRENT");
@@ -853,11 +808,22 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             _pelvisLegReference.Invalidate();
             if (!IsBuilt)
+            {
+                bool ownerLost = _driveEnabled || _controlState.Built;
+                if (_driveEnabled) DisableDriveForSafety("TORSO_NATIVE_OWNER_LOST", "ENTRY", null);
+                // The full projection reads native receiver state. Publish the lifecycle result without
+                // revisiting an owner that has just disappeared.
+                _report.Built = _controlState.ObserveBuilt(false);
+                _report.DriveEnabled = _driveEnabled;
+                _report.TraceEnabled = _traceEnabled;
+                _report.FiniteState = _controlState.ObserveFiniteState(false);
+                if (ownerLost) _report.LastDetail = "native-owner-lost";
                 return;
+            }
 
             if (!_sampleValid)
             {
-                if (_pelvisReceiver.Report.Selected && _driveEnabled) DisableDriveForSafety("RECEIVER_SOURCE_POSE_INVALID", "ENTRY", null);
+                if (_driveEnabled) DisableDriveForSafety(_pelvisReceiver.ControlStatus.Selected ? "RECEIVER_SOURCE_POSE_INVALID" : "TORSO_SOURCE_POSE_INVALID", "ENTRY", null);
                 UpdateReport("source-pose-invalid");
                 return;
             }
@@ -906,7 +872,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 };
                 _fixedUpdateStage = "RECEIVER_REFERENCE";
                 if (DynamicPelvisReceiverSelected && _driveEnabled) _pelvisLegReference.BeginStep(_runtimeStep);
-                var controlReceiverReference = _pelvisReceiver.BuildControlReference(rawReceiverReference, PhysicsDt);
+                var controlReceiverReference = _pelvisReceiver.BuildControlReference(rawReceiverReference, PhysicsDt, _runtimeStep);
                 PelvisReceiverReport.TrackingFrame receiverTracking = _pelvisReceiver.CaptureTracking(_traceEnabled,
                     controlReceiverReference.PelvisPosition, controlReceiverReference.PelvisRotation,
                     controlReceiverReference.PelvisVelocity, controlReceiverReference.PelvisW,
@@ -940,7 +906,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 {
                     _fixedUpdateStage = "APPLY_CHARACTER_JOINT_PD";
                     // Both formal arms require two passive solves without controller force or torque.
-                    if (!DynamicPelvisReceiverSelected || _pelvisReceiver.Report.Ready) ApplyCharacterJointPdTorqueDrive();
+                    if (!DynamicPelvisReceiverSelected || _pelvisReceiver.ControlStatus.Ready) ApplyCharacterJointPdTorqueDrive();
                 }
 
                 _fixedUpdateStage = "FINITE_STATE_CHECK";
@@ -984,8 +950,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 receiverTracking.RuntimeContext = _runtimeStep;
                 _pelvisReceiver.CommitTracking(receiverTracking, _report);
                 _fixedUpdateStage = "FREEZE_VALIDATION";
-                _freezeValidation.ObserveFixedStep(_report, _sourceTurnDiagnostics, CurrentUnscaledTime);
-                _freezeValidation.CopyToReport(_report);
+                _freezeValidation.ObserveFixedStep(_controlState, _sourceTurnDiagnostics, CurrentUnscaledTime);
+                _freezeValidation.CopyToReport(_report, _controlState);
                 _fixedUpdateStage = "DYNAMIC_TORSO_RECOVERY";
                 PublishTorsoRecoveryState();
                 _fixedUpdateStage = "TRACE_STATISTICS";
@@ -1007,9 +973,24 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         public string SetDrive(bool enabled)
         {
+            try { return SetDriveCore(enabled); }
+            catch
+            {
+                // A native start or trace-finalization failure can precede the logical latch.
+                // The caller must never inherit a partially enabled physical plant.
+                ForceDriveOffSafeKinematic();
+                throw;
+            }
+        }
+
+        private string SetDriveCore(bool enabled)
+        {
             if (!IsBuilt)
+            {
+                if (!enabled) ForceDriveOffSafeKinematic();
                 return "ARL drive：代理尚未创建。";
-            if (enabled && _driveEnabled && _pelvisReceiver.Report.Selected)
+            }
+            if (enabled && _driveEnabled && _pelvisReceiver.ControlStatus.Selected)
                 return "ARL drive | enabled=True | alreadyInRequestedState=True | action=NO_OP";
             ResetTorsoRecoveryState();
             _pelvisLegReference.Invalidate();
@@ -1087,7 +1068,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             UpdateReport(enabled ? "drive-enabled" : "drive-disabled-safe-kinematic");
             return
                 "ARL drive | enabled=" + _driveEnabled +
-                " | pelvisKinematic=" + _pelvisBody.isKinematic + " | receiverArm=" + _pelvisReceiver.Report.Arm +
+                " | pelvisKinematic=" + _pelvisBody.isKinematic + " | receiverArm=" + _pelvisReceiver.ControlStatus.Arm +
                 " | chestKinematic=" + _chestBody.isKinematic +
                 " | gravityApplied=" + (_driveEnabled && _gravityEnabled) +
                 " | colliders=" + _collidersEnabled +
@@ -1106,7 +1087,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 return "ARL gravity：代理尚未创建。";
             if (enabled && _driveEnabled)
                 return "ARL gravity：拒绝开启。v0.3.28.1 frozen torso drive 固定 Gravity=OFF；请先停止 drive。";
-            if (enabled && _pelvisReceiver.Report.Selected)
+            if (enabled && _pelvisReceiver.ControlStatus.Selected)
                 return "ARL gravity：接收体参考预检固定躯干重力OFF；请先停止并清理本轮实验。";
             _gravityEnabled = enabled;
             _chestBody.useGravity = _driveEnabled && enabled;
@@ -1118,7 +1099,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             if (!IsBuilt)
                 return "ARL colliders：代理尚未创建。";
-            if (enabled && _pelvisReceiver.Report.Selected)
+            if (enabled && _pelvisReceiver.ControlStatus.Selected)
                 return "ARL colliders：接收体参考预检固定躯干碰撞OFF。";
             if (enabled && _driveEnabled)
                 return "ARL colliders：拒绝开启。v0.3.28.1 frozen torso drive 固定 Colliders=OFF；请先停止 drive。";
@@ -1142,34 +1123,34 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         public string SetTrace(bool enabled)
         {
-            if (!IsBuilt)
+            if (!IsBuilt && enabled)
                 return "ARL trace：代理尚未创建。";
 
             if (enabled)
             {
                 if (!_driveEnabled)
                     return "ARL trace：冻结验收要求 drive=True。请先执行 arl_drive(on)。";
-                if (_pelvisReceiver.Report.Selected && !_pelvisReceiver.ReadyForRun)
+                if (_pelvisReceiver.ControlStatus.Selected && !_pelvisReceiver.ReadyForRun)
                     return "ARL trace：骨盆接收体尚未通过两拍被动求解或驱动资格。请查看arl_test_status。";
 
                 _traceDriveAbortCount = 0;
                 ResetTraceSessionStatistics();
                 _sourceTurnDiagnostics.BeginTraceSession();
                 _freezeValidation.BeginTraceSession();
-                _freezeValidation.CopyToReport(_report);
+                _freezeValidation.CopyToReport(_report, _controlState);
                 _traceEnabled = true;
                 _pelvisReceiver.BeginTrace();
-                _dynamicTorsoRecovery.ResetDiagnostics();
+                _controlState.ResetRecoveryDiagnostics();
                 _nextTraceTime = 0f;
                 UpdateReport("trace-enabled");
-                if (_emitLogs) Plugin.Logger?.LogInfo(
-                    "[ARL][TRACE] trace-start | intervalSeconds=" + _profile.TraceIntervalSeconds.ToString("G6") +
+                Plugin.Logger?.LogInfo(
+                    "[ARL][TRACE] trace-start | intervalSeconds=" + TraceLogInterval.ToString("G6") +
                     " | logMode=" + (_profile.TraceVerboseSnapshots ? "VERBOSE" : "COMPACT") +
                     " | sourceTurnContext=" + (_profile.SourceTurnVerboseContextLogging ? "VERBOSE" : "SUMMARY_ONLY") +
                     " | diagnostics=render-sample-hold-velocity+pose-bridge+pose-consistent-parent-ff+source-turn-discontinuity-attribution+recovery-failure-attribution+drive-fail-fast");
                 return
                     "ARL trace | enabled=True" +
-                    " | intervalSeconds=" + _profile.TraceIntervalSeconds.ToString("G6") +
+                    " | intervalSeconds=" + TraceLogInterval.ToString("G6") +
                     " | statsReset=True" +
                     " | phaseSafeFixedStep=True | renderVelocityBridge=sample-and-hold | poseBridge=predict-correct" +
                     " | parentFFReference=" + CurrentParentTranslationReference +
@@ -1178,53 +1159,75 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     " | freezeValidation=" + SourceAwareFreezeValidation.PolicyName;
             }
 
-            _sourceTurnDiagnostics.EndTraceSession();
-            _pelvisReceiver.EndTrace();
-            _traceEnabled = false;
-            UpdateReport("trace-disabled");
-            CopySourceTurnDiagnosticsToReport();
-            _freezeValidation.EndTraceSession(_report, _sourceTurnDiagnostics, CurrentUnscaledTime);
-            _freezeValidation.CopyToReport(_report);
-            string summary = _report.GetTraceSessionSummary();
-            string freezeSummary = _freezeValidation.GetSummary(_report, _sourceTurnDiagnostics);
-            if (_emitLogs) Plugin.Logger?.LogInfo("[ARL][TRACE_SUMMARY] " + summary);
-            if (_emitLogs) Plugin.Logger?.LogWarning("[ARL][FREEZE_VALIDATION] " + freezeSummary +
-                " | verdictRole=" + (DynamicPelvisReceiverSelected ? "LEGACY_REFERENCE_ONLY_FOR_DYNAMIC_RECEIVER" : "LEGACY_KINEMATIC_BASELINE"));
-            if (_emitLogs) Plugin.Logger?.LogInfo("[ARL][TRACE] trace-stop");
-            return
-                "ARL trace | enabled=False" +
-                " | intervalSeconds=" + _profile.TraceIntervalSeconds.ToString("G6") +
-                " | summary=" + summary +
-                " | freeze=" + freezeSummary;
+            try
+            {
+                Exception finalizationFailure = null;
+                try { _sourceTurnDiagnostics.EndTraceSession(); }
+                catch (Exception e) { finalizationFailure = e; }
+                try { _pelvisReceiver.EndTrace(); }
+                catch (Exception e) { finalizationFailure = finalizationFailure ?? e; }
+                if (finalizationFailure != null)
+                    throw new InvalidOperationException("TORSO_TRACE_FINALIZATION_FAILED", finalizationFailure);
+                _traceEnabled = false;
+                if (IsBuilt) UpdateReport("trace-disabled");
+                CopySourceTurnDiagnosticsToReport();
+                _freezeValidation.EndTraceSession(_controlState, _sourceTurnDiagnostics, CurrentUnscaledTime);
+                _freezeValidation.CopyToReport(_report, _controlState);
+                string summary = _report.GetTraceSessionSummary();
+                string freezeSummary = _freezeValidation.GetSummary(_controlState, _sourceTurnDiagnostics);
+                Plugin.Logger?.LogInfo("[ARL][TRACE_SUMMARY] " + summary);
+                Plugin.Logger?.LogWarning("[ARL][FREEZE_VALIDATION] " + freezeSummary +
+                    " | verdictRole=" + (DynamicPelvisReceiverSelected ? "LEGACY_REFERENCE_ONLY_FOR_DYNAMIC_RECEIVER" : "LEGACY_KINEMATIC_BASELINE"));
+                Plugin.Logger?.LogInfo("[ARL][TRACE] trace-stop");
+                return
+                    "ARL trace | enabled=False" +
+                    " | intervalSeconds=" + TraceLogInterval.ToString("G6") +
+                    " | summary=" + summary +
+                    " | freeze=" + freezeSummary;
+            }
+            finally
+            {
+                _traceEnabled = false;
+                _report.TraceEnabled = false;
+                _pelvisReceiver.Report.TraceRunning = false;
+            }
         }
 
         private void DisableDriveForSafety(string reason, string stage, Exception exception)
         {
-            if (_pelvisReceiver.Report.Selected) _pelvisReceiver.MarkFault(reason);
-            ActiveRagdollLabRuntime.RecordAutomaticStop("TORSO/" + stage, reason + (exception != null ? ":" + exception.GetType().Name : ""));
-            string detail = exception == null
-                ? "<none>"
-                : exception.GetType().Name + ":" + SafeLogText(exception.Message);
-
-            if (_traceEnabled && _driveEnabled)
+            try
             {
-                try
-                {
-                    AbortActiveTraceForDriveLoss(reason, stage, detail);
-                }
-                catch (Exception abortException)
-                {
-                    // Fail closed even if the diagnostic/validation abort path itself is the throwing stage.
-                    _traceEnabled = false;
-                    Plugin.Logger?.LogError(
-                        "[ARL][DRIVE_ABORT_HANDLER_EXCEPTION] type=" + abortException.GetType().Name +
-                        " | message=" + SafeLogText(abortException.Message));
-                }
-            }
+                if (_pelvisReceiver.ControlStatus.Selected) _pelvisReceiver.MarkFault(reason);
+                try { ActiveRagdollLabRuntime.RecordAutomaticStop("TORSO/" + stage, reason + (exception != null ? ":" + exception.GetType().Name : "")); }
+                catch (Exception e) { LogCleanupFailure("[ARL][DRIVE_ABORT_NOTICE_EXCEPTION] " + e.GetType().Name, true); }
+                string detail = exception == null
+                    ? "<none>"
+                    : exception.GetType().Name + ":" + SafeLogText(exception.Message);
 
-            // Keep the existing v0.1.11 safe-kinematic shutdown semantics, but do not depend on
-            // a fresh source snapshot while already handling a safety failure/exception.
-            ForceDriveOffSafeKinematic();
+                if (_traceEnabled && _driveEnabled)
+                {
+                    try
+                    {
+                        AbortActiveTraceForDriveLoss(reason, stage, detail);
+                    }
+                    catch (Exception abortException)
+                    {
+                        // Fail closed even if the diagnostic/validation abort path itself is the throwing stage.
+                        _traceEnabled = false;
+                        LogCleanupFailure(
+                            "[ARL][DRIVE_ABORT_HANDLER_EXCEPTION] type=" + abortException.GetType().Name +
+                            " | message=" + SafeLogText(abortException.Message), true);
+                    }
+                }
+
+            }
+            finally
+            {
+                _traceEnabled = false;
+                _report.TraceEnabled = false;
+                // Diagnostics and automatic-stop reporting cannot prevent native quiescence.
+                ForceDriveOffSafeKinematic();
+            }
         }
 
         private void ForceDriveOffSafeKinematic()
@@ -1232,6 +1235,14 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             ResetTorsoRecoveryState();
             _pelvisLegReference.Clear();
             _driveEnabled = false;
+            _report.DriveEnabled = false;
+            if (_traceEnabled)
+            {
+                try { _sourceTurnDiagnostics.EndTraceSession(); }
+                catch (Exception e) { LogCleanupFailure("[ARL][DRIVE_ABORT_SOURCE_TRACE_EXCEPTION] " + e.GetType().Name, true); }
+            }
+            _traceEnabled = false;
+            _report.TraceEnabled = false;
             _lastLinearAcceleration = Vector3.zero;
             _lastAngularAcceleration = Vector3.zero;
             _parentFeedforwardAcceleration = Vector3.zero;
@@ -1255,9 +1266,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             }
             catch (Exception e)
             {
-                Plugin.Logger?.LogError(
+                LogCleanupFailure(
                     "[ARL][DRIVE_ABORT_SAFE_STATE_ERROR] type=" + e.GetType().Name +
-                    " | message=" + SafeLogText(e.Message));
+                    " | message=" + SafeLogText(e.Message), true);
             }
 
             try
@@ -1267,7 +1278,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             }
             catch (Exception e)
             {
-                Plugin.Logger?.LogWarning("[ARL][DRIVE_ABORT_SAFE_STATE_ERROR] step=RESET_POSE | type=" + e.GetType().Name + " | message=" + SafeLogText(e.Message));
+                LogCleanupFailure("[ARL][DRIVE_ABORT_SAFE_STATE_ERROR] step=RESET_POSE | type=" + e.GetType().Name + " | message=" + SafeLogText(e.Message));
             }
 
             _poseBridge.Reset();
@@ -1281,7 +1292,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 return;
 
             _traceDriveAbortCount++;
-            Plugin.Logger?.LogError(
+            LogCleanupFailure(
                 "[ARL][DRIVE_ABORT] abortCount=" + _traceDriveAbortCount +
                 " | reason=" + reason +
                 " | stage=" + stage +
@@ -1290,25 +1301,38 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 " | finite=" + HasFinitePhysicsState() +
                 " | rotErr=" + _report.RotationErrorDegrees.ToString("G7") +
                 " | chestPosErr=" + _report.ChestPositionErrorMeters.ToString("G7") +
-                " | anchorErr=" + _report.AnchorErrorMeters.ToString("G7"));
+                " | anchorErr=" + _report.AnchorErrorMeters.ToString("G7"), true);
 
             // Stop both diagnostic clocks immediately. No preview-follow sample after this point may enter
             // NORMAL/SOURCE/RECOVERY freeze statistics. The user can still call arl_trace(off) later to
             // print the preserved aborted-session summary.
-            _sourceTurnDiagnostics.EndTraceSession();
+            try { _sourceTurnDiagnostics.EndTraceSession(); }
+            catch (Exception e) { LogCleanupFailure("[ARL][DRIVE_ABORT_SOURCE_TRACE_EXCEPTION] " + e.GetType().Name, true); }
             CopySourceTurnDiagnosticsToReport();
             _freezeValidation.AbortTraceSession(
-                _report,
+                _controlState,
                 _sourceTurnDiagnostics,
                 CurrentUnscaledTime,
                 reason,
                 stage,
                 detail);
-            _freezeValidation.CopyToReport(_report);
+            _freezeValidation.CopyToReport(_report, _controlState);
             _traceEnabled = false;
+            _report.TraceEnabled = false;
 
-            Plugin.Logger?.LogWarning(
-                "[ARL][FREEZE_VALIDATION_ABORT] " + _freezeValidation.GetSummary(_report, _sourceTurnDiagnostics));
+            LogCleanupFailure(
+                "[ARL][FREEZE_VALIDATION_ABORT] " + _freezeValidation.GetSummary(_controlState, _sourceTurnDiagnostics));
+        }
+
+        private static void LogCleanupFailure(string message, bool error = false)
+        {
+            // Cleanup must progress even if the diagnostic sink is itself unavailable.
+            try
+            {
+                if (error) Plugin.Logger?.LogError(message);
+                else Plugin.Logger?.LogWarning(message);
+            }
+            catch { }
         }
 
         private static string SafeLogText(string value)
@@ -1362,40 +1386,52 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         }
 
         public string Rollback(string reason)
+            => RollbackWithReceipt(reason).Summary;
+
+        internal CleanupReceipt RollbackWithReceipt(string reason)
         {
             ResetTorsoRecoveryState();
             _pelvisLegReference.Clear();
-            if (_destroyed)
-                return "ARL rollback | success=" + LastRollbackSucceeded + " | already-cleared=" + LastRollbackSucceeded + " | cleanupPending=" + !LastRollbackSucceeded + " | failedLegacyTeardownRequiresRestart=" + !LastRollbackSucceeded;
+            if (_destroyed && !HasPendingCleanup)
+            {
+                // A returned root Destroy is explicit release evidence for its owned descendants.
+                // Merely having lost the handles is never sufficient to erase a prior failure.
+                if (_rootReleaseCommitted) LastRollbackSucceeded = true;
+                string unchanged = "ARL rollback | success=" + LastRollbackSucceeded + " | already-cleared=" + LastRollbackSucceeded +
+                    " | cleanupPending=False | previousRootReleaseCommitted=" + _rootReleaseCommitted +
+                    " | failedTeardownRequiresRestart=" + !LastRollbackSucceeded;
+                // No new teardown ran. Preserve the existing release decision without
+                // claiming this call re-read safety or submitted another Destroy request.
+                int retained = _unparentedObjects.Count + (ReferenceEquals(_root, null) ? 0 : 1) +
+                    (ReferenceEquals(_previewMaterial, null) ? 0 : 1);
+                return new CleanupReceipt(false, LastRollbackSucceeded, null, retained, _ignoredPairs.Count, 0, 0, unchanged);
+            }
 
             int cleanupFailures = 0;
-            if (!_pelvisReceiver.QuiesceOwnedPair(_pelvisBody, _chestBody)) cleanupFailures++;
-            if (_pelvisReceiver.Report.BaselineCaptured && !_pelvisReceiver.Select(PelvisDynamicReceiverIsolation.IdleArm, _pelvisBody, _chestBody, _pelvisCollider, _chestCollider, _characterJoint)) cleanupFailures++;
-            _sourceTurnDiagnostics.EndTraceSession();
+            int destroyAttempts = 0, destroyReturned = 0;
+            // Terminal state stops further control immediately, including after a native teardown failure.
+            // Keep failed native owners reachable so a later Rollback performs a real retry.
             _destroyed = true;
             _driveEnabled = false;
             _traceEnabled = false;
+            if (!_rootReleaseCommitted)
+            {
+                if (!_pelvisReceiver.QuiesceOwnedPair(_pelvisBody, _chestBody)) cleanupFailures++;
+                if (_pelvisReceiver.ControlStatus.BaselineCaptured && !_pelvisReceiver.Select(PelvisDynamicReceiverIsolation.IdleArm, _pelvisBody, _chestBody, _pelvisCollider, _chestCollider, _characterJoint)) cleanupFailures++;
+            }
+            try { _sourceTurnDiagnostics.EndTraceSession(); }
+            catch (Exception e)
+            {
+                cleanupFailures++;
+                LogCleanupFailure("[ARL][TWOBODY_ROLLBACK_STEP_FAILED] step=END_SOURCE_TRACE | " + e.GetType().Name);
+            }
             _poseBridge.Reset();
 
-            int ignoreRestoreFailures = 0;
-            for (int i = _ignoredPairs.Count - 1; i >= 0; i--)
-            {
-                IgnoredPair pair = _ignoredPairs[i];
-                try
-                {
-                    if (pair?.A != null && pair.B != null)
-                        UnityEngine.Physics.IgnoreCollision(pair.A, pair.B, false);
-                }
-                catch
-                {
-                    ignoreRestoreFailures++;
-                }
-            }
-            _ignoredPairs.Clear();
+            int ignoreRestoreFailures = _ignoredPairs.RestoreAll();
             if (ignoreRestoreFailures > 0)
             {
                 cleanupFailures += ignoreRestoreFailures;
-                Plugin.Logger?.LogWarning("[ARL][ROLLBACK_ISOLATION_RESTORE] owner=TWOBODY | failures=" + ignoreRestoreFailures);
+                LogCleanupFailure("[ARL][ROLLBACK_ISOLATION_RESTORE] owner=TWOBODY | failures=" + ignoreRestoreFailures);
             }
 
             try
@@ -1413,40 +1449,81 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             catch (Exception e)
             {
                 cleanupFailures++;
-                Plugin.Logger?.LogWarning("[ARL][TWOBODY_ROLLBACK_STEP_FAILED] step=SAFE_STATE | " + e.GetType().Name + " / " + SafeLogText(e.Message));
+                LogCleanupFailure("[ARL][TWOBODY_ROLLBACK_STEP_FAILED] step=SAFE_STATE | " + e.GetType().Name + " / " + SafeLogText(e.Message));
             }
 
-            try { if (_root != null) Object.Destroy(_root); }
+            for (int i = _unparentedObjects.Count - 1; i >= 0; i--)
+            {
+                try
+                {
+                    if (_unparentedObjects[i] != null)
+                    {
+                        destroyAttempts++;
+                        Object.Destroy(_unparentedObjects[i]);
+                        destroyReturned++;
+                    }
+                    _unparentedObjects.RemoveAt(i);
+                }
+                catch (Exception e)
+                {
+                    cleanupFailures++;
+                    LogCleanupFailure("[ARL][TWOBODY_ROLLBACK_STEP_FAILED] step=DESTROY_UNPARENTED | " + e.GetType().Name);
+                }
+            }
+
+            try
+            {
+                if (_root != null)
+                {
+                    destroyAttempts++;
+                    Object.Destroy(_root);
+                    destroyReturned++;
+                    _rootReleaseCommitted = true;
+                }
+                _root = null;
+                _pelvisObject = null;
+                _chestObject = null;
+                _pelvisBody = null;
+                _chestBody = null;
+                _pelvisCollider = null;
+                _chestCollider = null;
+                _characterJoint = null;
+                _pelvisVisual = null;
+                _chestVisual = null;
+            }
             catch (Exception e)
             {
                 cleanupFailures++;
-                Plugin.Logger?.LogWarning("[ARL][TWOBODY_ROLLBACK_STEP_FAILED] step=DESTROY_ROOT | " + e.GetType().Name + " / " + SafeLogText(e.Message));
+                LogCleanupFailure("[ARL][TWOBODY_ROLLBACK_STEP_FAILED] step=DESTROY_ROOT | " + e.GetType().Name + " / " + SafeLogText(e.Message));
             }
-            try { if (_previewMaterial != null) Object.Destroy(_previewMaterial); }
+            try
+            {
+                if (_previewMaterial != null)
+                {
+                    destroyAttempts++;
+                    Object.Destroy(_previewMaterial);
+                    destroyReturned++;
+                }
+                _previewMaterial = null;
+            }
             catch (Exception e)
             {
                 cleanupFailures++;
-                Plugin.Logger?.LogWarning("[ARL][TWOBODY_ROLLBACK_STEP_FAILED] step=DESTROY_PREVIEW_MATERIAL | " + e.GetType().Name + " / " + SafeLogText(e.Message));
+                LogCleanupFailure("[ARL][TWOBODY_ROLLBACK_STEP_FAILED] step=DESTROY_PREVIEW_MATERIAL | " + e.GetType().Name + " / " + SafeLogText(e.Message));
             }
 
-            _root = null;
-            _pelvisObject = null;
-            _chestObject = null;
-            _pelvisBody = null;
-            _chestBody = null;
-            _pelvisCollider = null;
-            _chestCollider = null;
-            _characterJoint = null;
-            _pelvisVisual = null;
-            _chestVisual = null;
-            _previewMaterial = null;
-
-            _report.Built = false;
+            _report.Built = _controlState.ObserveBuilt(false);
             _report.DriveEnabled = false;
+            _report.TraceEnabled = false;
             _report.CollidersEnabled = false;
             LastRollbackSucceeded = cleanupFailures == 0;
             _report.LastDetail = (LastRollbackSucceeded ? "rollback:" : "rollback-with-errors:") + reason;
-            return "ARL rollback | success=" + LastRollbackSucceeded + " | reason=" + reason + " | cleanupFailures=" + cleanupFailures + " | sourceObjectUnchanged=True";
+            string summary = "ARL rollback | success=" + LastRollbackSucceeded + " | reason=" + reason + " | cleanupFailures=" + cleanupFailures +
+                " | cleanupPending=" + HasPendingCleanup + " | rootReleaseCommitted=" + _rootReleaseCommitted + " | sourceObjectUnchanged=True";
+            int remaining = _unparentedObjects.Count + (ReferenceEquals(_root, null) ? 0 : 1) +
+                (ReferenceEquals(_previewMaterial, null) ? 0 : 1);
+            return new CleanupReceipt(true, LastRollbackSucceeded, cleanupFailures, remaining, _ignoredPairs.Count,
+                destroyAttempts, destroyReturned, summary);
         }
 
         private GameObject CreateBody(
@@ -1462,14 +1539,18 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             out BoxCollider collider,
             out GameObject visual)
         {
-            GameObject gameObject = new GameObject(name + (_instanceTag == "PRODUCTION" ? string.Empty : "_" + Sanitize(_instanceTag)));
+            GameObject gameObject = new GameObject(name);
+            _unparentedObjects.Add(gameObject);
             gameObject.hideFlags = HideFlags.DontSave;
             gameObject.layer = _root != null ? _root.layer : 0;
             // Establish ownership before AddComponent/readback/preview work can throw.  Older builds parented
             // Pelvis/Chest only after both CreateBody calls returned, so a mid-build exception could leave an
             // unparented ARL body behind even though rollback destroyed _root.
             if (_root != null)
+            {
                 gameObject.transform.SetParent(_root.transform, true);
+                _unparentedObjects.Remove(gameObject);
+            }
             gameObject.transform.position = position;
             gameObject.transform.rotation = rotation;
 
@@ -1493,34 +1574,20 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             Vector3 legacyCom = body.centerOfMass;
             Vector3 legacyInertia = body.inertiaTensor;
             Quaternion legacyInertiaRotation = body.inertiaTensorRotation;
-            Vector3 expectedInertia = AnalyticalUniformBoxInertia(mass, size);
-
-            if (_massPropertyMode == TwoBodyMassPropertyMode.ExplicitCenterOfMassOnly ||
-                _massPropertyMode == TwoBodyMassPropertyMode.ExplicitUniformBox)
-                body.centerOfMass = colliderCenter;
-
-            if (_massPropertyMode == TwoBodyMassPropertyMode.ExplicitInertiaOnly ||
-                _massPropertyMode == TwoBodyMassPropertyMode.ExplicitUniformBox)
-            {
-                body.inertiaTensorRotation = Quaternion.identity;
-                body.inertiaTensor = expectedInertia;
-            }
-
-            bool comOk = (_massPropertyMode == TwoBodyMassPropertyMode.ExplicitCenterOfMassOnly || _massPropertyMode == TwoBodyMassPropertyMode.ExplicitUniformBox)
-                ? Approximately(body.centerOfMass, colliderCenter)
-                : Approximately(body.centerOfMass, legacyCom);
-            bool inertiaOk = (_massPropertyMode == TwoBodyMassPropertyMode.ExplicitInertiaOnly || _massPropertyMode == TwoBodyMassPropertyMode.ExplicitUniformBox)
-                ? Approximately(body.inertiaTensor, expectedInertia) && Approximately(body.inertiaTensorRotation, Quaternion.identity)
-                : Approximately(body.inertiaTensor, legacyInertia) && Approximately(body.inertiaTensorRotation, legacyInertiaRotation);
-            if (!comOk || !inertiaOk)
-                throw new InvalidOperationException(bodyLabel + " mass-property mode readback mismatch: " + _massPropertyMode);
+            // Preserve the legacy plant's readback without overwriting its COM or
+            // inertia. Explicit uniform-box setup belongs to the selected receiver.
+            if (!Approximately(body.centerOfMass, legacyCom) ||
+                !Approximately(body.inertiaTensor, legacyInertia) || !Approximately(body.inertiaTensorRotation, legacyInertiaRotation))
+                throw new InvalidOperationException(bodyLabel + " mass-property mode readback mismatch: LegacyUnityDefault");
 
             EnterBuildPhase("CREATE_" + bodyLabel + "_VISUAL");
             visual = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            _unparentedObjects.Add(visual);
             visual.name = gameObject.name + "_Visual";
             visual.hideFlags = HideFlags.DontSave;
             visual.layer = gameObject.layer;
             visual.transform.SetParent(gameObject.transform, false);
+            _unparentedObjects.Remove(visual);
             visual.transform.localPosition = colliderCenter;
             visual.transform.localRotation = Quaternion.identity;
             visual.transform.localScale = size;
@@ -1658,7 +1725,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             Vector3 angularAcceleration = ClampMagnitude(
                 rawAngularAcceleration,
                 _profile.MaxAngularAcceleration);
-            _angularAccelerationHeadroom = Mathf.Max(0f, _profile.MaxAngularAcceleration - angularAcceleration.magnitude);
 
             if (!IsFinite(angularAcceleration))
                 throw new InvalidOperationException(
@@ -1690,82 +1756,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _chestBody.angularVelocity = angularVelocity.normalized * _profile.MaxAngularVelocity;
         }
 
-        private void CaptureSolvedCharacterJointReaction()
-        {
-            _jointCurrentForceWorld = Vector3.zero; _jointReactionReadbackValid = false;
-            _jointCurrentTorqueWorld = Vector3.zero;
-            _jointChestComLeverWorld = Vector3.zero;
-            _jointPelvisComLeverWorld = Vector3.zero;
-            _jointReactionConstraintAnchorErrorMeters = 0f;
-            _jointForceMomentWorld = Vector3.zero;
-            _jointCombinedMomentWorld = Vector3.zero;
-            _jointTorqueAngularAccelerationProxyWorld = Vector3.zero;
-            _jointForceMomentAngularAccelerationProxyWorld = Vector3.zero;
-            _jointCombinedAngularAccelerationProxyWorld = Vector3.zero;
-
-            if (_characterJoint == null ||
-                _chestBody == null || _chestObject == null ||
-                _pelvisBody == null || _pelvisObject == null)
-                return;
-
-            try
-            {
-                // Unity exposes the solver's settled reaction from the previous physics step.
-                // v0.3.15 captures BOTH body-side levers at this exact readback instant.
-                Vector3 force = _characterJoint.currentForce;
-                Vector3 torque = _characterJoint.currentTorque;
-                Vector3 chestAnchorWorld = ChestPoint(_characterJointChestAnchorLocal);
-                Vector3 pelvisAnchorWorld = PelvisPoint(_characterJointPelvisAnchorLocal);
-                Vector3 chestLever = chestAnchorWorld - _chestBody.worldCenterOfMass;
-                Vector3 pelvisLever = pelvisAnchorWorld - _pelvisBody.worldCenterOfMass;
-                float constraintError = Vector3.Distance(chestAnchorWorld, pelvisAnchorWorld);
-                Vector3 forceMoment = Vector3.Cross(chestLever, force);
-                Vector3 combinedMoment = torque + forceMoment;
-
-                if (!IsFinite(force) || !IsFinite(torque) ||
-                    !IsFinite(chestLever) || !IsFinite(pelvisLever) || !IsFinite(constraintError) ||
-                    !IsFinite(forceMoment) || !IsFinite(combinedMoment))
-                    return;
-
-                Vector3 torqueA = TorqueToAngularAccelerationProxy(_chestBody, torque);
-                Vector3 forceMomentA = TorqueToAngularAccelerationProxy(_chestBody, forceMoment);
-                Vector3 combinedA = TorqueToAngularAccelerationProxy(_chestBody, combinedMoment);
-                if (!IsFinite(torqueA) || !IsFinite(forceMomentA) || !IsFinite(combinedA))
-                    return;
-
-                _jointCurrentForceWorld = force;
-                _jointCurrentTorqueWorld = torque;
-                _jointChestComLeverWorld = chestLever;
-                _jointPelvisComLeverWorld = pelvisLever;
-                _jointReactionConstraintAnchorErrorMeters = constraintError;
-                _jointForceMomentWorld = forceMoment;
-                _jointCombinedMomentWorld = combinedMoment;
-                _jointTorqueAngularAccelerationProxyWorld = torqueA;
-                _jointForceMomentAngularAccelerationProxyWorld = forceMomentA;
-                _jointCombinedAngularAccelerationProxyWorld = combinedA;
-                _jointReactionReadbackValid = true;
-            }
-            catch
-            {
-                // Diagnostic capability must never gate the frozen production torso.
-            }
-        }
-
-        private static Vector3 TorqueToAngularAccelerationProxy(Rigidbody body, Vector3 torqueWorld)
-        {
-            if (body == null || !IsFinite(torqueWorld))
-                return Vector3.zero;
-
-            Vector3 tensor = body.inertiaTensor;
-            if (!IsFinite(tensor) || tensor.x <= 1e-7f || tensor.y <= 1e-7f || tensor.z <= 1e-7f)
-                return Vector3.zero;
-
-            Quaternion inertiaWorld = body.rotation * body.inertiaTensorRotation;
-            Vector3 localTorque = Quaternion.Inverse(inertiaWorld) * torqueWorld;
-            Vector3 localA = new Vector3(localTorque.x / tensor.x, localTorque.y / tensor.y, localTorque.z / tensor.z);
-            return inertiaWorld * localA;
-        }
-
         private Vector3 ChestPoint(Vector3 local) => DynamicPelvisReceiverSelected ? _chestBody.position + _chestBody.rotation * local : _chestObject.transform.TransformPoint(local);
         private Vector3 PelvisPoint(Vector3 local) => DynamicPelvisReceiverSelected ? _pelvisBody.position + _pelvisBody.rotation * local : _pelvisObject.transform.TransformPoint(local);
 
@@ -1779,7 +1769,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (!IsFinite(chestWorld) || !IsFinite(pelvisWorld) || Vector3.Distance(chestWorld, pelvisWorld) > 0.00005f)
                 return false;
 
-            if (CharacterJointAnchorMode == TwoBodyCharacterJointAnchorMode.ChestCenterOfMass)
+            if (DynamicPelvisReceiverSelected)
                 return Vector3.Distance(chestWorld, _chestBody.worldCenterOfMass) <= 0.00005f;
 
             Vector3 sourceChestWorld = ChestPoint(_virtualChestAnchorLocal);
@@ -1806,7 +1796,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (Vector3.Distance(chestWorld, pelvisWorld) > 0.00005f)
                 return false;
 
-            if (CharacterJointAnchorMode == TwoBodyCharacterJointAnchorMode.ChestCenterOfMass)
+            if (DynamicPelvisReceiverSelected)
                 return Vector3.Distance(chestWorld, _chestBody.worldCenterOfMass) <= 0.00005f;
 
             return Vector3.Distance(chestLocal, _virtualChestAnchorLocal) <= 0.00005f &&
@@ -1864,39 +1854,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _characterJoint.swing2Limit = swing2;
         }
 
-        private void MeasureJointAngles(Quaternion relativeRotation, out float twist, out float swing1, out float swing2)
-        {
-            Quaternion delta = Quaternion.Inverse(_jointReferenceRelativeRotation) * relativeRotation;
-            Vector3 rotationVectorDegrees = QuaternionToRotationVectorDegrees(delta);
-            twist = Vector3.Dot(rotationVectorDegrees, _jointTwistAxis);
-            swing1 = Vector3.Dot(rotationVectorDegrees, _jointSwing1Axis);
-            swing2 = Vector3.Dot(rotationVectorDegrees, _jointSwing2Axis);
-        }
-
-        private float ComputeLimitProximity(float twist, float swing1, float swing2)
-        {
-            float twistLimit = twist >= 0f ? Mathf.Max(1f, _effectiveHighTwistLimit) : Mathf.Max(1f, -_effectiveLowTwistLimit);
-            float t = Mathf.Abs(twist) / twistLimit;
-            float s1 = Mathf.Abs(swing1) / Mathf.Max(1f, _effectiveSwing1Limit);
-            float s2 = Mathf.Abs(swing2) / Mathf.Max(1f, _effectiveSwing2Limit);
-            return Mathf.Max(t, Mathf.Max(s1, s2));
-        }
-
-        private static Vector3 QuaternionToRotationVectorDegrees(Quaternion q)
-        {
-            if (q.w < 0f)
-            {
-                q.x = -q.x; q.y = -q.y; q.z = -q.z; q.w = -q.w;
-            }
-            float w = Mathf.Clamp(q.w, -1f, 1f);
-            float angle = 2f * Mathf.Acos(w);
-            float sinHalf = Mathf.Sqrt(Mathf.Max(0f, 1f - w * w));
-            if (sinHalf < 0.0001f || angle < 0.0001f)
-                return Vector3.zero;
-            Vector3 axis = new Vector3(q.x / sinHalf, q.y / sinHalf, q.z / sinHalf);
-            return axis * (angle * Mathf.Rad2Deg);
-        }
-
         private static Vector3 SafeNormalize(Vector3 value, Vector3 fallback)
         {
             if (!IsFinite(value) || value.sqrMagnitude < 0.000001f)
@@ -1951,12 +1908,16 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 return;
             try
             {
+                if (_ignoredPairs.Contains(a, b)) return;
+                // Existing isolation belongs to its original owner. A potentially applied native
+                // write belongs to us even if its wrapper throws before returning.
+                if (UnityEngine.Physics.GetIgnoreCollision(a, b)) return;
+                _ignoredPairs.Remember(a, b);
                 UnityEngine.Physics.IgnoreCollision(a, b, true);
-                _ignoredPairs.Add(new IgnoredPair { A = a, B = b });
             }
             catch
             {
-                _report.IgnoreFailureCount++;
+                _report.IgnoreFailureCount = ++_ignoreFailureCount;
             }
         }
 
@@ -1965,7 +1926,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _pelvisLegReference.Invalidate();
             if (!_sampleValid || _pelvisBody == null || _chestBody == null)
                 return;
-            if (_pelvisReceiver.Report.Selected)
+            if (_pelvisReceiver.ControlStatus.Selected)
             {
                 PelvisDynamicReceiverIsolation.SynchronizeKinematicPose(_pelvisBody, _sampledPelvisPosition, _sampledPelvisRotation);
                 PelvisDynamicReceiverIsolation.SynchronizeKinematicPose(_chestBody, _sampledChestPosition, _sampledChestRotation);
@@ -1979,170 +1940,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _pelvisBody.angularVelocity = Vector3.zero;
             _chestBody.velocity = Vector3.zero;
             _chestBody.angularVelocity = Vector3.zero;
-        }
-
-        private void UpdateReport(string detail)
-        {
-            _report.Built = IsBuilt;
-            _report.DriveEnabled = _driveEnabled;
-            _report.GravityEnabled = _gravityEnabled;
-            _report.CollidersEnabled = _collidersEnabled;
-            _report.VisualEnabled = _visualEnabled;
-            _report.SourceAlive = _audit?.Pelvis != null && _audit.Chest != null;
-            _report.FiniteState = HasFinitePhysicsState();
-            _report.TargetName = _audit?.TargetName;
-            _report.TargetPath = _audit?.TargetPath;
-            _report.RootName = _root != null ? _root.name : null;
-            _report.TorsoLength = _audit?.PelvisToChestDistance ?? 0f;
-            _report.PelvisSize = _pelvisCollider != null ? _pelvisCollider.size : Vector3.zero;
-            _report.ChestSize = _chestCollider != null ? _chestCollider.size : Vector3.zero;
-            _report.IgnorePairCount = _ignoredPairs.Count;
-            _report.LastDetail = detail;
-
-            if (_pelvisBody != null && _chestBody != null && _sampleValid)
-            {
-                Quaternion currentRelative = _driveEnabled
-                    ? _settledBodyRelativeRotation
-                    : Quaternion.Inverse(_pelvisBody.rotation) * _chestBody.rotation;
-                Quaternion targetRelative = Quaternion.Inverse(_sampledPelvisRotation) * _sampledChestRotation;
-                _report.RotationErrorDegrees = Quaternion.Angle(currentRelative, targetRelative);
-                _report.PelvisPositionErrorMeters = Vector3.Distance(_pelvisBody.position, _sampledPelvisPosition);
-                _report.ChestPositionErrorMeters = Vector3.Distance(_chestBody.position, _sampledChestPosition);
-                _report.TargetChestLinearVelocity = _sampledChestLinearVelocity;
-                _report.TargetChestAngularVelocity = _sampledChestAngularVelocity;
-                _report.TargetPelvisLinearVelocity = _sampledPelvisLinearVelocity;
-                _report.TargetPelvisAngularVelocity = _sampledPelvisAngularVelocity;
-                _report.TargetChestLinearAcceleration = _sampledChestLinearAcceleration;
-                _report.TargetChestAngularAcceleration = _sampledChestAngularAcceleration;
-                _report.TargetPelvisLinearAcceleration = _sampledPelvisLinearAcceleration;
-                _report.TargetPelvisAngularAcceleration = _sampledPelvisAngularAcceleration;
-                _report.PelvisVelocity = _pelvisBody.velocity;
-                _report.PelvisAngularVelocity = _pelvisBody.angularVelocity;
-                _report.EstimatedPelvisLinearVelocity = _estimatedPelvisBodyLinearVelocity;
-                _report.EstimatedPelvisAngularVelocity = _estimatedPelvisBodyAngularVelocity;
-                _report.ParentTransportLinearVelocity = _parentTransportLinearVelocity;
-                _report.PhysicsParentTransportLinearVelocity = _physicsParentTransportLinearVelocity;
-                _report.ParentTransportConsistencyError = _parentTransportConsistencyError;
-                _report.ParentTransportConsistencyErrorMagnitude = _parentTransportConsistencyErrorMagnitude;
-                _report.ParentFeedforwardReferenceMode = CurrentParentTranslationReference;
-                _report.ParentFeedforwardReferenceVelocity = _parentFeedforwardReferenceVelocity;
-                _report.SourceRelativeLinearVelocity = _sourceRelativeLinearVelocity;
-                _report.TargetRelativeAngularVelocity = _targetRelativeAngularVelocity;
-                _report.BodyRelativeAngularVelocity = _bodyRelativeAngularVelocity;
-                _report.RelativeAngularVelocityError = _relativeAngularVelocityError;
-                _report.ChestVelocity = _chestBody.velocity;
-                _report.ChestAngularVelocity = _chestBody.angularVelocity;
-                _report.FixedStepPelvisTransportLinearVelocity = _fixedStepPelvisTransportLinearVelocity;
-                _report.FixedStepPelvisTransportAngularVelocity = _fixedStepPelvisTransportAngularVelocity;
-                _report.FixedStepTargetChestComVelocity = _fixedStepTargetChestComVelocity;
-                _report.AngularVelocityMode = "RENDER_SAMPLED_TARGET_RELATIVE_PLUS_FIXED_SETTLED_BODY_DELTA";
-                _report.DrivePhaseSyncMode = "FIXEDUPDATE_PARENT_PLUS_RENDER_SAMPLE_HOLD_VELOCITY_AND_POSE_BRIDGE_CONSISTENT_PARENT_FF";
-                _report.SourceVelocityBridgeMode = "RENDER_SAMPLE_HOLD";
-                _report.SourceVelocitySampleSequence = _sourceVelocitySampleSequence;
-                _report.SourceVelocitySampleFreshThisFixedStep = _sourceVelocitySampleFreshThisFixedStep;
-                _report.SourceVelocitySampleAgeSeconds = _sourceVelocitySampleAgeSeconds;
-                _report.SampledTargetRelativeAngularVelocity = _sampledPelvisRotation * _sampledTargetRelativeAngularVelocityLocal;
-                _report.PoseBridgeMode = RenderToPhysicsPoseBridge.ModeName;
-                _report.PoseBridgeCommandLinearVelocity = _poseBridge.CommandLinearVelocity;
-                _report.PoseBridgeCommandAngularVelocity = _poseBridge.CommandAngularVelocity;
-                _report.PoseBridgePositionCorrectionVelocity = _poseBridge.PositionCorrectionVelocity;
-                _report.PoseBridgeRotationCorrectionAngularVelocity = _poseBridge.RotationCorrectionAngularVelocity;
-                _report.PoseBridgePositionErrorMeters = _poseBridge.PositionErrorMeters;
-                _report.PoseBridgeRotationErrorDegrees = _poseBridge.RotationErrorDegrees;
-                _report.PoseBridgePredictionAgeSeconds = _poseBridge.PredictionAgeSeconds;
-                _report.PoseBridgePositionCorrectionClamped = _poseBridge.PositionCorrectionClamped;
-                _report.PoseBridgeRotationCorrectionClamped = _poseBridge.RotationCorrectionClamped;
-                _report.PoseBridgePositionCorrectionClampCount = _poseBridge.PositionCorrectionClampCount;
-                _report.PoseBridgeRotationCorrectionClampCount = _poseBridge.RotationCorrectionClampCount;
-            }
-
-            _report.MeasuredPelvisLinearVelocity = _measuredPelvisLinearVelocity;
-            _report.MeasuredChestLinearVelocity = _measuredChestLinearVelocity;
-            _report.MeasuredPelvisAngularVelocity = _measuredPelvisAngularVelocity;
-            _report.MeasuredChestAngularVelocity = _measuredChestAngularVelocity;
-            _report.MeasuredPelvisAnchorVelocity = _measuredPelvisAnchorVelocity;
-            _report.MeasuredChestAnchorVelocity = _measuredChestAnchorVelocity;
-            _report.MeasuredAnchorRelativeVelocity = _measuredAnchorRelativeVelocity;
-            _report.MeasuredTransportReferenceVelocity = _measuredTransportReferenceVelocity;
-            _report.MeasuredChestTransportVelocityError = _measuredChestTransportVelocityError;
-            _report.MotionPhase = _motionPhase;
-            _report.MotionTransition = _motionTransition;
-            _report.MotionTargetSpeed = _motionTargetSpeed;
-            _report.MotionSignedSpeedAcceleration = _motionSignedSpeedAcceleration;
-            CopySourceTurnDiagnosticsToReport();
-
-            _report.DriveBackend = DriveBackend;
-            _report.ConstraintBackend = ConstraintBackend;
-            _report.CharacterJointPresent = _characterJoint != null;
-            _report.CharacterJointConnectedBodyMatch =
-                _characterJoint != null && _characterJoint.connectedBody == _pelvisBody;
-            _report.ChestLowTwistLimitDegrees = _effectiveLowTwistLimit;
-            _report.ChestHighTwistLimitDegrees = _effectiveHighTwistLimit;
-            _report.ChestSwing1LimitDegrees = _effectiveSwing1Limit;
-            _report.ChestSwing2LimitDegrees = _effectiveSwing2Limit;
-            _report.JointLimitMode = _profile.WideJointLimitIsolation ? "WIDE_ISOLATION" : "ANATOMICAL";
-
-            if (_pelvisBody != null && _chestBody != null && _sampleValid)
-            {
-                Quaternion currentRelative = _driveEnabled
-                    ? _settledBodyRelativeRotation
-                    : Quaternion.Inverse(_pelvisBody.rotation) * _chestBody.rotation;
-                Quaternion targetRelative = Quaternion.Inverse(_sampledPelvisRotation) * _sampledChestRotation;
-                MeasureJointAngles(currentRelative, out _report.JointCurrentTwistDegrees, out _report.JointCurrentSwing1Degrees, out _report.JointCurrentSwing2Degrees);
-                MeasureJointAngles(targetRelative, out _report.JointTargetTwistDegrees, out _report.JointTargetSwing1Degrees, out _report.JointTargetSwing2Degrees);
-                _report.JointLimitProximity = ComputeLimitProximity(_report.JointCurrentTwistDegrees, _report.JointCurrentSwing1Degrees, _report.JointCurrentSwing2Degrees);
-                _report.TargetJointLimitProximity = ComputeLimitProximity(_report.JointTargetTwistDegrees, _report.JointTargetSwing1Degrees, _report.JointTargetSwing2Degrees);
-            }
-
-            _report.AngularAccelerationClamped = _lastAngularAccelerationClamped;
-            _report.AngularAccelerationClampCount = _angularAccelerationClampCount;
-            _report.RawAngularAccelerationMagnitude = _rawAngularAccelerationMagnitude;
-            _report.ParentMotionFeedforwardEnabled = _parentMotionFeedforwardEnabled && !DynamicPelvisReceiverSelected;
-            _report.CharacterJointAnchorMode = CharacterJointAnchorMode.ToString();
-            _report.CharacterJointAnchorModeValidated = _characterJointAnchorModeValidated;
-            if (_pelvisObject != null && _chestObject != null && _chestBody != null)
-            {
-                Vector3 constraintChestWorld = ChestPoint(_characterJointChestAnchorLocal);
-                Vector3 constraintPelvisWorld = PelvisPoint(_characterJointPelvisAnchorLocal);
-                _report.CharacterJointConstraintAnchorErrorMeters = Vector3.Distance(constraintChestWorld, constraintPelvisWorld);
-                _report.CharacterJointChestComLeverMeters = Vector3.Distance(constraintChestWorld, _chestBody.worldCenterOfMass);
-            }
-            _report.ParentFeedforwardAccelerationClamped = _parentFeedforwardAccelerationClamped;
-            _report.ParentFeedforwardAccelerationClampCount = _parentFeedforwardAccelerationClampCount;
-            _report.RawParentFeedforwardAccelerationMagnitude = _rawParentFeedforwardAccelerationMagnitude;
-            _report.ParentFeedforwardAcceleration = _parentFeedforwardAcceleration;
-            _report.TargetConnectedAnchorVelocity = _targetConnectedAnchorVelocity;
-            _report.ActualConnectedAnchorVelocity = _actualConnectedAnchorVelocity;
-            _report.ActualChestAnchorVelocity = _actualChestAnchorVelocity;
-            _report.AnchorVelocityError = _anchorVelocityError;
-            _report.LastLinearAcceleration = _lastLinearAcceleration;
-            _report.LastAngularAcceleration = _lastAngularAcceleration;
-
-            if (_pelvisObject != null && _chestObject != null)
-            {
-                Vector3 a = ChestPoint(_virtualChestAnchorLocal);
-                Vector3 b = PelvisPoint(_virtualPelvisAnchorLocal);
-                _report.AnchorErrorMeters = Vector3.Distance(a, b);
-            }
-
-            if (_driveEnabled)
-            {
-                _peakChestPositionError = Mathf.Max(_peakChestPositionError, _report.ChestPositionErrorMeters);
-                _peakRotationError = Mathf.Max(_peakRotationError, _report.RotationErrorDegrees);
-                _peakAnchorError = Mathf.Max(_peakAnchorError, _report.AnchorErrorMeters);
-                _peakLinearAcceleration = Mathf.Max(_peakLinearAcceleration, _lastLinearAcceleration.magnitude);
-                _peakAngularAcceleration = Mathf.Max(_peakAngularAcceleration, _lastAngularAcceleration.magnitude);
-                _peakJointLimitProximity = Mathf.Max(_peakJointLimitProximity, _report.JointLimitProximity);
-            }
-            _report.PeakChestPositionErrorMeters = _peakChestPositionError;
-            _report.PeakRotationErrorDegrees = _peakRotationError;
-            _report.PeakAnchorErrorMeters = _peakAnchorError;
-            _report.PeakLinearAcceleration = _peakLinearAcceleration;
-            _report.PeakAngularAcceleration = _peakAngularAcceleration;
-            _report.PeakJointLimitProximity = _peakJointLimitProximity;
-            CopyTraceSessionStatisticsToReport();
-            _freezeValidation.CopyToReport(_report);
-            _report.TraceEnabled = _traceEnabled;
         }
 
         private void UpdateMeasuredMotionDiagnostics()
@@ -2324,24 +2121,17 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     (targetChestComPosition - _previousCommandedTargetChestComPosition) / dt,
                     _profile.MaxLinearVelocity * 2f);
 
-                Vector3 targetRelativeAngularVelocityLocal =
-                    ComputeAngularVelocity(_previousCommandedTargetRelativeRotation, targetRelative, dt);
-                _fixedStepTargetRelativeAngularVelocity = ClampMagnitude(
-                    _settledPelvisRotation * targetRelativeAngularVelocityLocal,
-                    _profile.MaxAngularVelocity * 2f);
             }
             else
             {
                 _fixedStepPelvisTransportLinearVelocity = Vector3.zero;
                 _fixedStepPelvisTransportAngularVelocity = Vector3.zero;
                 _fixedStepTargetChestComVelocity = Vector3.zero;
-                _fixedStepTargetRelativeAngularVelocity = Vector3.zero;
             }
 
             _previousCommandedPelvisPosition = pelvisCommandPosition;
             _previousCommandedPelvisRotation = pelvisCommandRotation;
             _previousCommandedTargetChestComPosition = targetChestComPosition;
-            _previousCommandedTargetRelativeRotation = targetRelative;
             _hasPreviousFixedStepCommand = true;
 
             // 下一次 FixedUpdate 开头的 settled displacement 与“本次 command-delta 诊断速度”对齐比较。
@@ -2386,7 +2176,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _fixedStepPelvisTransportLinearVelocity = Vector3.zero;
             _fixedStepPelvisTransportAngularVelocity = Vector3.zero;
             _fixedStepTargetChestComVelocity = Vector3.zero;
-            _fixedStepTargetRelativeAngularVelocity = Vector3.zero;
             _fixedStepBodyRelativeAngularVelocity = Vector3.zero;
             _physicsParentTransportLinearVelocity = Vector3.zero;
             _parentTransportConsistencyError = Vector3.zero;
@@ -2406,7 +2195,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 Quaternion bridgedTargetChestRotation = _previousCommandedPelvisRotation * targetRelative;
                 Vector3 bridgedChestComOffset = bridgedTargetChestRotation * _chestBody.centerOfMass;
                 _previousCommandedTargetChestComPosition = bridgedTargetChestPosition + bridgedChestComOffset;
-                _previousCommandedTargetRelativeRotation = targetRelative;
                 _hasPreviousFixedStepCommand = true;
             }
             else
@@ -2414,7 +2202,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _previousCommandedPelvisPosition = Vector3.zero;
                 _previousCommandedPelvisRotation = Quaternion.identity;
                 _previousCommandedTargetChestComPosition = Vector3.zero;
-                _previousCommandedTargetRelativeRotation = Quaternion.identity;
             }
         }
 
@@ -2478,230 +2265,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _hasPreviousMotionSpeed = false;
             _transitionHoldUntil = 0f;
             _heldTransitionPhase = "TRANSITION";
-        }
-
-        private void ResetTraceSessionStatistics()
-        {
-            _traceSteadySampleCount = 0;
-            _traceTransitionSampleCount = 0;
-            _traceIdleSampleCount = 0;
-            _traceSteadyRotationErrorSum = 0f;
-            _traceSteadyRotationErrorMax = 0f;
-            _traceTransitionRotationErrorSum = 0f;
-            _traceTransitionRotationErrorMax = 0f;
-            _traceSteadyChestPositionErrorSum = 0f;
-            _traceSteadyChestPositionErrorMax = 0f;
-            _traceTransitionChestPositionErrorSum = 0f;
-            _traceTransitionChestPositionErrorMax = 0f;
-            _traceSteadyMeasuredTransportErrorSum = 0f;
-            _traceSteadyMeasuredTransportErrorMax = 0f;
-            _traceTransitionMeasuredTransportErrorSum = 0f;
-            _traceTransitionMeasuredTransportErrorMax = 0f;
-            _traceTurnSampleCount = 0;
-            _traceTurnRotationErrorSum = 0f;
-            _traceTurnRotationErrorMax = 0f;
-            _traceSteadyAngularClampSampleCount = 0;
-            _traceTransitionAngularClampSampleCount = 0;
-            _traceTurnAngularClampSampleCount = 0;
-            _traceSteadyAnchorRelativeSpeedSum = 0f;
-            _traceSteadyAnchorRelativeSpeedMax = 0f;
-            _traceTransitionAnchorRelativeSpeedSum = 0f;
-            _traceTransitionAnchorRelativeSpeedMax = 0f;
-            _traceTurnAnchorRelativeSpeedSum = 0f;
-            _traceTurnAnchorRelativeSpeedMax = 0f;
-            _traceSteadyParentTransportConsistencySum = 0f;
-            _traceSteadyParentTransportConsistencyMax = 0f;
-            _traceTransitionParentTransportConsistencySum = 0f;
-            _traceTransitionParentTransportConsistencyMax = 0f;
-            _traceTurnParentTransportConsistencySum = 0f;
-            _traceTurnParentTransportConsistencyMax = 0f;
-            _traceFreshSourceVelocityFixedStepCount = 0;
-            _traceHeldSourceVelocityFixedStepCount = 0;
-            CopyTraceSessionStatisticsToReport();
-        }
-
-        private void UpdateTraceSessionStatistics()
-        {
-            if (!_traceEnabled || !_driveEnabled)
-                return;
-
-            float measuredTransportError = _measuredChestTransportVelocityError.magnitude;
-            float anchorRelativeSpeed = _measuredAnchorRelativeVelocity.magnitude;
-            float transportConsistency = _parentTransportConsistencyErrorMagnitude;
-            if (_sourceVelocitySampleFreshThisFixedStep)
-                _traceFreshSourceVelocityFixedStepCount++;
-            else
-                _traceHeldSourceVelocityFixedStepCount++;
-            bool angularClampedThisStep = _lastAngularAccelerationClamped;
-
-            if (_motionTransition)
-            {
-                _traceTransitionSampleCount++;
-                _traceTransitionRotationErrorSum += _report.RotationErrorDegrees;
-                _traceTransitionRotationErrorMax = Mathf.Max(_traceTransitionRotationErrorMax, _report.RotationErrorDegrees);
-                _traceTransitionChestPositionErrorSum += _report.ChestPositionErrorMeters;
-                _traceTransitionChestPositionErrorMax = Mathf.Max(_traceTransitionChestPositionErrorMax, _report.ChestPositionErrorMeters);
-                _traceTransitionMeasuredTransportErrorSum += measuredTransportError;
-                _traceTransitionMeasuredTransportErrorMax = Mathf.Max(_traceTransitionMeasuredTransportErrorMax, measuredTransportError);
-                _traceTransitionAnchorRelativeSpeedSum += anchorRelativeSpeed;
-                _traceTransitionAnchorRelativeSpeedMax = Mathf.Max(_traceTransitionAnchorRelativeSpeedMax, anchorRelativeSpeed);
-                _traceTransitionParentTransportConsistencySum += transportConsistency;
-                _traceTransitionParentTransportConsistencyMax = Mathf.Max(_traceTransitionParentTransportConsistencyMax, transportConsistency);
-                if (angularClampedThisStep)
-                    _traceTransitionAngularClampSampleCount++;
-
-                if (_motionPhase == "TURN")
-                {
-                    _traceTurnSampleCount++;
-                    _traceTurnRotationErrorSum += _report.RotationErrorDegrees;
-                    _traceTurnRotationErrorMax = Mathf.Max(_traceTurnRotationErrorMax, _report.RotationErrorDegrees);
-                    _traceTurnAnchorRelativeSpeedSum += anchorRelativeSpeed;
-                    _traceTurnAnchorRelativeSpeedMax = Mathf.Max(_traceTurnAnchorRelativeSpeedMax, anchorRelativeSpeed);
-                    _traceTurnParentTransportConsistencySum += transportConsistency;
-                    _traceTurnParentTransportConsistencyMax = Mathf.Max(_traceTurnParentTransportConsistencyMax, transportConsistency);
-                    if (angularClampedThisStep)
-                        _traceTurnAngularClampSampleCount++;
-                }
-            }
-            else if (_motionPhase == "STEADY")
-            {
-                _traceSteadySampleCount++;
-                _traceSteadyRotationErrorSum += _report.RotationErrorDegrees;
-                _traceSteadyRotationErrorMax = Mathf.Max(_traceSteadyRotationErrorMax, _report.RotationErrorDegrees);
-                _traceSteadyChestPositionErrorSum += _report.ChestPositionErrorMeters;
-                _traceSteadyChestPositionErrorMax = Mathf.Max(_traceSteadyChestPositionErrorMax, _report.ChestPositionErrorMeters);
-                _traceSteadyMeasuredTransportErrorSum += measuredTransportError;
-                _traceSteadyMeasuredTransportErrorMax = Mathf.Max(_traceSteadyMeasuredTransportErrorMax, measuredTransportError);
-                _traceSteadyAnchorRelativeSpeedSum += anchorRelativeSpeed;
-                _traceSteadyAnchorRelativeSpeedMax = Mathf.Max(_traceSteadyAnchorRelativeSpeedMax, anchorRelativeSpeed);
-                _traceSteadyParentTransportConsistencySum += transportConsistency;
-                _traceSteadyParentTransportConsistencyMax = Mathf.Max(_traceSteadyParentTransportConsistencyMax, transportConsistency);
-                if (angularClampedThisStep)
-                    _traceSteadyAngularClampSampleCount++;
-            }
-            else
-            {
-                _traceIdleSampleCount++;
-            }
-            CopyTraceSessionStatisticsToReport();
-        }
-
-        private void CopyTraceSessionStatisticsToReport()
-        {
-            _report.TraceSteadySampleCount = _traceSteadySampleCount;
-            _report.TraceTransitionSampleCount = _traceTransitionSampleCount;
-            _report.TraceIdleSampleCount = _traceIdleSampleCount;
-            _report.TraceSteadyRotationErrorMeanDegrees = _traceSteadySampleCount > 0 ? _traceSteadyRotationErrorSum / _traceSteadySampleCount : 0f;
-            _report.TraceSteadyRotationErrorMaxDegrees = _traceSteadyRotationErrorMax;
-            _report.TraceTransitionRotationErrorMeanDegrees = _traceTransitionSampleCount > 0 ? _traceTransitionRotationErrorSum / _traceTransitionSampleCount : 0f;
-            _report.TraceTransitionRotationErrorMaxDegrees = _traceTransitionRotationErrorMax;
-            _report.TraceSteadyChestPositionErrorMeanMeters = _traceSteadySampleCount > 0 ? _traceSteadyChestPositionErrorSum / _traceSteadySampleCount : 0f;
-            _report.TraceSteadyChestPositionErrorMaxMeters = _traceSteadyChestPositionErrorMax;
-            _report.TraceTransitionChestPositionErrorMeanMeters = _traceTransitionSampleCount > 0 ? _traceTransitionChestPositionErrorSum / _traceTransitionSampleCount : 0f;
-            _report.TraceTransitionChestPositionErrorMaxMeters = _traceTransitionChestPositionErrorMax;
-            _report.TraceSteadyMeasuredTransportErrorMean = _traceSteadySampleCount > 0 ? _traceSteadyMeasuredTransportErrorSum / _traceSteadySampleCount : 0f;
-            _report.TraceSteadyMeasuredTransportErrorMax = _traceSteadyMeasuredTransportErrorMax;
-            _report.TraceTransitionMeasuredTransportErrorMean = _traceTransitionSampleCount > 0 ? _traceTransitionMeasuredTransportErrorSum / _traceTransitionSampleCount : 0f;
-            _report.TraceTransitionMeasuredTransportErrorMax = _traceTransitionMeasuredTransportErrorMax;
-            _report.TraceTurnSampleCount = _traceTurnSampleCount;
-            _report.TraceTurnRotationErrorMeanDegrees = _traceTurnSampleCount > 0 ? _traceTurnRotationErrorSum / _traceTurnSampleCount : 0f;
-            _report.TraceTurnRotationErrorMaxDegrees = _traceTurnRotationErrorMax;
-            _report.TraceSteadyAngularClampSampleCount = _traceSteadyAngularClampSampleCount;
-            _report.TraceTransitionAngularClampSampleCount = _traceTransitionAngularClampSampleCount;
-            _report.TraceTurnAngularClampSampleCount = _traceTurnAngularClampSampleCount;
-            _report.TraceSteadyAnchorRelativeSpeedMean = _traceSteadySampleCount > 0 ? _traceSteadyAnchorRelativeSpeedSum / _traceSteadySampleCount : 0f;
-            _report.TraceSteadyAnchorRelativeSpeedMax = _traceSteadyAnchorRelativeSpeedMax;
-            _report.TraceTransitionAnchorRelativeSpeedMean = _traceTransitionSampleCount > 0 ? _traceTransitionAnchorRelativeSpeedSum / _traceTransitionSampleCount : 0f;
-            _report.TraceTransitionAnchorRelativeSpeedMax = _traceTransitionAnchorRelativeSpeedMax;
-            _report.TraceTurnAnchorRelativeSpeedMean = _traceTurnSampleCount > 0 ? _traceTurnAnchorRelativeSpeedSum / _traceTurnSampleCount : 0f;
-            _report.TraceTurnAnchorRelativeSpeedMax = _traceTurnAnchorRelativeSpeedMax;
-            _report.TraceFreshSourceVelocityFixedStepCount = _traceFreshSourceVelocityFixedStepCount;
-            _report.TraceHeldSourceVelocityFixedStepCount = _traceHeldSourceVelocityFixedStepCount;
-            _report.TraceSteadyParentTransportConsistencyMean = _traceSteadySampleCount > 0 ? _traceSteadyParentTransportConsistencySum / _traceSteadySampleCount : 0f;
-            _report.TraceSteadyParentTransportConsistencyMax = _traceSteadyParentTransportConsistencyMax;
-            _report.TraceTransitionParentTransportConsistencyMean = _traceTransitionSampleCount > 0 ? _traceTransitionParentTransportConsistencySum / _traceTransitionSampleCount : 0f;
-            _report.TraceTransitionParentTransportConsistencyMax = _traceTransitionParentTransportConsistencyMax;
-            _report.TraceTurnParentTransportConsistencyMean = _traceTurnSampleCount > 0 ? _traceTurnParentTransportConsistencySum / _traceTurnSampleCount : 0f;
-            _report.TraceTurnParentTransportConsistencyMax = _traceTurnParentTransportConsistencyMax;
-        }
-
-        private void CopySourceTurnDiagnosticsToReport()
-        {
-            _report.SourceTurnDiagnosticsMode = SourceTurnDiscontinuityDiagnostics.ModeName;
-            _report.SourceTurnSampleDeltaSeconds = _sourceTurnDiagnostics.CurrentSampleDeltaSeconds;
-            _report.SourceTurnSampleRotationDeltaDegrees = _sourceTurnDiagnostics.CurrentRotationDeltaDegrees;
-            _report.SourceTurnSampleYawDegrees = _sourceTurnDiagnostics.CurrentYawDegrees;
-            _report.SourceTurnSampleYawDeltaDegrees = _sourceTurnDiagnostics.CurrentYawDeltaDegrees;
-            _report.SourceTurnRawAngularVelocity = _sourceTurnDiagnostics.CurrentRawAngularVelocity;
-            _report.SourceTurnRawAngularSpeed = _sourceTurnDiagnostics.CurrentRawAngularSpeed;
-            _report.SourceTurnRawAngularAcceleration = _sourceTurnDiagnostics.CurrentRawAngularAcceleration;
-            _report.SourceTurnRawAngularAccelerationMagnitude = _sourceTurnDiagnostics.CurrentRawAngularAccelerationMagnitude;
-            _report.SourceTurnChestRelativeRotationDeltaDegrees = _sourceTurnDiagnostics.CurrentChestRelativeRotationDeltaDegrees;
-            _report.SourceTurnEventActive = _sourceTurnDiagnostics.EventActive;
-            _report.SourceTurnCurrentEventId = _sourceTurnDiagnostics.CurrentEventId;
-            _report.SourceTurnEventCount = _sourceTurnDiagnostics.EventCount;
-            _report.SourceTurnDiscontinuityEventCount = _sourceTurnDiagnostics.DiscontinuityEventCount;
-            _report.SourceTurnRapidContinuousEventCount = _sourceTurnDiagnostics.RapidContinuousEventCount;
-            _report.SourceTurnMaxSingleSampleRotationDeltaDegrees = _sourceTurnDiagnostics.MaxSingleSampleRotationDeltaDegrees;
-            _report.SourceTurnMaxSingleSampleAbsYawDeltaDegrees = _sourceTurnDiagnostics.MaxSingleSampleAbsYawDeltaDegrees;
-            _report.SourceTurnMaxRawAngularSpeed = _sourceTurnDiagnostics.MaxRawAngularSpeed;
-            _report.SourceTurnMaxRawAngularAcceleration = _sourceTurnDiagnostics.MaxRawAngularAcceleration;
-            _report.SourceTurnMaxChestRelativeRotationDeltaDegrees = _sourceTurnDiagnostics.MaxChestRelativeRotationDeltaDegrees;
-            _report.SourceTurnMaxResponseRotationErrorDegrees = _sourceTurnDiagnostics.MaxResponseRotationErrorDegrees;
-            _report.SourceTurnMaxPoseBridgeRotationErrorDegrees = _sourceTurnDiagnostics.MaxPoseBridgeRotationErrorDegrees;
-            _report.SourceTurnMaxPoseBridgeCommandAngularSpeed = _sourceTurnDiagnostics.MaxPoseBridgeCommandAngularSpeed;
-            _report.SourceTurnMaxAnchorErrorMeters = _sourceTurnDiagnostics.MaxAnchorErrorMeters;
-            _report.SourceTurnAngularClampFixedStepCount = _sourceTurnDiagnostics.AngularClampFixedStepCount;
-            _report.SourceTurnLastEventClassification = _sourceTurnDiagnostics.LastEventClassification;
-            _report.SourceTurnLastEventSignedYawDeltaDegrees = _sourceTurnDiagnostics.LastEventSignedYawDeltaDegrees;
-            _report.SourceTurnLastEventAbsoluteYawDeltaDegrees = _sourceTurnDiagnostics.LastEventAbsoluteYawDeltaDegrees;
-            _report.SourceTurnLastEventMaxSingleSampleRotationDeltaDegrees = _sourceTurnDiagnostics.LastEventMaxSingleSampleRotationDeltaDegrees;
-            _report.SourceTurnLastEventMaxRawAngularSpeed = _sourceTurnDiagnostics.LastEventMaxRawAngularSpeed;
-            _report.SourceTurnLastEventMaxResponseRotationErrorDegrees = _sourceTurnDiagnostics.LastEventMaxResponseRotationErrorDegrees;
-        }
-
-        private void EmitTraceIfDue()
-        {
-            if (!_traceEnabled || !IsBuilt || !_driveEnabled)
-                return;
-            float now = CurrentUnscaledTime;
-            if (now < _nextTraceTime)
-                return;
-            _nextTraceTime = now + _profile.TraceIntervalSeconds;
-            if (_emitLogs) Plugin.Logger?.LogInfo("[ARL][TRACE] " + (_profile.TraceVerboseSnapshots ? _report.GetTraceSummary() : _report.GetTraceSummaryCompact()));
-        }
-
-        private void ResetDrivePeaks()
-        {
-            _peakChestPositionError = 0f;
-            _peakRotationError = 0f;
-            _peakAnchorError = 0f;
-            _peakLinearAcceleration = 0f;
-            _peakAngularAcceleration = 0f;
-            _peakJointLimitProximity = 0f;
-            _lastAngularAccelerationClamped = false;
-            _angularAccelerationClampCount = 0;
-            _rawAngularAccelerationMagnitude = 0f;
-            _angularPAcceleration = Vector3.zero;
-            _angularDAcceleration = Vector3.zero;
-            _angularAccelerationHeadroom = 0f;
-            _jointCurrentForceWorld = Vector3.zero; _jointReactionReadbackValid = false;
-            _jointCurrentTorqueWorld = Vector3.zero;
-            _jointChestComLeverWorld = Vector3.zero;
-            _jointForceMomentWorld = Vector3.zero;
-            _jointCombinedMomentWorld = Vector3.zero;
-            _jointTorqueAngularAccelerationProxyWorld = Vector3.zero;
-            _jointForceMomentAngularAccelerationProxyWorld = Vector3.zero;
-            _jointCombinedAngularAccelerationProxyWorld = Vector3.zero;
-            _parentFeedforwardAcceleration = Vector3.zero;
-            _parentFeedforwardAccelerationClamped = false;
-            _parentFeedforwardAccelerationClampCount = 0;
-            _rawParentFeedforwardAccelerationMagnitude = 0f;
-            _parentFeedforwardReferenceVelocity = Vector3.zero;
-            _targetConnectedAnchorVelocity = Vector3.zero;
-            _actualConnectedAnchorVelocity = Vector3.zero;
-            _actualChestAnchorVelocity = Vector3.zero;
-            _anchorVelocityError = Vector3.zero;
         }
 
         private void UpdatePelvisBodyVelocityEstimate()
@@ -2819,31 +2382,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             _buildPhase = string.IsNullOrWhiteSpace(phase) ? "<unknown>" : phase;
             _report.BuildPhase = _buildPhase;
-            if (_emitLogs) Plugin.Logger?.LogInfo("[ARL][TWO_BODY][BUILD_PHASE] phase=" + _buildPhase);
-        }
-
-        private static Vector3 AnalyticalUniformBoxInertia(float mass, Vector3 size)
-        {
-            float x = Mathf.Max(0.0001f, Mathf.Abs(size.x));
-            float y = Mathf.Max(0.0001f, Mathf.Abs(size.y));
-            float z = Mathf.Max(0.0001f, Mathf.Abs(size.z));
-            float k = Mathf.Max(0.0001f, mass) / 12f;
-            return new Vector3(k * (y * y + z * z), k * (x * x + z * z), k * (x * x + y * y));
-        }
-
-        private static bool ValidateBodyMassPropertyMode(Rigidbody body, BoxCollider collider, float mass, TwoBodyMassPropertyMode mode)
-        {
-            if (body == null || collider == null) return false;
-            Vector3 expectedInertia = AnalyticalUniformBoxInertia(mass, collider.size);
-            Vector3 expectedCom = (mode == TwoBodyMassPropertyMode.ExplicitCenterOfMassOnly || mode == TwoBodyMassPropertyMode.ExplicitUniformBox)
-                ? collider.center
-                : Vector3.zero;
-            Vector3 expectedTensor = (mode == TwoBodyMassPropertyMode.ExplicitInertiaOnly || mode == TwoBodyMassPropertyMode.ExplicitUniformBox)
-                ? expectedInertia
-                : Vector3.one;
-            return Approximately(body.centerOfMass, expectedCom) &&
-                   Approximately(body.inertiaTensor, expectedTensor) &&
-                   Approximately(body.inertiaTensorRotation, Quaternion.identity);
+            Plugin.Logger?.LogInfo("[ARL][TWO_BODY][BUILD_PHASE] phase=" + _buildPhase);
         }
 
         private static bool Approximately(Vector3 a, Vector3 b, float tolerance = 0.0005f)
@@ -2864,7 +2403,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 Mathf.Clamp(value.z, _profile.MinBoxDimension, _profile.MaxBoxDimension));
         }
 
-        private static Material CreatePreviewMaterial(float alpha)
+        private void CreatePreviewMaterial(float alpha)
         {
             Shader shader = Shader.Find("Legacy Shaders/Transparent/Diffuse");
             if (shader == null)
@@ -2874,11 +2413,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (shader == null)
                 throw new InvalidOperationException("没有找到可用的预览 Shader。" );
 
-            Material material = new Material(shader);
-            material.name = "ARL_TwoBodyPreviewMaterial";
-            material.hideFlags = HideFlags.DontSave;
-            material.color = new Color(0.15f, 0.75f, 1.0f, alpha);
-            return material;
+            _previewMaterial = new Material(shader);
+            _previewMaterial.name = "ARL_TwoBodyPreviewMaterial";
+            _previewMaterial.hideFlags = HideFlags.DontSave;
+            _previewMaterial.color = new Color(0.15f, 0.75f, 1.0f, alpha);
         }
 
         private static void SetRendererEnabled(GameObject visual, bool enabled)

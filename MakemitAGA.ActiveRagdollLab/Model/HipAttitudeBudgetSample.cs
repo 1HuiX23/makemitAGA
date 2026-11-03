@@ -5,7 +5,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
 {
     // Read-only, same-state budget arithmetic AFTER both Hip point-force writes.
     // H includes Chest COM elimination, not just the moment about Pelvis COM.
-    // No pure Upper Hip torque is mirrored to Pelvis. This remains diagnostic;
+    // B adds only bounded joint-relative reaction; applied torque already contains it. This remains diagnostic;
     // the separate committed attitude receipt supplies the actual FINAL torque.
     internal struct HipAttitudeBudgetSample
     {
@@ -18,13 +18,16 @@ namespace MakemitAGA.ActiveRagdollLab.Model
             var f = new HipAttitudeBudgetSample();
             if (!input.Matches(input.Step, input.BodyId) || !actuation.Valid || !actuation.Step.Matches(input.Step) ||
                 !PelvisChestPointResponse.Same(actuation.Torque, input.ReceiverTorque) || !attitude.Matches(input) ||
-                !V(actuation.RawTorque) || !V(hipForce) || !V(hipMoment)) return f;
+                !V(actuation.RawTorque) || !V(hipForce) || !V(hipMoment) ||
+                !PelvisChestPointResponse.Same(hipForce, attitude.HipForce)) return f;
             f.RawReceiverTorque = actuation.RawTorque; // after alpha40, before the existing torque2 cap
-            f.EffectiveHipTorque = hipMoment - input.Response.ChestFraction * Vector3.Cross(input.Response.ChestLever, hipForce);
+            // Hypothetical preservation of the OLD baseline would have to cancel
+            // the added angular reaction too. Production B intentionally does not.
+            f.EffectiveHipTorque = hipMoment - input.Response.ChestFraction * Vector3.Cross(input.Response.ChestLever, hipForce) + attitude.AngularReaction;
             f.PreserveRawTorque = f.RawReceiverTorque - f.EffectiveHipTorque;
             f.PreserveAppliedTorque = input.ReceiverTorque - f.EffectiveHipTorque;
             f.HipResponseAlpha = input.Response.AngularInertia.Solve(f.EffectiveHipTorque);
-            f.RawResponseDeficitAlpha = input.Response.AngularInertia.Solve(attitude.AppliedTorque + f.EffectiveHipTorque - f.RawReceiverTorque);
+            f.RawResponseDeficitAlpha = input.Response.AngularInertia.Solve(attitude.AppliedTorque + f.EffectiveHipTorque - attitude.AngularReaction - f.RawReceiverTorque);
             f.Valid = V(f.EffectiveHipTorque) && V(f.PreserveRawTorque) && V(f.PreserveAppliedTorque) &&
                 V(f.HipResponseAlpha) && V(f.RawResponseDeficitAlpha);
             f.ReceiverClamped = f.RawReceiverTorque.magnitude > 2f;

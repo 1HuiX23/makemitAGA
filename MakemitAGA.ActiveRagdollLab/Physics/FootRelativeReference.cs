@@ -7,6 +7,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 {
     // Candidate, not production: V04720 trajectory with V04730 explicit long-gap recovery.
     // Raw animation/conditioner history remains owned by Foundation. No body, force, clock or observer loop here.
+    // v113: rawRotation/rawW/RawGap refer to this planner's input (possibly a ground-compatible goal),
+    // not necessarily raw animation. Foundation keeps raw diagnostics separate.
     internal sealed class FootRelativeReference
     {
         internal const string ArmA = "RAW_FOOT_REFERENCE_V04730", ArmB = "COHERENT_FOOT_REFERENCE_V04730";
@@ -24,7 +26,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             internal SourceStepContext Source;
             internal Quaternion Rotation;
-            internal Vector3 W, A, PreviousW;
+            internal Vector3 W, A;
             internal float Dt, RawGap, SourceElapsed, DiscardedElapsed;
             internal bool AlphaLimited, SpeedLimited, InheritedOverSpeed, GapRecovery;
         }
@@ -63,7 +65,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (!_selected) return true;
             if (!source.Valid || !Q(rotation) || !V(w)) return Invalid("SEED_INPUT_INVALID");
             // Same pose/W as the existing physical-parent Foot initialization, without a first-step rebase.
-            _current = new Sample { Source = source, Rotation = Normalize(rotation), W = w, PreviousW = w };
+            _current = new Sample { Source = source, Rotation = Normalize(rotation), W = w };
             _inputRotation = rotation; _inputW = w;
             _active = true;
             return true;
@@ -139,7 +141,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 a.magnitude > MaxA + 0.002f || nextW.magnitude * dt >= Mathf.PI - 0.0001f)
                 throw new InvalidOperationException("FOOT_REFERENCE_BUDGET_INVALID");
             Quaternion nextRotation = Advance(rotation, nextW, dt);
-            return new Sample { Rotation = nextRotation, W = nextW, A = a, PreviousW = w, Dt = dt,
+            return new Sample { Rotation = nextRotation, W = nextW, A = a, Dt = dt,
                 RawGap = Log(rawRotation * Quaternion.Inverse(nextRotation)).magnitude,
                 AlphaLimited = delta.magnitude > MaxA * dt, SpeedLimited = desiredW.magnitude > MaxW,
                 InheritedOverSpeed = w.magnitude > MaxW + 0.0001f };
@@ -165,12 +167,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             "/domain=TRUE_RENDER_ONLY_FIXED_HOLD/closure=POSE_EXP_NEXT_W_PLAN_DT_AND_A_DELTA_W_PLAN_DT/gapPolicy=DISCARD_MISSING_TIME_ONE_STEP_MAX_1_OVER_60_NO_REBASE/stale=ORIGINAL_CONTROLLER_POLICY/noRunRebase=True";
 
         private bool Invalid(string issue) { _finite = false; _issue = issue; return false; }
-        private static Quaternion Advance(Quaternion q, Vector3 w, float dt)
+        internal static Quaternion Advance(Quaternion q, Vector3 w, float dt)
         {
             float speed = w.magnitude;
             return speed > 0f ? Normalize(Quaternion.AngleAxis(speed * dt * Mathf.Rad2Deg, w / speed) * q) : Normalize(q);
         }
-        private static Vector3 Log(Quaternion q)
+        internal static Vector3 Log(Quaternion q)
         {
             q = Normalize(q);
             if (q.w < 0f || (q.w == 0f && (q.x < 0f || (q.x == 0f && (q.y < 0f || (q.y == 0f && q.z < 0f))))))

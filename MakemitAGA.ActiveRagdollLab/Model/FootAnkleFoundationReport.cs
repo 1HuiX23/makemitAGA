@@ -6,16 +6,32 @@ using UnityEngine;
 namespace MakemitAGA.ActiveRagdollLab.Model
 {
     /// <summary>
-    /// ARL v0.4.0 Stage-E contact identity qualification shell over the unchanged v0.3.78 Foot/Ankle free-space production report.
-    /// The v0.3.76 bounded common-mode angular-drag compensation passed v0.3.77 stronger-motion confirmation and is now frozen production.
-    /// The v0.3.69 free-space Dynamic Foot production physics remains the baseline. v0.3.70 signed-radial precursor
-    /// attribution proved parent transport and the final command were correctly radial-closing during the tail, while
-    /// MaxA60 saturated against abrupt COM-velocity debt. v0.3.71 qualified a narrow conditional-80 candidate; v0.3.72
-    /// confirmed the same policy again while translation stayed below ~15 mm before an independent Left axial hard-envelope abort. v0.3.73 promotes conditional80 into production and adds only read-only axial temporal attribution. The 30 mm translation gate and 45/40/30/total60 angular hard gate remain unchanged.
+    /// Shared typed Foot/Ankle snapshot: frozen free-space control, authorized contact, load receipts
+    /// and independent diagnostic evidence. Historical labels identify contracts still used by regression
+    /// scopes; they do not select controller policy. Contact text views are formatted only when requested.
     /// </summary>
-    internal sealed class FootAnkleFoundationReport
+    internal sealed partial class FootAnkleFoundationReport
     {
         public const string ModeName = "ANKLE_FREE_SPACE_PRODUCTION_V0378";
+
+        private FootControlEvidenceSnapshot _controlEvidence;
+        public FootControlEvidenceSnapshot ControlEvidence => _controlEvidence;
+        public FootEvidenceTracePhase TraceEvidencePhase { get; private set; }
+        public FootTraceEndCapture TraceEndCapture { get; private set; }
+        public FootTurnResponseReceipt TurnResponseReceipt { get; private set; }
+
+        // Report values are projections. Only the concrete evidence owner advances these identities,
+        // aggregates and captured values; later status/native refreshes cannot mutate the trace-end copy.
+        internal void PublishControlEvidence(FootControlEvidenceSnapshot evidence, FootEvidenceTracePhase phase,
+            FootTraceEndCapture capture)
+        {
+            _controlEvidence = evidence;
+            TraceEvidencePhase = phase;
+            TraceEndCapture = capture;
+        }
+
+        internal void PublishTurnResponse(FootTurnResponseReceipt receipt) => TurnResponseReceipt = receipt;
+
 
         public bool Built;
         public bool Finite = true;
@@ -70,11 +86,11 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public string FootCollisionDetectionModeExperiment;
         public string FootCollisionDetectionModeArm;
         public bool FootCollisionDetectionModeFinite = true;
+        public bool FootCollisionDetectionModeSpeculative;
         public string FootCollisionDetectionModeInvalidReason;
         public string FootCollisionDetectionModeReadback;
-        public string FootCollisionDetectionModeSummary;
 
-        public string FootContactOffsetMode, FootContactOffsetArm, FootContactOffsetInvalidReason, FootContactOffsetSummary;
+        public string FootContactOffsetArm, FootContactOffsetInvalidReason, FootContactOffsetSummary;
         public bool FootContactOffsetInitialized, FootContactOffsetFinite = true, FootContactOffsetReadbackValid, FootContactOffsetBaselineRestored;
         public int FootContactOffsetOwnerId, FootContactOffsetReadbackFailures;
         public float FootContactOffsetBaselineMeters, FootContactOffsetSelectedMeters, FootContactOffsetActualMeters;
@@ -106,16 +122,16 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public bool SourceAnkleRenderStepValid;
         public float SourceAnkleRenderStepSeconds;
         public Vector3 SourceAnkleRenderStepDegrees;
-        public int TraceSourceRenderStepSamples;
-        public float TraceSourceRenderStepAngleMaxDegrees;
-        public FootFixedStepEvidence PreviousObservedStep;
-        public FootFixedStepEvidence CurrentObservedStep;
-        public int AnkleConstraintLastEvaluatedFixedSequence;
-        public int AnkleDriveLastEvaluatedFixedSequence;
-        public int FootControllerLastCompletedFixedSequence;
-        public int TraceObservedFixedSamples;
-        public float TraceObservedAnchorErrorMaxMeters;
-        public float TraceObservedTrackingErrorMaxDegrees;
+        public int TraceSourceRenderStepSamples => _controlEvidence.TraceSourceRenderStepSamples;
+        public float TraceSourceRenderStepAngleMaxDegrees => _controlEvidence.TraceSourceRenderStepAngleMaxDegrees;
+        public FootFixedStepEvidence PreviousObservedStep => _controlEvidence.PreviousObservedStep;
+        public FootFixedStepEvidence CurrentObservedStep => _controlEvidence.CurrentObservedStep;
+        public int AnkleConstraintLastEvaluatedFixedSequence => _controlEvidence.AnkleConstraintLastEvaluatedFixedSequence;
+        public int AnkleDriveLastEvaluatedFixedSequence => _controlEvidence.AnkleDriveLastEvaluatedFixedSequence;
+        public int FootControllerLastCompletedFixedSequence => _controlEvidence.FootControllerLastCompletedFixedSequence;
+        public int TraceObservedFixedSamples => _controlEvidence.TraceObservedFixedSamples;
+        public float TraceObservedAnchorErrorMaxMeters => _controlEvidence.TraceObservedAnchorErrorMaxMeters;
+        public float TraceObservedTrackingErrorMaxDegrees => _controlEvidence.TraceObservedTrackingErrorMaxDegrees;
         public Vector3 SourceAnkleFromBindRotationVectorDegrees;
         public float SourceAnkleFromBindAngleDegrees;
         public Vector3 SourceAnkleRelativeAngularVelocityLocal;
@@ -125,21 +141,21 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public float AnkleAnchorErrorMeters;
         public Vector3 SampledFootLinearVelocityWorld;
 
-        public int TraceSamples;
-        public float TraceAnkleRelativeErrorMeanDegrees;
-        public float TraceAnkleRelativeErrorMaxDegrees;
-        public float TraceAnkleAnchorErrorMeanMeters;
-        public float TraceAnkleAnchorErrorMaxMeters;
-        public float TraceSourceFromBindAngleMeanDegrees;
-        public float TraceSourceFromBindAngleMaxDegrees;
-        public float TraceSourceAngularSpeedMean;
-        public float TraceSourceAngularSpeedMax;
-        public Vector3 TraceSourceFromBindAxisMinDegrees;
-        public Vector3 TraceSourceFromBindAxisMaxDegrees;
-        public Vector3 TraceSourceFromBindAxisAbsMaxDegrees;
-        public Vector3 TraceSourceAngularVelocityAxisMin;
-        public Vector3 TraceSourceAngularVelocityAxisMax;
-        public Vector3 TraceSourceAngularVelocityAxisAbsMax;
+        public int TraceSamples => _controlEvidence.TraceSamples;
+        public float TraceAnkleRelativeErrorMeanDegrees => _controlEvidence.TraceAnkleRelativeErrorMeanDegrees;
+        public float TraceAnkleRelativeErrorMaxDegrees => _controlEvidence.TraceAnkleRelativeErrorMaxDegrees;
+        public float TraceAnkleAnchorErrorMeanMeters => _controlEvidence.TraceAnkleAnchorErrorMeanMeters;
+        public float TraceAnkleAnchorErrorMaxMeters => _controlEvidence.TraceAnkleAnchorErrorMaxMeters;
+        public float TraceSourceFromBindAngleMeanDegrees => _controlEvidence.TraceSourceFromBindAngleMeanDegrees;
+        public float TraceSourceFromBindAngleMaxDegrees => _controlEvidence.TraceSourceFromBindAngleMaxDegrees;
+        public float TraceSourceAngularSpeedMean => _controlEvidence.TraceSourceAngularSpeedMean;
+        public float TraceSourceAngularSpeedMax => _controlEvidence.TraceSourceAngularSpeedMax;
+        public Vector3 TraceSourceFromBindAxisMinDegrees => _controlEvidence.TraceSourceFromBindAxisMinDegrees;
+        public Vector3 TraceSourceFromBindAxisMaxDegrees => _controlEvidence.TraceSourceFromBindAxisMaxDegrees;
+        public Vector3 TraceSourceFromBindAxisAbsMaxDegrees => _controlEvidence.TraceSourceFromBindAxisAbsMaxDegrees;
+        public Vector3 TraceSourceAngularVelocityAxisMin => _controlEvidence.TraceSourceAngularVelocityAxisMin;
+        public Vector3 TraceSourceAngularVelocityAxisMax => _controlEvidence.TraceSourceAngularVelocityAxisMax;
+        public Vector3 TraceSourceAngularVelocityAxisAbsMax => _controlEvidence.TraceSourceAngularVelocityAxisAbsMax;
 
         // v0.3.56.1 support-plane calibration / sole-frame / ankle-ROM / ground-readiness requalification.
         public string SoleRequalificationMode;
@@ -167,23 +183,9 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public bool ContactIdentityFinite = true;
         public string ContactIdentityInvalidReason;
         public bool ContactIdentityCurrentQualified;
-        public bool ContactIdentityCurrentStaticCollider;
         public int ContactIdentityCurrentColliderInstanceId;
         public string ContactIdentityCurrentColliderPath;
-        public float ContactIdentityCurrentStableSeconds;
-        public int ContactIdentityTraceQuietEligibleSamples;
-        public int ContactIdentityTraceQuietQualifiedSamples;
         public float ContactIdentityTraceQuietQualifiedRatio;
-        public int ContactIdentityTraceNoHitSamples;
-        public int ContactIdentityTraceDynamicRejectedSamples;
-        public int ContactIdentityTraceSwitches;
-        public int ContactIdentityTraceStableSegments;
-        public float ContactIdentityTraceLongestStableSeconds;
-        public int ContactIdentityLastStableColliderInstanceId;
-        public string ContactIdentityLastStableColliderPath;
-        public bool ContactIdentityTraceEndedStable;
-        public int ContactIdentityEndingStableColliderInstanceId;
-        public string ContactIdentityEndingStableColliderPath;
         public bool ContactIdentityTraceQualified;
         public string ContactIdentityCurrentSummary;
         public string ContactIdentityTraceSummary;
@@ -193,6 +195,8 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public string ContactShadowArm;
         public bool ContactShadowFinite = true;
         public string ContactShadowInvalidReason;
+        public bool ContactShadowFootColliderEnabled;
+        public int ContactShadowMinRaycastMatchSamples, ContactShadowMinMatchedCallbacks;
         public bool ContactShadowPrepared;
         public bool ContactShadowActive;
         public int ContactShadowAuthorizedColliderInstanceId;
@@ -229,13 +233,13 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public int ContactShadowLastCallbackColliderInstanceId;
         public string ContactShadowLastCallbackColliderPath;
         public bool ContactShadowTraceQualified;
-        public string ContactShadowCurrentSummary;
-        public string ContactShadowTraceSummary;
 
         // v0.4.7 per-foot stance-only authorized contact lifecycle. This layer reuses the frozen v0.4.5 gait
         // classifier state and the closed v0.4.1-v0.4.4 exact-support contact primitive. It does not add any
         // force/torque/raycast or relax existing hard gates.
         public string StanceContactLifecycleMode;
+        public float StanceContactLifecycleTraceIdentityHoldSeconds;
+        public int StanceContactLifecycleMinGeometryReadySamples, StanceContactLifecycleMinActivations, StanceContactLifecycleMinReleases, StanceContactLifecycleMinActiveSamples;
         public bool StanceContactLifecycleEnabled;
         public bool StanceContactLifecycleFinite = true;
         public string StanceContactLifecycleInvalidReason;
@@ -243,9 +247,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public string StanceContactLifecycleLastReason;
         public float StanceContactLifecycleQualifiedStanceSeconds;
         public int StanceContactLifecycleQualifiedColliderInstanceId;
-        public string StanceContactLifecycleQualifiedColliderPath;
         public int StanceContactLifecycleAuthorizedColliderInstanceId;
-        public string StanceContactLifecycleAuthorizedColliderPath;
         public int StanceContactLifecycleFixedSamples;
         public int StanceContactLifecycleActiveSamples;
         public int StanceContactLifecycleContactActivations;
@@ -269,8 +271,9 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public int StanceContactLifecycleLastContactFixed;
         public int StanceContactLifecycleLastReleaseFixed;
         public bool StanceContactLifecycleTraceQualified;
-        public string StanceContactLifecycleCurrentSummary;
-        public string StanceContactLifecycleTraceSummary;
+        public bool ContactEntryEvidenceReady = true; // legacy scopes have no new entry-policy qualification
+        public string ContactEntrySummary;
+        public string StanceLoadAdmissionSummary;
 
         // v0.4.8 causal isolation of stance-contact friction/yaw constraint. Both arms keep the same
         // v0.4.7 stance lifecycle; only the Foot Collider PhysicMaterial changes.
@@ -288,52 +291,22 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public float StanceContactFrictionIsolationGroundDynamicFriction;
         public string StanceContactFrictionIsolationGroundFrictionCombine;
         public bool StanceContactFrictionIsolationEffectiveZeroGuaranteed;
-        public string StanceContactFrictionIsolationSummary;
 
-        // v0.4.16 consolidation: the v0.4.10 Foot world-ground anti-slip actuator and its A/B report
-        // fields were retired after v0.4.15 proved Lower-ground ownership + the frozen Foot↔Lower
-        // tether preserves local closure without that duplicate world-ground write.
-        // v0.4.11 observer-only separation between source-relative planar tracking and true ground-relative
-        // stance drift. The v0.4.10 B physical plant is frozen; these fields are diagnostic-only.
-
-        // v0.4.16 consolidation: the large v0.4.12 anti-slip-vs-tether competition observer/report
-        // was retired after v0.4.15 closed the ownership question. Tether load remains available
-        // from the frozen v0.3.63 report; ground-relative common/differential motion remains in V04130.
-        // v0.4.13 observer-only stance ground-anchor decomposition. Foot/Lower ground-relative motion is split
-        // exactly into equal-weight common and differential contributions, and two Lower-ground counterfactual
-        // acceleration demands are recorded without applying them.
-
-        public string StanceLowerGroundAuthorityMode;
+        // Lower-ground planar authority retained for legacy loaded regression scopes.
         public string StanceLowerGroundAuthorityArm;
         public bool StanceLowerGroundAuthorityFinite = true;
         public string StanceLowerGroundAuthorityInvalidReason;
         public bool StanceLowerGroundAuthorityEnabled;
-        public float StanceLowerGroundAuthorityKp;
-        public float StanceLowerGroundAuthorityKd;
-        public float StanceLowerGroundAuthorityMaxAcceleration;
-        public int StanceLowerGroundAuthorityTraceSamples;
-        public int StanceLowerGroundAuthorityEligibleSamples;
-        public int StanceLowerGroundAuthoritySupportNormalGapSamples;
-        public int StanceLowerGroundAuthorityEpisodesStarted;
-        public int StanceLowerGroundAuthorityAppliedSamples;
-        public int StanceLowerGroundAuthorityClampSamples;
-        public int StanceLowerGroundAuthorityNonStanceAppliedSamples;
         public float StanceLowerGroundAuthorityPositionErrorMeanMeters;
-        public float StanceLowerGroundAuthorityPositionErrorMaxMeters;
         public float StanceLowerGroundAuthorityVelocityErrorMean;
-        public float StanceLowerGroundAuthorityVelocityErrorMax;
         public float StanceLowerGroundAuthorityRawAccelerationMean;
-        public float StanceLowerGroundAuthorityRawAccelerationMax;
         public float StanceLowerGroundAuthorityAppliedAccelerationMean;
-        public float StanceLowerGroundAuthorityAppliedAccelerationMax;
         public Vector3 StanceLowerGroundAuthorityPositionErrorPlanarWorld;
         public Vector3 StanceLowerGroundAuthorityVelocityErrorPlanarWorld;
         public Vector3 StanceLowerGroundAuthorityRawAccelerationWorld;
         public Vector3 StanceLowerGroundAuthorityAppliedAccelerationWorld;
         public bool StanceLowerGroundAuthorityCurrentClamped;
         public bool StanceLowerGroundAuthorityCurrentApplied;
-        public float StanceLowerGroundAuthorityDirectYawTorqueMax;
-        public int StanceLowerGroundAuthorityFirstAppliedFixed;
         public int StanceLowerGroundAuthorityLastAppliedFixed;
         public string StanceLowerGroundAuthoritySummary;
 
@@ -366,22 +339,17 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public float StanceFootNativeGravityGravityOffSignedNormalImpulseMean;
         public float StanceFootNativeGravityGravityOffSignedNormalImpulseMax;
         public Vector3 StanceFootNativeGravityGravityWorld;
-        public float StanceFootNativeGravityGravityMagnitude;
         public float StanceFootNativeGravityFootMass;
         public bool StanceFootNativeGravityCurrentApplied;
         public int StanceFootNativeGravityCurrentScheduledFixed;
         public int StanceFootNativeGravityFirstAppliedFixed;
         public int StanceFootNativeGravityLastAppliedFixed;
-        public string StanceFootNativeGravitySummary;
 
         // v0.4.3 read-only static-support-normal mechanical reaction attribution.
         public string MechanicalReactionMode;
         public bool MechanicalReactionFinite = true;
         public string MechanicalReactionInvalidReason;
         public bool MechanicalReactionReadbackClean = true;
-        public string MechanicalReactionLastReadFailureStage;
-        public string MechanicalReactionLastReadFailureType;
-        public string MechanicalReactionLastReadFailureMessage;
         public bool MechanicalReactionSolverWitnessQualified;
         public bool MechanicalReactionSupportNormalWitnessQualified;
         public int MechanicalReactionTraceCallbacks;
@@ -398,52 +366,20 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public int MechanicalReactionTraceSupportInvalidGeometryNotReady;
         public int MechanicalReactionTraceSupportInvalidFootprintNotSameSurface;
         public int MechanicalReactionTraceSupportInvalidNormalNonFiniteOrZero;
-        public int MechanicalReactionTraceSupportPredicateGeometryNotReady;
-        public int MechanicalReactionTraceSupportPredicateFootprintNotSameSurface;
-        public int MechanicalReactionTraceSupportPredicateNormalNonFiniteOrZero;
-        public int MechanicalReactionTraceSupportPredicateHitCountLt5;
-        public int MechanicalReactionTraceSupportPredicateHitCountLt3;
-        public int MechanicalReactionTraceSupportPredicatePrimarySurfaceNotSame;
-        public int MechanicalReactionTraceSupportPredicateClearanceGateFail;
-        public int MechanicalReactionTraceSupportPredicateSpreadGateFail;
-        public int MechanicalReactionTraceSupportPredicateNormalDotGateFail;
-        public int MechanicalReactionTraceSupportInvalidEnter;
-        public int MechanicalReactionTraceSupportInvalidStay;
-        public int MechanicalReactionTraceSupportInvalidOtherPhase;
-        public int MechanicalReactionTraceSupportInvalidEpisodes;
         public int MechanicalReactionTraceSupportInvalidMaxStreak;
-        public int MechanicalReactionTraceSupportInvalidFirstCallbackIndex;
-        public int MechanicalReactionTraceSupportInvalidLastCallbackIndex;
-        public int MechanicalReactionTraceSupportInvalidFirstPreFixedSequence;
-        public int MechanicalReactionTraceSupportInvalidLastPreFixedSequence;
 
         // v0.4.3.2 observer-only lateral-probe alternate-collider attribution.
         // These counters/summaries explain WHICH already-executed sole probe diverged from the
         // authorized center surface during an invalid episode. They do not alter any readiness gate.
-        public int MechanicalReactionTraceInvalidLateralLeftOnlySamples;
-        public int MechanicalReactionTraceInvalidLateralRightOnlySamples;
-        public int MechanicalReactionTraceInvalidLateralBothSamples;
-        public int MechanicalReactionTraceInvalidNoLateralDivergenceSamples;
-        public int MechanicalReactionTraceInvalidPrimaryProbeDivergenceSamples;
-        public int MechanicalReactionTraceAlternateColliderUniqueCount;
-        public int MechanicalReactionTraceAlternateColliderOverflowCount;
-        public string MechanicalReactionTraceAlternateColliderCatalog;
-        public string MechanicalReactionTraceInvalidEpisodeAttribution;
 
         public int MechanicalReactionTraceProjectionSamples;
         public int MechanicalReactionTraceReadFailures;
-        public int MechanicalReactionTracePrePhysicsSamples;
         public int MechanicalReactionTraceResponseSamples;
         public int MechanicalReactionTraceImpulseReadSamples;
         public int MechanicalReactionTraceImpulseReadFailures;
-        public int MechanicalReactionTraceRelativeVelocityReadSamples;
         public int MechanicalReactionTraceRelativeVelocityReadFailures;
-        public int MechanicalReactionTracePostBodyReadSamples;
         public int MechanicalReactionTracePostBodyReadFailures;
         public int MechanicalReactionTraceNonZeroImpulseSamples;
-        public int MechanicalReactionTraceAlignedImpulseSamples;
-        public int MechanicalReactionTraceOpposedImpulseSamples;
-        public int MechanicalReactionTraceNearZeroImpulseSamples;
         public float MechanicalReactionTraceImpulseMagnitudeMean;
         public float MechanicalReactionTraceImpulseMagnitudeMax;
         public float MechanicalReactionTraceSignedNormalImpulseMean;
@@ -478,17 +414,10 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public string MechanicalReactionCurrentSummary;
         public string MechanicalReactionTraceSummary;
 
-        // v0.4.23 read-only Fixed N -> PhysX callback -> Fixed N+1 solve-continuity attribution.
-        // Diagnostic-only: never participates in Foot fail-close or controller inputs.
-
         // V04280 diagnostic-only fields. Never part of production finite/safety checks.
-        public string StancePlanarDampingMode;
         public string StancePlanarDampingArm;
         public bool StancePlanarDampingEnabled;
-        public bool StancePlanarDampingQuiesced;
         public bool StancePlanarDampingFinite = true;
-        public string StancePlanarDampingInvalidReason;
-        public bool StancePlanarDampingCurrentActive;
         public int StancePlanarDampingLoadedSolves;
         public int StancePlanarDampingNonzeroWrites;
         public string StancePlanarDampingSummary;
@@ -497,7 +426,6 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public bool SupportEntityBoundaryFinite = true;
         public string SupportEntityBoundaryInvalidReason;
         public bool SupportEntityBoundaryEvidenceReady;
-        public int SupportEntityBoundaryResolvedLoadedSolves;
         public string SupportEntityBoundaryTraceSummary;
         public string SupportEntityBoundaryRecentFrames;
         // V04350 retains raw ledgers and compares damping/actual release steps in the same bounded windows.
@@ -508,7 +436,6 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public string SupportNormalWindowMode;
         public bool SupportNormalWindowFinite = true;
         public string SupportNormalWindowInvalidReason;
-        public int SupportNormalWindowJoinedSolves;
         public bool SupportNormalWindowEvidenceReady;
         public string SupportNormalWindowTraceSummary;
         // V04360 reuses the same callback snapshots and cached angular/linear ledgers.
@@ -522,7 +449,6 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public string DynamicNormalLoadMode;
         public bool DynamicNormalLoadFinite = true;
         public string DynamicNormalLoadInvalidReason;
-        public int DynamicNormalLoadResolvedSolves;
         public bool DynamicNormalLoadEvidenceReady;
         public string DynamicNormalLoadTraceSummary;
         public string DynamicNormalLoadPeakFrames;
@@ -531,12 +457,10 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public bool RockingTetherCouplingFinite = true;
         public string RockingTetherCouplingInvalidReason;
         public bool RockingTetherCouplingEvidenceReady;
-        public int RockingTetherCouplingResolvedSolves;
         public string RockingTetherCouplingTraceSummary;
         public string RockingTetherCouplingRecentFrames;
 
         // V04270 selector readbacks and run provenance; current values may be restored before audit.
-        public string FootVelocitySolverMode;
         public string FootVelocitySolverArm;
         public bool FootVelocitySolverInitialized;
         public bool FootVelocitySolverFinite;
@@ -554,7 +478,6 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public string FootVelocitySolverSummary;
 
         // V04310 position-only experiment; captured velocity and stop originals share one owner.
-        public string FootPositionSolverMode;
         public string FootPositionSolverArm;
         public int FootPositionSolverSelectedPosition;
         public bool FootPositionSolverEnabled;
@@ -575,8 +498,6 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public string StanceSupportAngularInvalidReason;
         public int StanceSupportAngularEligibleSamples;
         public int StanceSupportAngularAppliedSamples;
-        public int StanceSupportAngularClampedSamples;
-        public Vector3 StanceSupportAngularCurrentTorqueWorld;
         public float StanceSupportAngularMaxNormalTorqueNm;
         public float StanceSupportAngularMaxPowerWatts;
         public string StanceSupportAngularSummary;
@@ -589,50 +510,21 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public string FootAngularImpulseAttributionCurrentSummary;
         public string FootAngularImpulseAttributionTraceSummary;
 
-        // Historical cleanup (v0.4.15): v0.4.4 mild-motion recovery and v0.4.4.1 axial-debt observers
-        // were removed; v0.4.7 lifecycle + v0.4.8 zero-friction supersede their online diagnostic role.
-        // v0.4.5 read-only game-native locomotion stance/swing phase qualification. This observer is
-        // intentionally contact-free (formal test uses arm A / Foot Collider OFF) and reuses the existing
-        // five-point sole probe plus render-sampled source Foot velocity. It does not control contact.
+        // Gait state feeds stance lifecycle; legacy qualification counts only contact-free samples.
+        // Reuses the existing five-point probe and held source velocity, with no additional physics query.
         public string GameNativeGaitPhaseMode;
         public bool GameNativeGaitPhaseFinite = true;
         public string GameNativeGaitPhaseInvalidReason;
         public string GameNativeGaitPhaseState;
-        public int GameNativeGaitTraceSamples;
-        public int GameNativeGaitEligibleSamples;
-        public int GameNativeGaitStanceSamples;
-        public int GameNativeGaitSwingSamples;
-        public int GameNativeGaitTransitionSamples;
-        public int GameNativeGaitUnknownSamples;
-        public int GameNativeGaitStanceEntries;
-        public int GameNativeGaitSwingEntries;
-        public int GameNativeGaitStanceToSwingTransitions;
-        public int GameNativeGaitSwingToStanceTransitions;
-        public int GameNativeGaitAmbiguousSamples;
-        public int GameNativeGaitNoHitSamples;
-        public int GameNativeGaitFullFootprintSamples;
-        public int GameNativeGaitSameSurfaceSamples;
-        public int GameNativeGaitFirstStanceFixed;
-        public int GameNativeGaitFirstSwingFixed;
-        public int GameNativeGaitLastTransitionFixed;
         public float GameNativeGaitStanceTangentialSpeedMean;
-        public float GameNativeGaitStanceTangentialSpeedMax;
         public float GameNativeGaitSwingTangentialSpeedMean;
-        public float GameNativeGaitSwingTangentialSpeedMax;
         public float GameNativeGaitStanceNormalSpeedAbsMean;
-        public float GameNativeGaitStanceNormalSpeedAbsMax;
         public float GameNativeGaitSwingNormalSpeedAbsMean;
-        public float GameNativeGaitSwingNormalSpeedAbsMax;
         public float GameNativeGaitStanceClearanceAbsMeanMeters;
-        public float GameNativeGaitStanceClearanceAbsMaxMeters;
         public float GameNativeGaitSwingClearanceAbsMeanMeters;
-        public float GameNativeGaitSwingClearanceAbsMaxMeters;
-        public int GameNativeGaitStanceSurfaceSwitches;
-        public bool GameNativeGaitTraceQualified;
-        public string GameNativeGaitLastReason;
         public string GameNativeGaitTraceSummary;
 
-        // v0.3.58 Dynamic Foot + data-bounded CharacterJoint + source-bone relative Ankle PD causal A/B.
+        // Frozen source-relative Ankle PD; historical labels remain report-compatible.
         public string AnkleDriveMode;
         public string AnkleDriveArm;
         public bool AnkleDriveFinite = true;
@@ -640,20 +532,15 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public string AnkleDriveCurrentSummary;
         public string AnkleDriveTraceSummary;
 
-        // v0.3.63 Dynamic-Foot positional-backend causal A/B: native CharacterJoint versus ARL-owned COM-only tether.
+        // Frozen no-Joint Foot COM tether; unexpected native Joints remain a structural rejection.
         public string AnkleConstraintMode;
         public string AnkleConstraintArm;
         public bool AnkleConstraintFinite = true;
         public string AnkleConstraintInvalidReason;
         public string AnkleConstraintCurrentSummary;
-        // v0.4.12 exposes the already-computed v0.3.63 tether command numerically so the stance-only
-        // competition observer can consume it without parsing formatted status strings. These are readback only.
+        // Actual evaluated/applied tether values consumed by load transfer and momentum ledgers.
         public bool AnkleConstraintCurrentDynamic;
-        public Vector3 AnkleConstraintCurrentCorrectionAccelerationWorld;
-        public Vector3 AnkleConstraintCurrentTransportAccelerationWorld;
-        public Vector3 AnkleConstraintCurrentRawAccelerationWorld;
         public Vector3 AnkleConstraintCurrentAppliedAccelerationWorld;
-        public bool AnkleConstraintCurrentClamped;
         public string AnkleConstraintTraceSummary;
 
         // v0.3.64 translation-tether parent-transport causal A/B. The physical topology remains no-Joint in the
@@ -695,19 +582,6 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public string TranslationPredictiveTailCaptureArm;
         public bool TranslationPredictiveTailCaptureFinite = true;
         public string TranslationPredictiveTailCaptureInvalidReason;
-        public bool TranslationPredictiveTailCaptureEnabled;
-        public int TranslationPredictiveTailCaptureTraceSamples;
-        public int TranslationPredictiveTailCaptureDynamicSamples;
-        public int TranslationPredictiveTailCaptureBaseEligibleSamples;
-        public int TranslationPredictiveTailCapturePredictedBreachSamples;
-        public int TranslationPredictiveTailCaptureReserveActiveSamples;
-        public int TranslationPredictiveTailCapturePredictedFinalBreachSamples;
-        public int TranslationPredictiveTailCaptureUnexpectedElevationSamples;
-        public float TranslationPredictiveTailCapturePredictedBaselineAnchorMaxMeters;
-        public float TranslationPredictiveTailCapturePredictedFinalAnchorMaxMeters;
-        public float TranslationPredictiveTailCaptureFinalSelectedMaxAccelerationMax;
-        public int TranslationPredictiveTailCaptureFirstReserveFixed;
-        public int TranslationPredictiveTailCaptureLastReserveFixed;
         public string TranslationPredictiveTailCaptureCurrentSummary;
         public string TranslationPredictiveTailCaptureTraceSummary;
 
@@ -718,14 +592,39 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                    "/traceN=" + TraceSourceRenderStepSamples + "/tracePeakDeg=" + F(TraceSourceRenderStepAngleMaxDegrees);
         }
 
-        private string GetStepEvidenceSummary()
+        private string GetStepEvidenceSummary() => GetStepEvidenceSummary(_controlEvidence);
+
+        private static string GetStepEvidenceSummary(FootControlEvidenceSnapshot evidence)
         {
             return "readback=BEFORE_LIFECYCLE_AND_FOOT_CONTROL" +
-                   "/previous={" + PreviousObservedStep.GetSummary() + "}/current={" + CurrentObservedStep.GetSummary() + "}" +
-                   "/lastEvaluated(tether/drive)=" + AnkleConstraintLastEvaluatedFixedSequence + "/" + AnkleDriveLastEvaluatedFixedSequence +
-                   "/lastCompletedFootControl=" + FootControllerLastCompletedFixedSequence +
-                   "/observedTrace(n/anchorPeakMm/trackingPeakDeg)=" + TraceObservedFixedSamples + "/" + F(TraceObservedAnchorErrorMaxMeters * 1000f) + "/" + F(TraceObservedTrackingErrorMaxDegrees) +
-                   "/completedTrace(n/anchorPeakMm)=" + TraceSamples + "/" + F(TraceAnkleAnchorErrorMaxMeters * 1000f);
+                   "/previous={" + evidence.PreviousObservedStep.GetSummary() + "}/current={" + evidence.CurrentObservedStep.GetSummary() + "}" +
+                   "/lastEvaluated(tether/drive)=" + evidence.AnkleConstraintLastEvaluatedFixedSequence + "/" + evidence.AnkleDriveLastEvaluatedFixedSequence +
+                   "/lastCompletedFootControl=" + evidence.FootControllerLastCompletedFixedSequence +
+                   "/observedTrace(n/anchorPeakMm/trackingPeakDeg)=" + evidence.TraceObservedFixedSamples + "/" + F(evidence.TraceObservedAnchorErrorMaxMeters * 1000f) + "/" + F(evidence.TraceObservedTrackingErrorMaxDegrees) +
+                   "/completedTrace(n/anchorPeakMm)=" + evidence.TraceSamples + "/" + F(evidence.TraceAnkleAnchorErrorMaxMeters * 1000f);
+        }
+
+        private string GetEvidenceTimeDomainsSummary()
+        {
+            FootTraceEndCapture capture = TraceEndCapture;
+            string captured = !capture.Available ? "NOT_CAPTURED" :
+                "runtime=" + capture.RuntimeContext.Epoch + ":" + capture.RuntimeContext.Sequence +
+                "/source=" + capture.SourceContext.Epoch + ":" + capture.SourceContext.Sequence +
+                "/observed-completed=" + capture.Evidence.CurrentObservedStep.FixedSequence + "/" +
+                    capture.Evidence.FootControllerLastCompletedFixedSequence +
+                "/drive=" + capture.DriveActive + "/kinematic=" + capture.Kinematic +
+                "/gravity=" + capture.GravityEnabled + "/collider=" + capture.ColliderEnabled;
+            return "live=LATEST_OWNER_PROJECTION/trace=" + TraceEvidencePhase +
+                "/observed=PRE_CONTROL_READBACK/completed=POST_FOOT_GRAVITY_SCHEDULE" +
+                "/traceSamples=FINITE_OBSERVEFIXED_TAIL/traceEnd={" + captured + "}";
+        }
+
+        private static string GetTurnResponseSummary(FootTurnResponseReceipt receipt)
+        {
+            return "scope=DYNAMIC_PARENT_COMMAND_NEXT_SETTLED_READBACK/sealed=" + receipt.Sealed +
+                "/captured-resolved-censored-pending=" + receipt.Captured + "/" + receipt.Resolved + "/" +
+                    receipt.Censored + "/" + receipt.Pending +
+                "/postForUnresolved=NA/censored=NO_ATTRIBUTABLE_READBACK/zero=MEASURED_VALUE_ONLY";
         }
 
         // Only explicit free-space callers opt out. Any exposure/failure restores the full legacy evidence.
@@ -824,7 +723,9 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                 " | v04171PredictiveCapture=" + (TranslationPredictiveTailCaptureMode ?? "<none>") + "/arm=" + (TranslationPredictiveTailCaptureArm ?? "<none>") + "/finite=" + TranslationPredictiveTailCaptureFinite +
                 " | v04171PredictiveCaptureNow=" + (TranslationPredictiveTailCaptureCurrentSummary ?? "<none>") +
                 " | v04171PredictiveCaptureTrace=" + (TranslationPredictiveTailCaptureTraceSummary ?? "<none>") +
-                " | trace(n/errMeanMax/anchorMeanMax/wMeanMax)=" + TraceSamples + "/" + F(TraceAnkleRelativeErrorMeanDegrees) + "/" + F(TraceAnkleRelativeErrorMaxDegrees) + "/" + F(TraceAnkleAnchorErrorMeanMeters) + "/" + F(TraceAnkleAnchorErrorMaxMeters) + "/" + F(TraceSourceAngularSpeedMean) + "/" + F(TraceSourceAngularSpeedMax);
+                " | trace(n/errMeanMax/anchorMeanMax/wMeanMax)=" + TraceSamples + "/" + F(TraceAnkleRelativeErrorMeanDegrees) + "/" + F(TraceAnkleRelativeErrorMaxDegrees) + "/" + F(TraceAnkleAnchorErrorMeanMeters) + "/" + F(TraceAnkleAnchorErrorMaxMeters) + "/" + F(TraceSourceAngularSpeedMean) + "/" + F(TraceSourceAngularSpeedMax) +
+                " | evidenceTimeDomains=" + GetEvidenceTimeDomainsSummary() +
+                " | turnResponse=" + GetTurnResponseSummary(TurnResponseReceipt);
         }
 
         public string GetFullText(bool includeSupport = true)
@@ -861,6 +762,11 @@ namespace MakemitAGA.ActiveRagdollLab.Model
             sb.AppendLine("bindAnkleRelative=" + Q(BindAnkleRelativeRotation));
             sb.AppendLine("sourceAnkleRelative=" + Q(SourceAnkleRelativeRotation));
             sb.AppendLine("stepEvidence=" + GetStepEvidenceSummary());
+            sb.AppendLine("evidenceTimeDomains=" + GetEvidenceTimeDomainsSummary());
+            sb.AppendLine("turnResponse=" + GetTurnResponseSummary(TurnResponseReceipt));
+            sb.AppendLine("traceEndStepEvidence=" + (TraceEndCapture.Available ? GetStepEvidenceSummary(TraceEndCapture.Evidence) : "NOT_CAPTURED"));
+            sb.AppendLine("traceEndAnkleDriveCurrent=" + (TraceEndCapture.Available ? (TraceEndCapture.AnkleDriveCurrentSummary ?? "<none>") : "NOT_CAPTURED"));
+            sb.AppendLine("traceEndTurnResponse=" + (TraceEndCapture.Available ? GetTurnResponseSummary(TraceEndCapture.TurnResponse) : "NOT_CAPTURED"));
             sb.AppendLine("sourceRenderStep=" + GetSourceRenderStepSummary());
             sb.AppendLine("sourceFromBindDeg=" + V(SourceAnkleFromBindRotationVectorDegrees) + "/angle=" + F(SourceAnkleFromBindAngleDegrees));
             sb.AppendLine("sourceW=" + V(SourceAnkleRelativeAngularVelocityLocal) + "/speed=" + F(SourceAnkleRelativeAngularSpeed));
@@ -893,6 +799,8 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                 sb.AppendLine("stanceContactLifecycleMode=" + (StanceContactLifecycleMode ?? "<none>"));
                 sb.AppendLine("stanceContactLifecycleFinite=" + StanceContactLifecycleFinite + "/reason=" + (StanceContactLifecycleInvalidReason ?? "<none>"));
                 sb.AppendLine("stanceContactLifecycleCurrent=" + (StanceContactLifecycleCurrentSummary ?? "<none>"));
+                sb.AppendLine("contactEntryV041180=" + (ContactEntrySummary ?? "<none>"));
+                sb.AppendLine(StanceLoadAdmissionSummary ?? "STANCE_LOAD_ADMISSION_V041190/PENDING_TRACE_FINALIZE");
                 sb.AppendLine("stanceContactLifecycleTrace=" + (StanceContactLifecycleTraceSummary ?? "<none>"));
                 sb.AppendLine("stanceContactFrictionIsolation=" + (StanceContactFrictionIsolationSummary ?? "<none>"));
                 sb.AppendLine("stanceLowerGroundAnchorAuthority=" + (StanceLowerGroundAuthoritySummary ?? "<none>"));

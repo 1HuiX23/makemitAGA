@@ -69,7 +69,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     report.StanceContactFrictionIsolationGroundFrictionCombine = "<not-checked>";
                     report.StanceContactFrictionIsolationEffectiveZeroGuaranteed = !string.Equals(arm, ArmB, StringComparison.Ordinal);
                 }
-                _finite = ValidateReadback(collider, arm, out error);
+                _finite = ValidateReadback(collider.sharedMaterial, arm, out error);
                 _invalidReason = _finite ? null : error;
                 CopyToReport(collider, report);
                 return _finite;
@@ -99,36 +99,49 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             }
 
             PhysicMaterial ground = groundCollider.sharedMaterial;
-            bool guaranteed = ground == null || ground.frictionCombine != PhysicMaterialCombine.Maximum ||
-                              (Mathf.Abs(ground.staticFriction) <= 0.0001f && Mathf.Abs(ground.dynamicFriction) <= 0.0001f);
+            bool finite = ground == null || (IsFinite(ground.staticFriction) && IsFinite(ground.dynamicFriction));
+            bool guaranteed = finite && (ground == null || ground.frictionCombine != PhysicMaterialCombine.Maximum ||
+                              (Mathf.Abs(ground.staticFriction) <= 0.0001f && Mathf.Abs(ground.dynamicFriction) <= 0.0001f));
             CopyGroundToReport(groundCollider, guaranteed, report);
             if (!guaranteed)
             {
-                error = "GROUND_MAXIMUM_FRICTION_COMBINE_PREVENTS_ZERO_EFFECTIVE_FRICTION";
+                error = finite ? "GROUND_MAXIMUM_FRICTION_COMBINE_PREVENTS_ZERO_EFFECTIVE_FRICTION" : "GROUND_FRICTION_READBACK_NONFINITE";
                 Invalidate(error, report);
                 return false;
             }
             return true;
         }
 
-        internal void RestoreAndDispose(BoxCollider collider, FootAnkleFoundationReport report)
+        internal int RestoreAndDispose(BoxCollider collider, FootAnkleFoundationReport report)
         {
+            int failures = 0;
             try
             {
                 if (collider != null && _baselineCaptured)
+                {
                     collider.sharedMaterial = _baselineMaterial;
+                    if (collider.sharedMaterial != _baselineMaterial)
+                        throw new InvalidOperationException("DEFAULT_MATERIAL_RESTORE_READBACK_MISMATCH");
+                }
+                _arm = ArmA;
             }
-            catch { }
+            catch { failures++; }
 
             try
             {
                 if (_zeroFrictionMaterial != null)
                     Object.Destroy(_zeroFrictionMaterial);
+                _zeroFrictionMaterial = null;
             }
-            catch { }
-            _zeroFrictionMaterial = null;
-            _arm = ArmA;
-            CopyToReport(collider, report);
+            catch { failures++; } // Preserve the owned handle for a later rollback attempt.
+            if (failures > 0)
+            {
+                _finite = false;
+                if (string.IsNullOrEmpty(_invalidReason)) _invalidReason = "FRICTION_RESTORE_OR_DISPOSE_FAILED";
+            }
+            try { CopyToReport(collider, report); }
+            catch { failures++; }
+            return failures;
         }
 
         private void CaptureBaseline(BoxCollider collider)
@@ -158,10 +171,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _zeroFrictionMaterial.bounceCombine = PhysicMaterialCombine.Minimum;
         }
 
-        private bool ValidateReadback(BoxCollider collider, string arm, out string error)
+        private bool ValidateReadback(PhysicMaterial current, string arm, out string error)
         {
             error = null;
-            PhysicMaterial current = collider.sharedMaterial;
             if (string.Equals(arm, ArmA, StringComparison.Ordinal))
             {
                 if (current != _baselineMaterial)
@@ -175,6 +187,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (current == null)
             {
                 error = "ZERO_FRICTION_MATERIAL_READBACK_NULL";
+                return false;
+            }
+            if (!IsFinite(current.staticFriction) || !IsFinite(current.dynamicFriction))
+            {
+                error = "ZERO_FRICTION_READBACK_NONFINITE";
                 return false;
             }
             if (Mathf.Abs(current.staticFriction) > 0.0001f || Mathf.Abs(current.dynamicFriction) > 0.0001f)
@@ -212,6 +229,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             if (report == null) return;
             PhysicMaterial current = collider != null ? collider.sharedMaterial : null;
+            // Arm selection is only the request. Keep validating the native material that
+            // contact will actually use, just like the collision-mode/offset owners do.
+            if (collider != null && _baselineCaptured && !ValidateReadback(current, _arm, out string readbackError))
+            {
+                _finite = false;
+                if (string.IsNullOrEmpty(_invalidReason)) _invalidReason = readbackError;
+            }
             report.StanceContactFrictionIsolationMode = Mode;
             report.StanceContactFrictionIsolationArm = _arm;
             report.StanceContactFrictionIsolationFinite = _finite;
@@ -221,20 +245,14 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             report.StanceContactFrictionIsolationStaticFriction = current != null ? current.staticFriction : 0f;
             report.StanceContactFrictionIsolationDynamicFriction = current != null ? current.dynamicFriction : 0f;
             report.StanceContactFrictionIsolationFrictionCombine = current != null ? current.frictionCombine.ToString() : "DEFAULT_NULL";
-            report.StanceContactFrictionIsolationSummary =
-                "mode=" + Mode + "/arm=" + _arm + "/finite=" + _finite +
-                "/zero=" + ZeroFriction + "/assigned=" + (current != null) +
-                "/static=" + F(report.StanceContactFrictionIsolationStaticFriction) +
-                "/dynamic=" + F(report.StanceContactFrictionIsolationDynamicFriction) +
-                "/combine=" + report.StanceContactFrictionIsolationFrictionCombine +
-                "/groundAssigned=" + report.StanceContactFrictionIsolationGroundMaterialAssigned +
-                "/groundStatic=" + F(report.StanceContactFrictionIsolationGroundStaticFriction) +
-                "/groundDynamic=" + F(report.StanceContactFrictionIsolationGroundDynamicFriction) +
-                "/groundCombine=" + (report.StanceContactFrictionIsolationGroundFrictionCombine ?? "<none>") +
-                "/effectiveZeroGuaranteed=" + report.StanceContactFrictionIsolationEffectiveZeroGuaranteed +
-                "/reason=" + (string.IsNullOrEmpty(_invalidReason) ? "<none>" : _invalidReason);
+            report.FrictionSummaryGroundAssigned = report.StanceContactFrictionIsolationGroundMaterialAssigned;
+            report.FrictionSummaryGroundStatic = report.StanceContactFrictionIsolationGroundStaticFriction;
+            report.FrictionSummaryGroundDynamic = report.StanceContactFrictionIsolationGroundDynamicFriction;
+            report.FrictionSummaryGroundCombine = report.StanceContactFrictionIsolationGroundFrictionCombine;
+            report.FrictionSummaryEffectiveZero = report.StanceContactFrictionIsolationEffectiveZeroGuaranteed;
         }
 
         private static string F(float value) => value.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture);
+        private static bool IsFinite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);
     }
 }

@@ -69,7 +69,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (!_traceEnabled || report == null || primary == null || secondary == null) return;
             SingleLegBilateralReadOnlySnapshot p = primary.GetBilateralReadOnlySnapshot();
             SingleLegBilateralReadOnlySnapshot s = secondary.GetBilateralReadOnlySnapshot();
-            if (!p.DriveEnabled && !s.DriveEnabled && !_abortLatched) return;
+            bool pAbort = primary.Report != null && primary.Report.DriveAborted;
+            bool sAbort = secondary.Report != null && secondary.Report.DriveAborted;
+            // Both children can fail closed in this same Fixed step before the coordinator
+            // observes them. Their stopped drive state must not hide the first abort receipt.
+            if (!p.DriveEnabled && !s.DriveEnabled && !pAbort && !sAbort && !_abortLatched) return;
 
             float pa = p.KneePositionErrorWorld.magnitude;
             float sa = s.KneePositionErrorWorld.magnitude;
@@ -97,8 +101,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
             if (!_abortLatched)
             {
-                bool pAbort = primary.Report != null && primary.Report.DriveAborted;
-                bool sAbort = secondary.Report != null && secondary.Report.DriveAborted;
                 if (pAbort || sAbort)
                 {
                     _abortLatched = true;

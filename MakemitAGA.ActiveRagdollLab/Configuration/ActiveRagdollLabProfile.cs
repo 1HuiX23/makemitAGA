@@ -38,7 +38,7 @@ namespace MakemitAGA.ActiveRagdollLab.Configuration
         public bool TraceVerboseSnapshots = false;
         public bool SourceTurnVerboseContextLogging = false;
 
-        // Motion-phase classifier thresholds: diagnostics/freeze validation only.
+        // Shared source-motion phase thresholds; these are not controller gains.
         public float MotionIdleSpeedThreshold = 0.15f;
         public float MotionSteadyMinSpeed = 0.50f;
         public float MotionLinearAccelerationThreshold = 3.00f;
@@ -46,7 +46,7 @@ namespace MakemitAGA.ActiveRagdollLab.Configuration
         public float MotionTurnAngularAccelerationThreshold = 12.0f;
         public float MotionTransitionHoldSeconds = 0.30f;
 
-        // Source-turn attribution thresholds: diagnostics only.
+        // Source-turn thresholds are also consumed by leg source-turn detection/recovery.
         public float SourceTurnEventRotationDeltaDegrees = 20.0f;
         public float SourceTurnEventAngularSpeedThreshold = 4.0f;
         public float SourceTurnEventAngularAccelerationThreshold = 30.0f;
@@ -90,9 +90,9 @@ namespace MakemitAGA.ActiveRagdollLab.Configuration
         public string SingleLegFootBonePath = string.Empty;
         public float UpperLegMass = 7.0f;
         public float LowerLegMass = 4.0f;
-        // v0.4.3: no profile value changes. v0.3.78 Foot/Ankle physics and v0.4.1.x contact boundary stay frozen; only read-only support-normal reaction attribution is added.
-        // B adds one source-bone-driven relative Ankle PD realized as an equal/opposite Lower<->Foot torque pair; constants remain code-frozen, not Profile sweep knobs.
-        // The calibrated vertical offset is frozen for the run; Gravity/Collider/contact/GSP remain OFF. Footwear state remains intentionally unresolved.
+        // Foot geometry/mass baseline. Current reference, contact and load policies are
+        // selected by the typed run scope; controller constants are not Profile sweep knobs.
+        // The calibrated sole offset stays fixed within a run; footwear state remains unresolved.
         public bool FootAnkleFoundationEnabled = true;
         public float FootMass = 1.0f;
         public float LegSegmentThickness = 0.10f;
@@ -287,11 +287,11 @@ namespace MakemitAGA.ActiveRagdollLab.Configuration
                 "/sourceMaxA=" + F(LegKneeSoftOffAxisSourceTurnMaxAngularAcceleration) + "/recoveryMaxA=" + F(LegKneeSoftOffAxisRecoveryMaxAngularAcceleration) +
                 "/recoveryExit=" + F(LegKneeSoftOffAxisRecoveryExitErrorDegrees) + "deg/hold=" + F(LegKneeSoftOffAxisRecoveryStableHoldSeconds) + "s/max=" + F(LegKneeSoftOffAxisRecoveryMaxSeconds) + "s" +
                 "/healthReentry=" + F(LegKneeSoftOffAxisTrackingHealthEnterErrorDegrees) + "deg/" + F(LegKneeSoftOffAxisTrackingHealthEnterHoldSeconds) + "s/immediate=" + F(LegKneeSoftOffAxisTrackingHealthImmediateErrorDegrees) + "deg" +
-                " | legKneeBackend=WIDE_CHARACTER_JOINT_PLUS_SOFTWARE_OFFAXIS_PD" +
+                " | legKneeBackend=PREVIEW_CHARACTER_JOINT_THEN_POST_PCA_TETHER_PLUS_SOFTWARE_PD" +
                 " | legAngularAccelerationFF=" + LegAngularAccelerationFeedforward + "/" + F(LegAngularAccelerationFeedforwardGain) + "/" + F(LegAngularAccelerationFeedforwardMaxAcceleration) + "/maxAge=" + F(LegAngularAccelerationFeedforwardMaxSourceSampleAgeSeconds) + "/normal=PRODUCTION_ON" +
                 " | kneeAxisCalibration=DATA_DRIVEN_PCA_EXPLICIT_APPLY" +
                 " | legStage=BILATERAL_FOUNDATION_FROM_FROZEN_SINGLE_LEG_V0300" +
-                " | kneeTorqueTopology=CHILD_ONLY_PRODUCTION | kneeConstraintBackend=WIDE_CHARACTER_JOINT_PLUS_SOFTWARE_OFFAXIS_PD | legMassProperties=EXPLICIT_UNIFORM_BOX_VALIDATED | legDiagnostics=SINGLE_LEG_TRANSPORT_AND_FLEXION_AXIS_ATTRIBUTION+DATA_DRIVEN_KNEE_AXIS_CALIBRATION+ANGULAR_PHASE_TIMING_ATTRIBUTION_0_TO_10+ANGULAR_ACCELERATION_ACTUATION_FF_VALIDATED_BOUND20" +
+                " | kneeTorqueTopology=CHILD_ONLY_PRODUCTION | kneeConstraintBackend=PREVIEW_CHARACTER_JOINT_THEN_POST_PCA_TETHER_PLUS_SOFTWARE_PD | legMassProperties=EXPLICIT_UNIFORM_BOX_VALIDATED | legDiagnostics=SINGLE_LEG_TRANSPORT_AND_FLEXION_AXIS_ATTRIBUTION+DATA_DRIVEN_KNEE_AXIS_CALIBRATION+ANGULAR_PHASE_TIMING_ATTRIBUTION_0_TO_10+ANGULAR_ACCELERATION_ACTUATION_FF_VALIDATED_BOUND20" +
                 " | detail=" + LoadMessage;
         }
 
@@ -573,130 +573,14 @@ namespace MakemitAGA.ActiveRagdollLab.Configuration
 
         private static string GetTemplateText()
         {
-            return
-                "# MakemitAGA Active Ragdoll Lab 0.4.100 - Hip Motion Feasibility Allocation\r\n" +
-                "# 保存后执行：arl_profile_reload\r\n" +
-                "# 当前主线：v0.4.100在arl_pelvis_hip_test(b)验证纠偏优先的共同运动预算；先暂存双侧Hip角请求，联合削减骨盆共同COM与Upper净角请求，再继续Knee/Foot；完整纠偏不可行时显式标记fallback；保留Upper同拍-r×F和平移质量求力，遵守力诱导相对点加速度60m/s²、Upper补偿8Nm、实际执行器max(8Nm,原基线幅值)、骨盆总矩8Nm预算；原骨盆基础请求仍限2Nm；物理arm=B_V041000_HIP_MOTION_FEASIBILITY_ALLOCATION；双端点力对拓扑/目标链/安全门及95射线范围修复保持；纯Hip角控制器反力、Torso重力及Foot-tether reciprocal关闭。\r\n" +
-                "# 本文件只保留仍由活动运行时消费的配置；历史实验参数与 A/B 细节请查长期版本记录或旧版本 ZIP。\r\n" +
-                "\r\n" +
-                "# --- 目标与 Two-Body 几何 ---\r\n" +
-                "targetName=MitaPerson Mita\r\n" +
-                "pelvisBonePath=Armature/Hips\r\n" +
-                "spineBonePath=Armature/Hips/Spine\r\n" +
-                "chestBonePath=Armature/Hips/Spine/Chest\r\n" +
-                "pelvisMass=8\r\n" +
-                "chestMass=12\r\n" +
-                "pelvisSizeScale=0.70,0.34,0.52\r\n" +
-                "chestSizeScale=0.86,0.68,0.56\r\n" +
-                "minBoxDimension=0.10\r\n" +
-                "maxBoxDimension=0.55\r\n" +
-                "\r\n" +
-                "# --- Two-Body 冻结控制与诊断 ---\r\n" +
-                "# 运动阶段与 source-turn 阈值只用于 trace/冻结验收，不进入控制。\r\n" +
-                "maxLinearVelocity=6\r\n" +
-                "angularSpring=55\r\n" +
-                "angularDamper=12\r\n" +
-                "maxAngularAcceleration=40\r\n" +
-                "angularDrag=3\r\n" +
-                "maxAngularVelocity=18\r\n" +
-                "driveDisableDistance=0.80\r\n" +
-                "targetVelocityBlend=0.50\r\n" +
-                "traceIntervalSeconds=0.50\r\n" +
-                "traceVerboseSnapshots=false\r\n" +
-                "sourceTurnVerboseContextLogging=false\r\n" +
-                "motionIdleSpeedThreshold=0.15\r\n" +
-                "motionSteadyMinSpeed=0.50\r\n" +
-                "motionLinearAccelerationThreshold=3.00\r\n" +
-                "motionTurnAngularVelocityThreshold=1.20\r\n" +
-                "motionTurnAngularAccelerationThreshold=12.0\r\n" +
-                "motionTransitionHoldSeconds=0.30\r\n" +
-                "sourceTurnEventRotationDeltaDegrees=20\r\n" +
-                "sourceTurnEventAngularSpeedThreshold=4\r\n" +
-                "sourceTurnEventAngularAccelerationThreshold=30\r\n" +
-                "sourceTurnContextPreSeconds=0.50\r\n" +
-                "sourceTurnContextPostSeconds=0.75\r\n" +
-                "\r\n" +
-                "# --- Torso pose bridge / parent feedforward / joint safety ---\r\n" +
-                "# WIDE_ISOLATION=true 时人体窄限位字段仅作为未来恢复 ANATOMICAL 模式的保留配置。\r\n" +
-                "parentMotionFeedforward=true\r\n" +
-                "parentMotionFeedforwardGain=12\r\n" +
-                "maxParentMotionFeedforwardAcceleration=20\r\n" +
-                "poseBridgeMaxExtrapolationSeconds=0.10\r\n" +
-                "poseBridgePositionCorrectionGain=6.0\r\n" +
-                "poseBridgeMaxPositionCorrectionSpeed=0.75\r\n" +
-                "poseBridgeRotationCorrectionGain=6.0\r\n" +
-                "poseBridgeMaxRotationCorrectionAngularSpeed=3.0\r\n" +
-                "wideJointLimitIsolation=true\r\n" +
-                "wideJointLimitDegrees=170\r\n" +
-                "chestLowTwistLimitDegrees=-35\r\n" +
-                "chestHighTwistLimitDegrees=35\r\n" +
-                "chestSwing1LimitDegrees=45\r\n" +
-                "chestSwing2LimitDegrees=35\r\n" +
-                "jointAnchorSafetyDistance=0.15\r\n" +
-                "\r\n" +
-                "# --- Bilateral frozen leg foundation ---\r\n" +
-                "# 当前生产链要求 Knee PCA 显式 apply 后再 arl_hip_stack(on)；Hip/Knee hard tether safety 仍为 30 mm fail-close。显式骨骼路径默认留空，AUTO 失败时再填写。\r\n" +
-                "singleLegEnabled=true\r\n" +
-                "bilateralLegEnabled=true\r\n" +
-                "singleLegSide=Left\r\n" +
-                "singleLegUpperBonePath=\r\n" +
-                "singleLegLowerBonePath=\r\n" +
-                "singleLegFootBonePath=\r\n" +
-                "upperLegMass=7.0\r\n" +
-                "lowerLegMass=4.0\r\n" +
-                "# v0.4.7：Profile键值继续不变；stance-only contact复用冻结的v0.4.5 gait阈值与v0.4.0 exact-support identity阈值，不新增参数。v0.4.6 discontinuity reconciliation不推广，正式A/B均恢复raw native-gait reference；Gravity/GSP/增益/MaxA/MaxTau/hard gate不变。\r\n" +
-                "footAnkleFoundationEnabled=true\r\n" +
-                "footMass=1.0\r\n" +
-                "legSegmentThickness=0.10\r\n" +
-                "legHipAngularSpring=55\r\n" +
-                "legHipAngularDamper=12\r\n" +
-                "legHipMaxAngularAcceleration=40\r\n" +
-                "legHipSourceTurnMaxAngularAcceleration=80\r\n" +
-                "legHipRecoveryMaxAngularAcceleration=80\r\n" +
-                "legHipRecoveryExitErrorDegrees=10\r\n" +
-                "legHipRecoveryStableHoldSeconds=0.15\r\n" +
-                "legHipRecoveryMaxSeconds=2.0\r\n" +
-                "legHipTrackingHealthEnterErrorDegrees=15\r\n" +
-                "legHipTrackingHealthEnterHoldSeconds=0.10\r\n" +
-                "legHipTrackingHealthImmediateErrorDegrees=30\r\n" +
-                "legHipControlFrameInertialization=true\r\n" +
-                "legHipControlFrameSourceMaxAngularSpeed=6\r\n" +
-                "legHipControlFrameSourceMaxAngularAcceleration=60\r\n" +
-                "legHipControlFrameRecoveryMaxAngularSpeed=8\r\n" +
-                "legHipControlFrameRecoveryMaxAngularAcceleration=80\r\n" +
-                "legHipControlFrameMaxLagDegrees=25\r\n" +
-                "legHipControlFrameRecoveryExitAngleDegrees=1.5\r\n" +
-                "legHipControlFrameRecoveryExitAngularSpeed=0.5\r\n" +
-                "legHipControlFrameRecoveryStableHoldSeconds=0.10\r\n" +
-                "legHipControlFrameRecoveryMaxSeconds=1.5\r\n" +
-                "legKneeAngularSpring=45\r\n" +
-                "legKneeAngularDamper=9\r\n" +
-                "legKneeMaxAngularAcceleration=40\r\n" +
-                "legKneeSoftOffAxisAngularSpring=30\r\n" +
-                "legKneeSoftOffAxisAngularDamper=8\r\n" +
-                "legKneeSoftOffAxisMaxAngularAcceleration=20\r\n" +
-                "legKneeSoftOffAxisSourceTurnMaxAngularAcceleration=40\r\n" +
-                "legKneeSoftOffAxisRecoveryMaxAngularAcceleration=40\r\n" +
-                "legKneeSoftOffAxisRecoveryExitErrorDegrees=5\r\n" +
-                "legKneeSoftOffAxisRecoveryStableHoldSeconds=0.15\r\n" +
-                "legKneeSoftOffAxisRecoveryMaxSeconds=2.0\r\n" +
-                "legKneeSoftOffAxisTrackingHealthEnterErrorDegrees=10\r\n" +
-                "legKneeSoftOffAxisTrackingHealthEnterHoldSeconds=0.10\r\n" +
-                "legKneeSoftOffAxisTrackingHealthImmediateErrorDegrees=25\r\n" +
-                "legDriveDisableDistance=0.65\r\n" +
-                "\r\n" +
-                "# --- Validated angular-acceleration feedforward ---\r\n" +
-                "# 已验证 production baseline：ON / gain=1 / bound=20；Source/Recovery/陈旧样本等抑制逻辑由运行时负责。\r\n" +
-                "legAngularAccelerationFeedforward=true\r\n" +
-                "legAngularAccelerationFeedforwardGain=1.0\r\n" +
-                "legAngularAccelerationFeedforwardMaxAcceleration=20.0\r\n" +
-                "legAngularAccelerationFeedforwardMaxSourceSampleAgeSeconds=0.10\r\n" +
-                "\r\n" +
-                "# --- 默认安全状态与预览 ---\r\n" +
-                "# 默认不启用物理 Collider/Gravity；后续 feet/GSP 接触阶段再由专门测试流程显式开启。\r\n" +
-                "defaultColliders=false\r\n" +
-                "defaultGravity=false\r\n" +
-                "previewAlpha=0.28\r\n";
+            // The shipped example is embedded at build time; do not depend on the game's cwd.
+            const string resourceName = "MakemitAGA.ActiveRagdollLab.ProfileTemplate";
+            using Stream stream = typeof(ActiveRagdollLabProfile).Assembly.GetManifestResourceStream(resourceName);
+            if (stream == null)
+                throw new InvalidOperationException("PROFILE_TEMPLATE_RESOURCE_MISSING:" + resourceName);
+            using var reader = new StreamReader(stream);
+            // Preserve the generated Windows template's line endings independently of checkout settings.
+            return reader.ReadToEnd().Replace("\r\n", "\n").Replace("\n", "\r\n");
         }
     }
 }

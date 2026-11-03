@@ -64,36 +64,42 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal bool Enabled => _enabled;
         internal string Arm => _enabled ? ArmB : ArmA;
         internal bool CurrentValid { get; private set; } = true;
-        internal Vector3 CurrentFeedforwardWorld => _currentFeedforwardWorld;
 
         internal void SetEnabled(bool enabled, SingleLegChainReport report)
         {
             _enabled = enabled;
-            ResetDiagnostics(report);
+            ResetForDrive(report);
         }
 
-        internal void ResetDiagnostics(SingleLegChainReport report)
+        // Drive/mode changes reset control state; a trace boundary only resets diagnostics.
+        internal void ResetForDrive(SingleLegChainReport report)
         {
             _hasPreviousParentAnchorPosition = false;
             _previousParentAnchorPosition = Vector3.zero;
-            _steps = 0;
-            _warmupSteps = 0;
-            _activeSteps = 0;
-            _strictLinearTransportSuppressedSteps = 0;
-            _invalidSteps = 0;
             _currentFeedforwardWorld = Vector3.zero;
             _currentSettledParentSpeed = 0f;
             _currentCommandedParentSpeed = 0f;
             _currentCandidateAcceleration = 0f;
             _currentAppliedAcceleration = 0f;
-            _peakSettledParentSpeed = 0f;
-            _peakCommandedParentSpeed = 0f;
-            _peakCandidateAcceleration = 0f;
-            _peakAppliedAcceleration = 0f;
             _currentSourceToChildLocal = Vector3.zero;
             _currentSourceToParentLocal = Vector3.zero;
             _currentParentToChildLocal = Vector3.zero;
             _currentForwardVelocityError = 0f;
+            CurrentValid = true;
+            ResetDiagnostics(report);
+        }
+
+        internal void ResetDiagnostics(SingleLegChainReport report)
+        {
+            _steps = 0;
+            _warmupSteps = 0;
+            _activeSteps = 0;
+            _strictLinearTransportSuppressedSteps = 0;
+            _invalidSteps = 0;
+            _peakSettledParentSpeed = 0f;
+            _peakCommandedParentSpeed = 0f;
+            _peakCandidateAcceleration = 0f;
+            _peakAppliedAcceleration = 0f;
             _peakAbsSourceToChildForward = 0f;
             _peakAbsSourceToChildLateral = 0f;
             _peakAbsSourceToChildVertical = 0f;
@@ -102,7 +108,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _peakAbsForwardVelocityError = 0f;
             _lastEvidence = "<none>";
             _abortEvidence = "<none>";
-            CurrentValid = true;
             CopyToReport(report);
         }
 

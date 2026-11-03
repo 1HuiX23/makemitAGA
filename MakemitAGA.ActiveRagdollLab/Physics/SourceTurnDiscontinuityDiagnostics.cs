@@ -120,9 +120,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         public void EndTraceSession()
         {
-            if (_eventActive)
-                FinalizeEvent("TRACE_STOP", Time.unscaledTime);
-            _sessionActive = false;
+            try
+            {
+                if (_eventActive)
+                    FinalizeEvent("TRACE_STOP", Time.unscaledTime);
+            }
+            finally { _sessionActive = false; }
         }
 
         public void ObserveRenderSample(
@@ -360,27 +363,33 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             MaxPoseBridgeCommandAngularSpeed = Mathf.Max(MaxPoseBridgeCommandAngularSpeed, _eventMaxPoseBridgeCommandAngularSpeed);
             MaxAnchorErrorMeters = Mathf.Max(MaxAnchorErrorMeters, _eventMaxAnchorErrorMeters);
 
-            Plugin.Logger?.LogWarning(
-                "[ARL][SOURCE_TURN_SUMMARY] event=" + _eventId +
-                " | classification=" + classification +
-                " | trigger=" + _eventTriggerReason +
-                " | close=" + closeReason +
-                " | durationFromTrigger=" + F(Mathf.Max(0f, closeTime - _eventTriggerTime)) +
-                " | contextSignedYawDeltaDeg=" + F(_eventSignedYawDeltaDegrees) +
-                " | contextAbsYawDeltaDeg=" + F(_eventAbsoluteYawDeltaDegrees) +
-                " | maxSampleRotationDeltaDeg=" + F(_eventMaxRotationDeltaDegrees) +
-                " | maxSampleAbsYawDeltaDeg=" + F(_eventMaxAbsYawDeltaDegrees) +
-                " | maxRawAngularSpeed=" + F(_eventMaxRawAngularSpeed) +
-                " | maxRawAngularAcceleration=" + F(_eventMaxRawAngularAcceleration) +
-                " | maxChestRelativeRotationDeltaDeg=" + F(_eventMaxChestRelativeRotationDeltaDegrees) +
-                " | responseMaxRotationErrorDeg=" + F(_eventMaxResponseRotationErrorDegrees) +
-                " | responseMaxPoseBridgeRotationErrorDeg=" + F(_eventMaxPoseBridgeRotationErrorDegrees) +
-                " | responseMaxPoseBridgeCmdAngularSpeed=" + F(_eventMaxPoseBridgeCommandAngularSpeed) +
-                " | responseMaxAnchorError=" + F(_eventMaxAnchorErrorMeters) +
-                " | responseAngularClampFixedSteps=" + _eventAngularClampFixedStepCount);
-
-            _eventActive = false;
-            _eventTriggerReason = "<none>";
+            try
+            {
+                Plugin.Logger?.LogWarning(
+                    "[ARL][SOURCE_TURN_SUMMARY] event=" + _eventId +
+                    " | classification=" + classification +
+                    " | trigger=" + _eventTriggerReason +
+                    " | close=" + closeReason +
+                    " | durationFromTrigger=" + F(Mathf.Max(0f, closeTime - _eventTriggerTime)) +
+                    " | contextSignedYawDeltaDeg=" + F(_eventSignedYawDeltaDegrees) +
+                    " | contextAbsYawDeltaDeg=" + F(_eventAbsoluteYawDeltaDegrees) +
+                    " | maxSampleRotationDeltaDeg=" + F(_eventMaxRotationDeltaDegrees) +
+                    " | maxSampleAbsYawDeltaDeg=" + F(_eventMaxAbsYawDeltaDegrees) +
+                    " | maxRawAngularSpeed=" + F(_eventMaxRawAngularSpeed) +
+                    " | maxRawAngularAcceleration=" + F(_eventMaxRawAngularAcceleration) +
+                    " | maxChestRelativeRotationDeltaDeg=" + F(_eventMaxChestRelativeRotationDeltaDegrees) +
+                    " | responseMaxRotationErrorDeg=" + F(_eventMaxResponseRotationErrorDegrees) +
+                    " | responseMaxPoseBridgeRotationErrorDeg=" + F(_eventMaxPoseBridgeRotationErrorDegrees) +
+                    " | responseMaxPoseBridgeCmdAngularSpeed=" + F(_eventMaxPoseBridgeCommandAngularSpeed) +
+                    " | responseMaxAnchorError=" + F(_eventMaxAnchorErrorMeters) +
+                    " | responseAngularClampFixedSteps=" + _eventAngularClampFixedStepCount);
+            }
+            finally
+            {
+                // Statistics were committed above; failed output must not count this event again.
+                _eventActive = false;
+                _eventTriggerReason = "<none>";
+            }
         }
 
         private void ResetSessionStatistics()

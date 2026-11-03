@@ -72,7 +72,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal string Arm => _enabled ? ExperimentalArm : ProductionArm;
         internal bool CurrentAnchorValid => !_enabled || _currentAnchorError <= TetherAnchorValidityMeters;
         internal Vector3 CurrentPositionErrorWorld => _currentPositionErrorWorld;
-        internal Vector3 CurrentVelocityErrorWorld => _currentVelocityErrorWorld;
         internal Vector3 CurrentParentAnchorFeedforwardWorld => _currentParentAnchorFeedforwardWorld;
         internal Vector3 CurrentRawAccelerationWorld => _currentRawAccelerationWorld;
         internal Vector3 CurrentAppliedAccelerationWorld => _currentAppliedAccelerationWorld;
@@ -137,6 +136,14 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 return Vector3.zero;
             }
 
+            if (!Finite(fixedDeltaTime) || !Finite(parentAnchorUpperLocal) || !Finite(childAnchorLowerLocal) ||
+                !Finite(parentAnchorAccelerationFeedforwardWorld))
+            {
+                _currentAppliedAccelerationWorld = Vector3.zero;
+                _currentAppliedAcceleration = 0f;
+                throw new System.InvalidOperationException("KNEE_TETHER_INPUT_NONFINITE");
+            }
+
             Vector3 parentAnchorWorld = upper.transform.TransformPoint(parentAnchorUpperLocal);
             Vector3 childAnchorWorld = lower.transform.TransformPoint(childAnchorLowerLocal);
             Vector3 parentLever = parentAnchorWorld - upper.worldCenterOfMass;
@@ -158,6 +165,14 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             {
                 applied = raw * (TetherMaxAcceleration / rawMag);
                 clamped = true;
+            }
+
+            if (!Finite(positionError) || !Finite(velocityError) || !Finite(raw) ||
+                !Finite(rawMag) || !Finite(applied))
+            {
+                _currentAppliedAccelerationWorld = Vector3.zero;
+                _currentAppliedAcceleration = 0f;
+                throw new System.InvalidOperationException("KNEE_TETHER_COMMAND_NONFINITE");
             }
 
             // Causal invariant: COM force only. No AddTorque, AddForceAtPosition, MovePosition/MoveRotation,

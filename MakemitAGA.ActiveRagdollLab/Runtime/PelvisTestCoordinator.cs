@@ -37,7 +37,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
     internal sealed class PelvisTestCoordinator
     {
         internal const string Plan = "TORSO_SAMPLE> TORSO_CONTROL_AND_PARENT_PUBLISH> CLOCKED_LEGS_IF_PRESENT> SESSION_READINESS";
-        internal const string TestInstructions = "ARL pelvis v0.4.100：骨盆独立基线使用arl_pelvis_test_setup → arl_pelvis_test(b)。自动[STARTED]后才计时；结束arl_pelvis_test(stop)、arl_test_cleanup、arl_test_status各一次。动态腿足无接触用arl_pelvis_leg_test，无载荷接触用arl_pelvis_contact_test，足部自重接触用arl_pelvis_foot_load_test，小腿自重用arl_pelvis_lower_load_test，膝部耦合回归用arl_pelvis_knee_test，大腿自重回归用arl_pelvis_upper_load_test，当前髋部连接力与大腿净角输出协调用arl_pelvis_hip_test。";
+        internal const string TestInstructions = "ARL pelvis v0.4.119：骨盆独立基线使用arl_pelvis_test_setup → arl_pelvis_test(b)。自动[STARTED]后才计时；结束arl_pelvis_test(stop)、arl_test_cleanup、arl_test_status各一次。动态腿足无接触用arl_pelvis_leg_test，无载荷接触用arl_pelvis_contact_test，足部自重接触用arl_pelvis_foot_load_test，小腿自重用arl_pelvis_lower_load_test，膝部耦合回归用arl_pelvis_knee_test，大腿自重回归用arl_pelvis_upper_load_test，当前完整承重准入对照使用arl_pelvis_hip_test(a|b)，两轮各自重启，共用118 B背景；A直接接入载荷，B近地连续两拍后同步完整承重。原入口、安全线和控制上限保持；等待/承重曝光单独记录。";
         private readonly IPelvisRunPort _port;
         internal readonly RunSession Session = new RunSession();
         private PhysicsStepContext _lastStep;
@@ -47,7 +47,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
         {
             if (string.Equals(requestedArm, "stop", StringComparison.OrdinalIgnoreCase)) return Stop("USER_STOP");
             string arm = _port.ResolveArm(requestedArm);
-            if (arm == null) return Reject("RETIRED_OR_INVALID_ARM | 当前大腿自重用arl_pelvis_upper_load_test(b)，膝部法向耦合用arl_pelvis_knee_test(b)，小腿自重用arl_pelvis_lower_load_test(b)，足部自重用arl_pelvis_foot_load_test(b)，无载荷接触用arl_pelvis_contact_test(b)，无接触用arl_pelvis_leg_test(a|b)，独立骨盆用arl_pelvis_test(b)。");
+            if (arm == null) return Reject("RETIRED_OR_INVALID_ARM | 当前Hip用arl_pelvis_hip_test(a|b)，A=直接完整承重，B=近地连续两拍后整链承重；两臂共同采用118 B膝部与相同足部背景，保留原保护、接触入口与安全门，旧完整arm标识已退休。大腿自重用arl_pelvis_upper_load_test(b)，膝部法向耦合用arl_pelvis_knee_test(b)，小腿自重用arl_pelvis_lower_load_test(b)，足部自重用arl_pelvis_foot_load_test(b)，无载荷接触用arl_pelvis_contact_test(b)，无接触用arl_pelvis_leg_test(a|b)，独立骨盆用arl_pelvis_test(b)。");
             string failure = _port.Preflight();
             if (failure != null) return Reject(failure);
             if (Session.Active)
@@ -64,7 +64,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
                 _port.Prepare(arm);
                 Session.AwaitReadiness();
                 if (_port.Ready) BeginTrace();
-                string result = "ARL pelvis v0.4.100 | started=" + Session.Started + " | pending=" + Session.Pending +
+                string result = "ARL pelvis v0.4.119 | started=" + Session.Started + " | pending=" + Session.Pending +
                     " | scope=" + _port.Scope + " | runId=" + Session.RunId + " | testArm=" + Session.Arm + " | " + _port.ReadinessSummary() + " | " + Session.Status();
                 _port.Emit("[ARL][PELVIS_TEST_BUNDLE][" + (Session.Started ? "START_ACK" : "PENDING_NATIVE_SOLVES") + "] " + result, false, false);
                 return result;
@@ -140,11 +140,11 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             _port.Emit("[ARL][PELVIS_TEST_BUNDLE][STOP] " + complete + "\n[SESSION_AFTER_STOP]\n" + Session.Status(), false, automatic);
             try { _port.WriteReports(); }
             catch (Exception e) { _port.Emit("[ARL][REPORT_WRITE_FAILED] " + e.GetType().Name, true, false); }
-            return "ARL pelvis v0.4.100 | stopped=True | " + summary;
+            return "ARL pelvis v0.4.119 | stopped=True | " + summary;
         }
         internal string Status(bool detailed = true)
         {
-            string live = "ARL pelvis v0.4.100 | stateScope=LIVE_STATE | scope=" + _port.Scope + " | pelvisTestActive=" + Session.Active +
+            string live = "ARL pelvis v0.4.119 | stateScope=LIVE_STATE | scope=" + _port.Scope + " | pelvisTestActive=" + Session.Active +
                 " | started=" + Session.Started + " | pending=" + Session.Pending + " | testArm=" + Session.Arm + " | " + Session.Status() +
                 " | plan=" + Plan + " | " + _lastStep.Status();
             if (!detailed) return live + Session.EvidenceSummary();

@@ -55,18 +55,29 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private string _abortEvidence = "<none>";
 
         internal bool Enabled => _enabled;
-        internal bool Active => _active;
         internal string Arm => _enabled ? ExperimentalArm : ProductionArm;
 
         internal void SetEnabled(bool enabled, SingleLegChainReport report)
         {
             _enabled = enabled;
+            ResetForDrive(report);
+        }
+
+        // Drive/mode changes reset control state; a trace boundary only resets diagnostics.
+        internal void ResetForDrive(SingleLegChainReport report)
+        {
+            _active = false;
+            _currentHipDegrees = 0f;
+            _currentAwaySpeedDegPerSec = 0f;
+            _currentSupplementalA = 0f;
+            _currentProductionMaxA = 0f;
+            _currentEffectiveMaxA = 0f;
+            _currentOrigin = "NONE";
             ResetDiagnostics(report);
         }
 
         internal void ResetDiagnostics(SingleLegChainReport report)
         {
-            _active = false;
             _steps = 0;
             _recoveryEligibleSteps = 0;
             _activeSteps = 0;
@@ -79,12 +90,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _peakSupplementalA = 0f;
             _peakAwaySpeedDegPerSec = 0f;
             _peakEffectiveMaxA = 0f;
-            _currentHipDegrees = 0f;
-            _currentAwaySpeedDegPerSec = 0f;
-            _currentSupplementalA = 0f;
-            _currentProductionMaxA = 0f;
-            _currentEffectiveMaxA = 0f;
-            _currentOrigin = "NONE";
             _lastExit = "<none>";
             _abortEvidence = "<none>";
             CopyToReport(report);

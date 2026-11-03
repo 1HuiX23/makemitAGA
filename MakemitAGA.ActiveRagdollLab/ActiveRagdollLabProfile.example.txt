@@ -1,6 +1,6 @@
-# MakemitAGA Active Ragdoll Lab 0.4.100 - Hip Motion Feasibility Allocation
+# MakemitAGA Active Ragdoll Lab 0.4.119 - Full Stance Load Admission A/B
 # 保存后执行：arl_profile_reload
-# 当前主线：v0.4.100在arl_pelvis_hip_test(b)验证纠偏优先的共同运动预算；先暂存双侧Hip角请求，联合削减骨盆共同COM与Upper净角请求，再继续Knee/Foot；完整纠偏不可行时显式标记fallback；保留Upper同拍-r×F和平移质量求力，遵守力诱导相对点加速度60m/s²、Upper补偿8Nm、实际执行器max(8Nm,原基线幅值)、骨盆总矩8Nm预算；原骨盆基础请求仍限2Nm；物理arm=B_V041000_HIP_MOTION_FEASIBILITY_ALLOCATION；双端点力对拓扑/目标链/安全门及95射线范围修复保持；纯Hip角控制器反力、Torso重力及Foot-tether reciprocal关闭。
+# 当前主线：v0.4.119 arl_pelvis_hip_test(a|b)，各自重启。共同背景为118 B连续Knee相对R/W/A、受限规划A及相同Foot完整/合法部分减穿透参考。A_V041190_DIRECT_STANCE_LOAD直接接入整链载荷；B_V041190_NEAR_SURFACE_LOAD_ADMISSION在原授权接触成立后，以实际Box及当前点速度预测一拍最低点均[-3,+2]mm、完整足印、踝间隙<=5mm、源龄<=100ms连续2个共享Fixed准入。无超时放行；接触资格中断或支持物改变后重置。Foot/Lower/Upper重力、自重传递、Knee法向耦合同用一个资格，不做Foot单独承重或力坡道。双侧kneeReference及kneePlannedFF均True，loadAdmission为A=False/False、B=True/True。原2mm入口、3mm/150ms恢复、30mm安全线和原控制上限不变。日志记录等待/准入及原有实际承重曝光；不能以卸载换取通过。Torso重量、Foot-tether reciprocal与GSP仍OFF。
 # 本文件只保留仍由活动运行时消费的配置；历史实验参数与 A/B 细节请查长期版本记录或旧版本 ZIP。
 
 # --- 目标与 Two-Body 几何 ---
@@ -16,7 +16,7 @@ minBoxDimension=0.10
 maxBoxDimension=0.55
 
 # --- Two-Body 冻结控制与诊断 ---
-# 运动阶段与 source-turn 阈值只用于 trace/冻结验收，不进入控制。
+# 运动阶段与 source-turn 阈值用于共享源状态及诊断；source-turn 同时参与腿部转身识别/恢复，不是独立只读参数。
 maxLinearVelocity=6
 angularSpring=55
 angularDamper=12
@@ -68,7 +68,7 @@ singleLegLowerBonePath=
 singleLegFootBonePath=
 upperLegMass=7.0
 lowerLegMass=4.0
-# v0.4.7：Profile键值继续不变；stance-only contact复用冻结的v0.4.5 gait阈值与v0.4.0 exact-support identity阈值，不新增参数。v0.4.6 discontinuity reconciliation不推广，正式A/B均恢复raw native-gait reference；Gravity/GSP/增益/MaxA/MaxTau/hard gate不变。
+# Foot几何与质量沿用冻结值；接触、完整载荷准入和参考策略由当前typed测试范围选择，不由这些配置键切换。
 footAnkleFoundationEnabled=true
 footMass=1.0
 legSegmentThickness=0.10
@@ -117,7 +117,7 @@ legAngularAccelerationFeedforwardMaxAcceleration=20.0
 legAngularAccelerationFeedforwardMaxSourceSampleAgeSeconds=0.10
 
 # --- 默认安全状态与预览 ---
-# 默认不启用物理 Collider/Gravity；后续 feet/GSP 接触阶段再由专门测试流程显式开启。
+# 默认不启用通用 Collider/Gravity；当前接触与分层载荷由 typed 测试范围授权，GSP仍后置。
 defaultColliders=false
 defaultGravity=false
 previewAlpha=0.28

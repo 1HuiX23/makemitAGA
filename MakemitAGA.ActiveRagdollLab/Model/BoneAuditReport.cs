@@ -61,7 +61,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public string GetFullText()
         {
             StringBuilder sb = new StringBuilder(4096);
-            sb.AppendLine("MakemitAGA Active Ragdoll Lab 0.4.2.1 - Bone Audit");
+            sb.AppendLine("MakemitAGA Active Ragdoll Lab " + Plugin.PluginVersion + " - Bone Audit");
             sb.AppendLine("completed=" + Completed);
             sb.AppendLine("success=" + Success);
             sb.AppendLine("error=" + (Error ?? "<none>"));

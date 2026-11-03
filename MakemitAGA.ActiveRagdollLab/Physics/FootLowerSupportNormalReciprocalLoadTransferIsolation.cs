@@ -26,7 +26,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal const string Mode = "STANCE_FOOT_LOWER_SUPPORT_NORMAL_RECIPROCAL_LOAD_TRANSFER_CAUSAL_AB_V04200";
         internal const string ArmA = "A_V04200_V04190_B_LOWER_GRAVITY_CHILD_ONLY_FOOT_TETHER";
         internal const string ArmB = "B_V04200_SUPPORT_NORMAL_EQUAL_OPPOSITE_RECIPROCAL";
-        internal const int MinEligibleSamples = 30;
         internal const int MinAppliedSamples = 30;
 
         private const float Epsilon = 0.0000001f;
@@ -69,8 +68,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal string Arm => _arm;
         internal bool Enabled => string.Equals(_arm, ArmB, StringComparison.Ordinal);
         internal bool Finite => _finite;
-        internal string InvalidReason => _invalidReason;
-        internal bool CurrentApplied => _currentApplied;
 
         internal bool SetArm(string arm, SingleLegChainReport report, out string error)
         {
@@ -146,7 +143,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
             if (!exactAuthorizedStance || !zeroFriction)
             {
-                if (_currentApplied) _nonStanceAppliedSamples++;
                 CopyToReport(report);
                 return true;
             }
@@ -170,46 +166,49 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (reactionForceAbs > sourceForceBound + BoundToleranceNewtons)
                 return Invalidate("RECIPROCAL_LOAD_TRANSFER_FORCE_BOUND_VIOLATION", report);
 
-            _eligibleSamples++;
             _currentFootTetherSupportNormalAcceleration = footSupportA;
             _currentFootTetherSupportNormalForce = footSupportForceSigned;
             _currentLowerReactionSupportNormalAcceleration = lowerReactionSupportA;
             _currentReactionForceWorld = reactionForce;
 
-            _footTetherSupportNormalAccelerationSum += footSupportA;
-            if (!_footTetherSupportNormalAccelerationHasSample)
+            if (traceEnabled)
             {
-                _footTetherSupportNormalAccelerationMin = footSupportA;
-                _footTetherSupportNormalAccelerationMax = footSupportA;
-                _footTetherSupportNormalAccelerationHasSample = true;
-            }
-            else
-            {
-                _footTetherSupportNormalAccelerationMin = Mathf.Min(_footTetherSupportNormalAccelerationMin, footSupportA);
-                _footTetherSupportNormalAccelerationMax = Mathf.Max(_footTetherSupportNormalAccelerationMax, footSupportA);
-            }
+                _eligibleSamples++;
+                _footTetherSupportNormalAccelerationSum += footSupportA;
+                if (!_footTetherSupportNormalAccelerationHasSample)
+                {
+                    _footTetherSupportNormalAccelerationMin = footSupportA;
+                    _footTetherSupportNormalAccelerationMax = footSupportA;
+                    _footTetherSupportNormalAccelerationHasSample = true;
+                }
+                else
+                {
+                    _footTetherSupportNormalAccelerationMin = Mathf.Min(_footTetherSupportNormalAccelerationMin, footSupportA);
+                    _footTetherSupportNormalAccelerationMax = Mathf.Max(_footTetherSupportNormalAccelerationMax, footSupportA);
+                }
 
-            _reciprocalForceAbsSum += reactionForceAbs;
-            _reciprocalForceAbsMax = Mathf.Max(_reciprocalForceAbsMax, reactionForceAbs);
-            _lowerReactionSupportNormalAccelerationSum += lowerReactionSupportA;
-            if (!_lowerReactionSupportNormalAccelerationHasSample)
-            {
-                _lowerReactionSupportNormalAccelerationMin = lowerReactionSupportA;
-                _lowerReactionSupportNormalAccelerationMax = lowerReactionSupportA;
-                _lowerReactionSupportNormalAccelerationHasSample = true;
-            }
-            else
-            {
-                _lowerReactionSupportNormalAccelerationMin = Mathf.Min(_lowerReactionSupportNormalAccelerationMin, lowerReactionSupportA);
-                _lowerReactionSupportNormalAccelerationMax = Mathf.Max(_lowerReactionSupportNormalAccelerationMax, lowerReactionSupportA);
-            }
+                _reciprocalForceAbsSum += reactionForceAbs;
+                _reciprocalForceAbsMax = Mathf.Max(_reciprocalForceAbsMax, reactionForceAbs);
+                _lowerReactionSupportNormalAccelerationSum += lowerReactionSupportA;
+                if (!_lowerReactionSupportNormalAccelerationHasSample)
+                {
+                    _lowerReactionSupportNormalAccelerationMin = lowerReactionSupportA;
+                    _lowerReactionSupportNormalAccelerationMax = lowerReactionSupportA;
+                    _lowerReactionSupportNormalAccelerationHasSample = true;
+                }
+                else
+                {
+                    _lowerReactionSupportNormalAccelerationMin = Mathf.Min(_lowerReactionSupportNormalAccelerationMin, lowerReactionSupportA);
+                    _lowerReactionSupportNormalAccelerationMax = Mathf.Max(_lowerReactionSupportNormalAccelerationMax, lowerReactionSupportA);
+                }
 
-            if (reactionForceAbs <= Epsilon)
-                _zeroReactionSamples++;
-            else if (lowerReactionSupportA > 0f)
-                _upwardLowerReactionSamples++;
-            else if (lowerReactionSupportA < 0f)
-                _downwardLowerReactionSamples++;
+                if (reactionForceAbs <= Epsilon)
+                    _zeroReactionSamples++;
+                else if (lowerReactionSupportA > 0f)
+                    _upwardLowerReactionSamples++;
+                else if (lowerReactionSupportA < 0f)
+                    _downwardLowerReactionSamples++;
+            }
 
             if (Enabled)
             {
@@ -225,9 +224,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
                 _currentApplied = true;
                 _currentFixed = fixedSequence;
-                _appliedSamples++;
-                if (_firstAppliedFixed == 0) _firstAppliedFixed = fixedSequence;
-                _lastAppliedFixed = fixedSequence;
+                if (traceEnabled)
+                {
+                    _appliedSamples++;
+                    if (_firstAppliedFixed == 0) _firstAppliedFixed = fixedSequence;
+                    _lastAppliedFixed = fixedSequence;
+                }
             }
 
             CopyToReport(report);
@@ -238,18 +240,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             if (report == null) return;
             float eligibleDenom = Mathf.Max(1, _eligibleSamples);
-            report.StanceFootLowerReciprocalMode = Mode;
             report.StanceFootLowerReciprocalArm = _arm;
             report.StanceFootLowerReciprocalFinite = _finite;
             report.StanceFootLowerReciprocalInvalidReason = _invalidReason;
             report.StanceFootLowerReciprocalEnabled = Enabled;
-            report.StanceFootLowerReciprocalTraceSamples = _traceSamples;
-            report.StanceFootLowerReciprocalEligibleSamples = _eligibleSamples;
             report.StanceFootLowerReciprocalAppliedSamples = _appliedSamples;
             report.StanceFootLowerReciprocalNonStanceAppliedSamples = _nonStanceAppliedSamples;
-            report.StanceFootLowerReciprocalZeroReactionSamples = _zeroReactionSamples;
-            report.StanceFootLowerReciprocalUpwardLowerReactionSamples = _upwardLowerReactionSamples;
-            report.StanceFootLowerReciprocalDownwardLowerReactionSamples = _downwardLowerReactionSamples;
             report.StanceFootLowerReciprocalFootTetherSupportNormalAccelerationMean = _eligibleSamples > 0 ? _footTetherSupportNormalAccelerationSum / eligibleDenom : 0f;
             report.StanceFootLowerReciprocalFootTetherSupportNormalAccelerationMin = _footTetherSupportNormalAccelerationHasSample ? _footTetherSupportNormalAccelerationMin : 0f;
             report.StanceFootLowerReciprocalFootTetherSupportNormalAccelerationMax = _footTetherSupportNormalAccelerationHasSample ? _footTetherSupportNormalAccelerationMax : 0f;
@@ -262,12 +258,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             report.StanceFootLowerReciprocalCurrentFixed = _currentFixed;
             report.StanceFootLowerReciprocalCurrentFootMass = _currentFootMass;
             report.StanceFootLowerReciprocalCurrentLowerMass = _currentLowerMass;
-            report.StanceFootLowerReciprocalCurrentFootTetherSupportNormalAcceleration = _currentFootTetherSupportNormalAcceleration;
-            report.StanceFootLowerReciprocalCurrentFootTetherSupportNormalForce = _currentFootTetherSupportNormalForce;
-            report.StanceFootLowerReciprocalCurrentLowerSupportNormalAcceleration = _currentLowerReactionSupportNormalAcceleration;
             report.StanceFootLowerReciprocalCurrentReactionForceWorld = _currentReactionForceWorld;
-            report.StanceFootLowerReciprocalFirstAppliedFixed = _firstAppliedFixed;
-            report.StanceFootLowerReciprocalLastAppliedFixed = _lastAppliedFixed;
             report.StanceFootLowerReciprocalSummary =
                 "mode=" + Mode +
                 "/arm=" + _arm +

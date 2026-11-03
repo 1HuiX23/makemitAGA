@@ -6,7 +6,9 @@ using UnityEngine;
 
 namespace MakemitAGA.ActiveRagdollLab.Physics
 {
-    // V04800: both dynamic arms keep the V04780 Fixed WORLD trajectory; only A extrapolates sample age.
+    // V04800 reference policies keep the V04780 Fixed WORLD trajectory; policy A
+    // extrapolates sample age. These policy labels differ from current run arms:
+    // both V041080 Hip runs select the no-age-prediction policy.
     // No body/time reads, source differentiation, new force owner, catch-up loop or observer ring.
     internal sealed class HipNormalReference
     {
@@ -19,6 +21,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private PhysicsStepContext _last;
         private SourceStepContext _source;
         private int _steps, _applied, _held, _alphaLimited, _speedLimited;
+        private int _receiverParentSteps;
         private float _peakGap, _peakA, _peakW;
         private string _traceArm = ArmOff;
         internal HipNormalReferenceState Current { get; private set; }
@@ -41,14 +44,20 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             _traceArm = ArmFor(_selected, _sampleAgePrediction);
             _traceSampleAgePrediction = _selected && _sampleAgePrediction;
-            _steps = _applied = _held = _alphaLimited = _speedLimited = 0;
+            _steps = _applied = _held = _alphaLimited = _speedLimited = _receiverParentSteps = 0;
             _peakGap = _peakA = _peakW = 0f;
         }
         internal void DisablePreserveTrace() { _selected = _seeded = _sampleAgePrediction = false; Current = new HipNormalReferenceState(); }
 
+        // One eligibility predicate for the planner and its input adapter. Protected
+        // and stale bypasses must seed from the old stack's actual output, even in B.
+        internal bool CanApply(bool ordinary, float age, float maxAge) => _selected && ordinary && F(age) && F(maxAge) &&
+            age >= -0.0001f && age <= Mathf.Max(0f, maxAge) + 0.0001f;
+        internal bool RejectParentReference() => Invalid("RECEIVER_PARENT_REFERENCE_INVALID");
+
         internal bool Step(bool trace, PhysicsStepContext step, SourceStepContext source, bool ordinary,
             Quaternion inputWorldR, Vector3 inputWorldW, Quaternion parentR, Vector3 relativeW,
-            float age, float maxAge, float maxW, float maxA, float arrivalRate)
+            float age, float maxAge, float maxW, float maxA, float arrivalRate, bool receiverParentReference = false)
         {
             Current = new HipNormalReferenceState { Step = step, Selected = _selected, SampleAgePrediction = _sampleAgePrediction, Reason = "BASELINE" };
             if (!_selected) return true; // Non-dynamic legacy path remains an exact bypass.
@@ -63,15 +72,16 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 return Invalid("SOURCE_IDENTITY_CHANGED");
             try
             {
-                bool freshEnough = age >= -0.0001f && age <= Mathf.Max(0f, maxAge) + 0.0001f;
-                bool apply = ordinary && freshEnough;
+                bool apply = CanApply(ordinary, age, maxAge);
+                if (receiverParentReference && !apply) return RejectParentReference();
                 HipNormalReferenceState frame = new HipNormalReferenceState { Step = step, Valid = true, Selected = true,
                     Applied = apply, SampleAgePrediction = _sampleAgePrediction, Reason = apply ? "COHERENT_NORMAL" : ordinary ? "STALE_BYPASS" : "PROTECTED_BYPASS",
+                    ReceiverParentReference = receiverParentReference,
                     PreviousR = _rotation, PreviousW = _w, InputR = Normalize(inputWorldR), InputW = inputWorldW,
                     MaxW = maxW, MaxA = maxA };
                 if (apply)
                 {
-                    // A retains the previous local-only sample extrapolation. B holds the observed pose goal;
+                    // Reference policy A retains local-only sample extrapolation; policy B holds the pose goal.
                     // input W, stop reserve, Fixed integration, FF and all budgets remain identical.
                     // Never advance the parent twice or replace the actual source-age eligibility check.
                     frame.PredictionSeconds = _sampleAgePrediction ? Mathf.Clamp(age, 0f, Mathf.Max(0f, maxAge)) : 0f;
@@ -106,6 +116,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     if (apply)
                     {
                         _applied++; if (frame.AlphaLimited) _alphaLimited++; if (frame.SpeedLimited) _speedLimited++;
+                        if (frame.ReceiverParentReference) _receiverParentSteps++;
                         _peakGap = Mathf.Max(_peakGap, Log(frame.InputR * Quaternion.Inverse(_rotation)).magnitude);
                         _peakW = Mathf.Max(_peakW, _w.magnitude); _peakA = Mathf.Max(_peakA, frame.A.magnitude);
                     }
@@ -116,8 +127,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         }
         internal string GetSummary() => "HIP_NORMAL_REFERENCE_V04800/selected=" + _selected + "/liveSampleAgePrediction=" + _sampleAgePrediction + "/traceSampleAgePrediction=" + _traceSampleAgePrediction + "/traceArm=" + _traceArm +
             "/steps-applied-held-alphaLimited-speedLimited=" + _steps + "/" + _applied + "/" + _held + "/" + _alphaLimited + "/" + _speedLimited +
-            "/peak(rawGapDeg-W-A)=" + S(_peakGap * Mathf.Rad2Deg) + "/" + S(_peakW) + "/" + S(_peakA) +
-            "/issue=" + (Issue ?? "<none>") + "/domain=ONE_SHARED_FIXED_STEP_WORLD_TRAJECTORY" +
+            "/peak(inputGapDeg-W-A)=" + S(_peakGap * Mathf.Rad2Deg) + "/" + S(_peakW) + "/" + S(_peakA) +
+            "/issue=" + (Issue ?? "<none>") + "/domain=ONE_SHARED_FIXED_STEP_WORLD_TRAJECTORY/receiverParentStepsV041080=" + _receiverParentSteps +
             "/bounds=HIP_NORMAL_MAX_A_OVER_KD_AND_EXISTING_FF_BOUND/notHumanLimits=True" +
             "/FF=PLANNED_WORLD_A_BEFORE_ORIGINAL_GATE_SUM_AND_CAP/traceReset=STATISTICS_ONLY";
 

@@ -32,7 +32,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private int _normalBypassSteps;
         private int _normalScopeBlockedSteps;
         private int _normalScopeBlockedSourceSteps;
-        private int _normalScopeBlockedRecoverySteps;
         private int _normalScopeBlockedUnhealthySteps;
         private int _disabledSteps;
         private int _realParentSteps;
@@ -46,7 +45,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private float _peakCombinedApplied;
         private float _peakTransportToMaxA;
         private float _peakCombinedRawToMaxA;
-        private string _lastEvidence = "<none>";
 
         internal bool Enabled => _enabled;
         internal bool NormalTransportEnabled => false;
@@ -57,6 +55,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal bool RecoveryTransportEnabled => _enabled;
         internal bool ActiveThisStep => _activeThisStep;
         internal Vector3 CombinedRawWorld => _combinedRawWorld;
+        internal Vector3 SelectedTransportWorld => _transportWorld;
 
         internal bool TrySetEnabled(bool enabled)
         {
@@ -81,11 +80,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
             _steps = _activeSteps = _strictActiveSteps = _recoveryActiveSteps = _healthyNormalEligibleSteps = 0;
             _normalBypassSteps = _normalScopeBlockedSteps = 0;
-            _normalScopeBlockedSourceSteps = _normalScopeBlockedRecoverySteps = _normalScopeBlockedUnhealthySteps = 0;
+            _normalScopeBlockedSourceSteps = _normalScopeBlockedUnhealthySteps = 0;
             _disabledSteps = _realParentSteps = _inactiveFrameSteps = _invalidSteps = _clampSteps = 0;
             _peakTransport = _peakRelativeCorrection = _peakCombinedRaw = _peakCombinedApplied = 0f;
             _peakTransportToMaxA = _peakCombinedRawToMaxA = 0f;
-            _lastEvidence = "<none>";
             CopyToReport(report);
         }
 
@@ -197,17 +195,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _peakCombinedRawToMaxA = Mathf.Max(_peakCombinedRawToMaxA, raw / _maxA);
             }
 
-            _lastEvidence =
-                "active=" + _activeThisStep +
-                "/branch=" + _activeBranch +
-                "/reason=" + _suppressionReason +
-                "/transport=" + F(transport) +
-                "/relative=" + F(correction) +
-                "/combinedRaw=" + F(raw) +
-                "/applied=" + F(applied) +
-                "/maxA=" + F(_maxA) +
-                "/clamp=" + _combinedClamped;
-
             return _combinedAppliedWorld;
         }
 
@@ -251,7 +238,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             report.HipMechanicalParentTransportNormalBypassSteps = _normalBypassSteps;
             report.HipMechanicalParentTransportScopeBlockedSteps = _normalScopeBlockedSteps;
             report.HipMechanicalParentTransportScopeBlockedSourceSteps = _normalScopeBlockedSourceSteps;
-            report.HipMechanicalParentTransportScopeBlockedRecoverySteps = _normalScopeBlockedRecoverySteps;
+            report.HipMechanicalParentTransportScopeBlockedRecoverySteps = 0; // Retired Normal scope selector; retained report schema.
             report.HipMechanicalParentTransportScopeBlockedUnhealthySteps = _normalScopeBlockedUnhealthySteps;
             report.HipMechanicalParentTransportDisabledSteps = _disabledSteps;
             report.HipMechanicalParentTransportRealParentSteps = _realParentSteps;
@@ -264,30 +251,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             report.HipMechanicalParentTransportPeakCombinedAppliedMagnitude = _peakCombinedApplied;
             report.HipMechanicalParentTransportPeakToMaxARatio = _peakTransportToMaxA;
             report.HipMechanicalParentTransportPeakCombinedRawToMaxARatio = _peakCombinedRawToMaxA;
-            report.HipMechanicalParentTransportLastEvidence = _lastEvidence;
-            report.HipMechanicalParentTransportKey = GetKey();
-        }
-
-        internal string GetKey()
-        {
-            return
-                "mode=" + ModeName +
-                " | strictEnabled=" + _enabled +
-                " | recoverySupport=DEDICATED_V088_" + (_enabled ? "ON" : "OFF_MASTER") +
-                " | healthyNormalArm=" + NormalTransportArm +
-                " | phaseOwnership=" + NormalTransportScopeArm +
-                " | steps(total/active/strict/recovery/healthyEligible/healthyActive/healthyBypass/nonHealthyBlocked/disabled/real/inactiveFrame/invalid/clamp)=" +
-                _steps + "/" + _activeSteps + "/" + _strictActiveSteps + "/" + _recoveryActiveSteps + "/" + _healthyNormalEligibleSteps + "/" + 0 + "/" + _normalBypassSteps + "/" + _normalScopeBlockedSteps + "/" + _disabledSteps + "/" + _realParentSteps + "/" + _inactiveFrameSteps + "/" + _invalidSteps + "/" + _clampSteps +
-                " | nonHealthyBlocked(source/recovery/unhealthyNoRecovery)=" + _normalScopeBlockedSourceSteps + "/" + _normalScopeBlockedRecoverySteps + "/" + _normalScopeBlockedUnhealthySteps +
-                " | current(active/recovery/healthyNormal/branch/reason/transport/relative/raw/applied/maxA/clamp)=" +
-                _activeThisStep + "/" + _recoveryActiveThisStep + "/" + false + "/" + _activeBranch + "/" + _suppressionReason + "/" + F(_transportWorld.magnitude) + "/" + F(_relativeCorrectionWorld.magnitude) + "/" + F(_combinedRawWorld.magnitude) + "/" + F(_combinedAppliedWorld.magnitude) + "/" + F(_maxA) + "/" + _combinedClamped +
-                " | peak(transport/relative/raw/applied/transportToMaxA/rawToMaxA)=" +
-                F(_peakTransport) + "/" + F(_peakRelativeCorrection) + "/" + F(_peakCombinedRaw) + "/" + F(_peakCombinedApplied) + "/" + F(_peakTransportToMaxA) + "/" + F(_peakCombinedRawToMaxA) +
-                " | totalAuthority=UNCHANGED_HIP_MAXA_40_80_80" +
-                " | recoveryVector=SAME_UPCOMING_PARENT_A_AS_V087_VALIDATED_BASELINE" +
-                " | sourceA=STRICT_CONTROL_FRAME_BRANCH_ONLY" +
-                " | guardPoseRebase=NEVER_USED_BY_TRANSPORT_FF" +
-                " | rawPelvisA=NEVER_USED_BY_TRANSPORT_FF";
         }
 
         private static Vector3 ClampMagnitude(Vector3 value, float maxMagnitude, out bool clamped)
@@ -304,6 +267,5 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         private static bool Finite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);
         private static bool Finite(Vector3 value) => Finite(value.x) && Finite(value.y) && Finite(value.z);
-        private static string F(float value) => value.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture);
     }
 }

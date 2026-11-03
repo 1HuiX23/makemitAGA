@@ -16,7 +16,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     internal sealed class FootAnkleTranslationCaptureAuthorityIsolation
     {
         internal const string Mode = "ANKLE_TRANSLATION_TAIL_CONDITIONAL_CAPTURE_AUTHORITY_PRODUCTION_V0373";
-        internal const string Baseline = "V0370_BASE_MAXA60";
         internal const string Production = "V0373_PRODUCTION_CONDITIONAL_MAXA80_CAPTURE";
 
         internal const float BaselineMaxAcceleration = 60f;
@@ -71,8 +70,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         internal string Arm => Production;
         internal bool IsProductionPolicy => true;
-        internal bool Finite => _finite;
-        internal string InvalidReason => _invalidReason;
         internal float CurrentSelectedMaxAcceleration => _currentSelectedMaxAcceleration;
         internal bool CurrentEligible => _currentEligible;
 

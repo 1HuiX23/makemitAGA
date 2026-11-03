@@ -229,7 +229,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             if (report == null) return;
             // Cached formatting cannot retry a failing native getter on an error-reporting path.
-            report.FootContactOffsetMode = Mode;
             report.FootContactOffsetArm = _arm;
             report.FootContactOffsetInitialized = _initialized;
             report.FootContactOffsetFinite = _finite;

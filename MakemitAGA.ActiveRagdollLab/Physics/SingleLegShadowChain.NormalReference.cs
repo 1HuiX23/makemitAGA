@@ -1,3 +1,4 @@
+using MakemitAGA.ActiveRagdollLab.Runtime;
 using UnityEngine;
 
 namespace MakemitAGA.ActiveRagdollLab.Physics
@@ -18,7 +19,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
             // Do not include the composite absorber's own active flag in this hold:
             // it must be allowed to converge and release after external protection clears.
-            bool protection = _torso.Report.ControlRecoveryActive ||
+            bool protection = _torso.ControlRecoveryActive ||
                 _hipAuthority.PhysicalRecoveryPending || _softKneeAuthority.PhysicalRecoveryPending ||
                 (_hipControlFrame.Active && _profile.LegHipControlFrameInertialization) ||
                 _hipSourceReferenceShockAbsorber.Active || _hipReferenceGovernor.Active;
@@ -34,17 +35,34 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private bool UpdateHipNormalReference(Quaternion parentR, Vector3 parentW)
         {
             bool ordinary = _dynamicParentActive && _torso.Report != null &&
-                !_torso.Report.SourceTurnEventActive && !_torso.Report.ControlRecoveryActive &&
+                !_torso.ControlPhase.SourceTurnEventActive && !_torso.ControlRecoveryActive &&
                 !_hipAuthority.PhysicalRecoveryPending && !_softKneeAuthority.PhysicalRecoveryPending &&
                 !(_hipControlFrame.Active && _profile.LegHipControlFrameInertialization) && !HipFeedforwardGoalBridgeActive;
             Quaternion inputR = parentR * _controlTargetHipRelative;
             Vector3 inputW = parentW + parentR * _controlTargetHipRelativeAngularVelocityLocal;
+            Quaternion predictionParentR = parentR;
+            bool receiverReference = _hipNormalReference.CanApply(ordinary, _targetSampleTiming.AgeSeconds,
+                _profile.LegAngularAccelerationFeedforwardMaxSourceSampleAgeSeconds) &&
+                PelvisRunScopes.HasHipCoupling(_dynamicScope) && _parentCommand.HipCommand.JointTorqueReaction;
+            if (receiverReference)
+            {
+                // Do not recycle the parent's response to Hip reaction
+                // through a newly planned WORLD A-FF on the next step. The receiver
+                // publishes its already-governed target in the same immutable receipt.
+                // Both current Hip arms use this policy; non-normal/bypass paths retain their arithmetic.
+                var command = _parentCommand.HipCommand;
+                if (!_parentCommand.Matches(_runtimeStep) || !command.Matches(_runtimeStep, _physicalParent.BodyId))
+                    return _hipNormalReference.RejectParentReference();
+                predictionParentR = command.ReferenceRotation;
+                inputR = predictionParentR * _controlTargetHipRelative;
+                inputW = command.ReferenceW + predictionParentR * _controlTargetHipRelativeAngularVelocityLocal;
+            }
             if (!_hipNormalReference.Step(_traceEnabled, _runtimeStep, _runtimeSource, ordinary, inputR, inputW,
-                parentR, _controlTargetHipRelativeAngularVelocityLocal, _report.TargetRenderSampleAgeSeconds,
+                predictionParentR, _controlTargetHipRelativeAngularVelocityLocal, _targetSampleTiming.AgeSeconds,
                 _profile.LegAngularAccelerationFeedforwardMaxSourceSampleAgeSeconds,
                 _profile.LegHipMaxAngularAcceleration / _profile.LegHipAngularDamper,
                 Mathf.Min(_profile.LegAngularAccelerationFeedforwardMaxAcceleration, _profile.LegHipMaxAngularAcceleration),
-                _profile.LegHipAngularSpring / _profile.LegHipAngularDamper)) return false;
+                _profile.LegHipAngularSpring / _profile.LegHipAngularDamper, receiverReference)) return false;
             if (!_hipNormalReference.Current.Applied) return true;
             _controlTargetHipRelative = Quaternion.Inverse(parentR) * _hipNormalReference.Rotation;
             _controlTargetHipRelativeAngularVelocityLocal = Quaternion.Inverse(parentR) * (_hipNormalReference.W - parentW);

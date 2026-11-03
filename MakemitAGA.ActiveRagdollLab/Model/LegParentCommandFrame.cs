@@ -14,7 +14,8 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         internal Quaternion Rotation;
         // Dynamic handoff keeps the settled native state separate from the governed target.
         internal PelvisParentFrame PhysicalParent;
-        // Hip-coupled scope only: actual committed receiver input, distinct from pose/reference data.
+        // Hip-coupled scope: committed receiver baseline and its governed R/W target,
+        // distinct from the settled physical parent state above.
         internal PelvisHipCommandFrame HipCommand;
         internal bool Valid => Step.Valid && PelvisParentFrame.V(Position) && PelvisParentFrame.Q(Rotation);
         internal bool Matches(PhysicsStepContext step) => Valid && Step.Matches(step);

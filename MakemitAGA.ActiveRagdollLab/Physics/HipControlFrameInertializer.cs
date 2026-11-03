@@ -126,7 +126,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         public Vector3 StrictMechanicalAngularAccelerationWorld => _currentVirtualAngularAccelerationWorld;
         public float StrictMechanicalCurrentMaxAngularAcceleration => _currentIntegratorMaxAcceleration;
         public bool Active => _phase == "SOURCE_TURN_INERTIALIZED" || _phase == "FRAME_RECOVERY_INERTIALIZED";
-        public string Phase => _phase;
         public bool ReferenceLagGuardRebaseEnabled => _referenceLagGuardRebaseEnabled;
         public string ReferenceLagGuardRebaseArm => _referenceLagGuardRebaseEnabled ? LagGuardRebaseArmA : LagGuardRebaseArmB;
 
@@ -198,7 +197,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         public void Step(
             ActiveRagdollLabProfile profile,
-            TwoBodyProxyReport torso,
+            TorsoControlPhase? torso,
             Quaternion realPelvisRotation,
             Vector3 realPelvisAngularVelocity,
             bool mechanicalActivationSyncEnabled,
@@ -224,7 +223,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _referenceRotation = realPelvisRotation;
                 _angularVelocityWorld = realPelvisAngularVelocity;
                 _currentVirtualAngularAccelerationWorld = Vector3.zero;
-                _previousSourceActive = torso != null && torso.SourceTurnEventActive;
+                _previousSourceActive = torso != null && torso.Value.SourceTurnEventActive;
                 _recoveryActive = false;
                 _stableSeconds = 0f;
                 _phase = "RAW_BASELINE";
@@ -236,7 +235,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 return;
             }
 
-            bool sourceActive = torso != null && torso.SourceTurnEventActive;
+            bool sourceActive = torso != null && torso.Value.SourceTurnEventActive;
             if (sourceActive)
             {
                 // v0.2.51: sync ONLY the fresh RAW_BASELINE -> SOURCE_TURN_INERTIALIZED handoff. If a new Source
@@ -384,33 +383,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 " | arrivalSnap=REMOVED" +
                 " | actualWPostClamp=REMOVED" +
                 " | lagGuard=" + ReferenceLagGuardRebaseArm + "_STRICT_MECHANICAL_BRANCH_DECOUPLED";
-        }
-
-        public string GetKey(ActiveRagdollLabProfile profile, SingleLegChainReport report)
-        {
-            return
-                "mode=" + ModeName +
-                " | enabled=" + (profile != null && profile.LegHipControlFrameInertialization) +
-                " | phase=" + _phase +
-                " | sourceLimit(w/a)=" + F(profile != null ? profile.LegHipControlFrameSourceMaxAngularSpeed : 0f) + "/" + F(profile != null ? profile.LegHipControlFrameSourceMaxAngularAcceleration : 0f) +
-                " | recoveryLimit(w/a)=" + F(profile != null ? profile.LegHipControlFrameRecoveryMaxAngularSpeed : 0f) + "/" + F(profile != null ? profile.LegHipControlFrameRecoveryMaxAngularAcceleration : 0f) +
-                " | lagBound=" + F(profile != null ? profile.LegHipControlFrameMaxLagDegrees : 0f) +
-                " | lagGuardArm=" + ReferenceLagGuardRebaseArm +
-                " | lagGuard(steps/maxPre/maxCorrection/totalCorrection)=" + _lagBoundCorrectionSteps + "/" + F(_maxPreGuardFrameLagDegrees) + "/" + F(_maxLagBoundCorrectionDegrees) + "/" + F(_totalLagBoundCorrectionDegrees) +
-                " | lagGuardSuppressed(steps/current/peak/total)=" + _lagGuardSuppressedSteps + "/" + F(_currentSuppressedLagBoundCorrectionDegrees) + "/" + F(_peakSuppressedLagBoundCorrectionDegrees) + "/" + F(_totalSuppressedLagBoundCorrectionDegrees) +
-                " | exit(angle/w/hold/max)=" + F(profile != null ? profile.LegHipControlFrameRecoveryExitAngleDegrees : 0f) + "/" + F(profile != null ? profile.LegHipControlFrameRecoveryExitAngularSpeed : 0f) + "/" + F(profile != null ? profile.LegHipControlFrameRecoveryStableHoldSeconds : 0f) + "/" + F(profile != null ? profile.LegHipControlFrameRecoveryMaxSeconds : 0f) +
-                " | steps(base/source/recovery)=" + _baselineSteps + "/" + _sourceSteps + "/" + _recoverySteps +
-                " | integrator=" + IntegratorModeName +
-                " | limited(speed/accel/braking)=" + _speedLimitedSteps + "/" + _accelerationLimitedSteps + "/" + _brakingLimitedSteps +
-                " | inheritedSpeedOverLimitSteps=" + _inheritedSpeedOverLimitSteps +
-                " | contractCurrent(active/speedOK/accelOK/inherited/maxW/maxA/virtualW/virtualA)=" + _strictIntegratorActiveThisStep + "/" + _speedContractSatisfiedThisStep + "/" + _accelerationContractSatisfiedThisStep + "/" + _inheritedSpeedOverLimitThisStep + "/" + F(_currentIntegratorMaxSpeed) + "/" + F(_currentIntegratorMaxAcceleration) + "/" + F(_angularVelocityWorld.magnitude) + "/" + F(_currentVirtualAngularAcceleration) +
-                " | contractPeak(virtualA/Wratio/Aratio)=" + F(_maxVirtualAngularAcceleration) + "/" + F(_maxVirtualSpeedToLimitRatio) + "/" + F(_maxVirtualAccelerationToLimitRatio) +
-                " | activationSync(applied/count/poseDeg/wDelta/peakPose/peakW)=" + _activationSyncAppliedThisStep + "/" + _activationSyncCount + "/" + F(_currentActivationSyncPoseDegrees) + "/" + F(_currentActivationSyncAngularVelocityDelta) + "/" + F(_peakActivationSyncPoseDegrees) + "/" + F(_peakActivationSyncAngularVelocityDelta) +
-                " | commandClosureSync(applied/count/poseDeg/wDelta/peakPose/peakW)=" + _mechanicalClosureSyncAppliedThisStep + "/" + _mechanicalClosureSyncCount + "/" + F(_currentMechanicalClosureSyncPoseDegrees) + "/" + F(_currentMechanicalClosureSyncAngularVelocityDelta) + "/" + F(_peakMechanicalClosureSyncPoseDegrees) + "/" + F(_peakMechanicalClosureSyncAngularVelocityDelta) +
-                " | recovery(start/complete/timeout/censored)=" + _recoveryStarted + "/" + _recoveryCompleted + "/" + _recoveryTimedOut + "/" + _recoveryCensoredByNewSource +
-                " | peak(frameLag/strictMechanicalLag/virtualW/realW/wErr)=" + F(_maxFrameLagDegrees) + "/" + F(_maxStrictMechanicalLagDegrees) + "/" + F(_maxVirtualAngularSpeed) + "/" + F(_maxRealAngularSpeed) + "/" + F(_maxAngularVelocityError) +
-                " | current(frameLag/strictMechanicalLag/virtualW/virtualA/realW/wErr)=" + F(report != null ? report.HipControlFrameRotationLagDegrees : 0f) + "/" + F(report != null ? report.HipControlFrameStrictMechanicalRotationLagDegrees : 0f) + "/" + F(report != null ? report.HipControlFrameVirtualAngularSpeed : 0f) + "/" + F(report != null ? report.HipControlFrameVirtualAngularAcceleration : 0f) + "/" + F(report != null ? report.HipControlFrameRealPelvisAngularSpeed : 0f) + "/" + F(report != null ? report.HipControlFrameAngularVelocityError : 0f) +
-                " | guardMechanicalDecoupled=True";
         }
 
         private void ClearActivationSyncStep()

@@ -151,8 +151,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             report.StanceSupportAngularInvalidReason = _reason;
             report.StanceSupportAngularEligibleSamples = _eligibleSamples;
             report.StanceSupportAngularAppliedSamples = _appliedSamples;
-            report.StanceSupportAngularClampedSamples = _clampedSamples;
-            report.StanceSupportAngularCurrentTorqueWorld = _torque;
             report.StanceSupportAngularMaxNormalTorqueNm = _maxNormalTorque;
             report.StanceSupportAngularMaxPowerWatts = _maxPower;
             if (!formatSummary) return;

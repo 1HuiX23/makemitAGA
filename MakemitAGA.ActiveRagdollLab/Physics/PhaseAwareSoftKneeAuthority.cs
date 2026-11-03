@@ -36,12 +36,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private int _continuousHealthImmediateReentered;
         private float _continuousHealthPeakEntryErrorDegrees;
 
-        public bool RecoveryActive => _physicalRecoveryPending;
         public bool PhysicalRecoveryPending => _physicalRecoveryPending;
         public bool RecoveryBoostActive => _recoveryBoostActive;
         public bool TrackingHealthUnhealthy => _physicalRecoveryPending && _recoveryOrigin == "CONTINUOUS_HEALTH";
-        public float HealthEnterCandidateSeconds => _healthEnterCandidateSeconds;
-        public string RecoveryOrigin => _recoveryOrigin;
         public float CurrentMaxAngularAcceleration => _currentMaxA;
         public string Phase => _phase;
 
@@ -71,13 +68,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             CopyToReport(report, false);
         }
 
-        public float Step(ActiveRagdollLabProfile profile, TwoBodyProxyReport torso, float kneeOffAxisErrorDegrees, float now, float dt, SingleLegChainReport report)
+        public float Step(ActiveRagdollLabProfile profile, TorsoControlPhase? torso, bool controlRecoveryActive, float kneeOffAxisErrorDegrees, float now, float dt, SingleLegChainReport report)
         {
             float safeDt = Mathf.Max(0f, dt);
             float baseline = profile.LegKneeSoftOffAxisMaxAngularAcceleration;
             float sourceMax = Mathf.Max(baseline, profile.LegKneeSoftOffAxisSourceTurnMaxAngularAcceleration);
             float recoveryMax = Mathf.Max(baseline, profile.LegKneeSoftOffAxisRecoveryMaxAngularAcceleration);
-            bool sourceActive = torso != null && torso.SourceTurnEventActive;
+            bool sourceActive = torso != null && torso.Value.SourceTurnEventActive;
             _currentRecoveryErrorDegrees = Mathf.Max(0f, kneeOffAxisErrorDegrees);
 
             if (sourceActive)
@@ -102,7 +99,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _previousSourceActive = false;
 
             if (!_physicalRecoveryPending)
-                UpdateContinuousHealthReentry(profile, torso, kneeOffAxisErrorDegrees, safeDt);
+                UpdateContinuousHealthReentry(profile, torso, controlRecoveryActive, kneeOffAxisErrorDegrees, safeDt);
 
             if (_physicalRecoveryPending)
             {
@@ -170,9 +167,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _recoveryStarted++;
         }
 
-        private void UpdateContinuousHealthReentry(ActiveRagdollLabProfile profile, TwoBodyProxyReport torso, float errorDegrees, float dt)
+        private void UpdateContinuousHealthReentry(ActiveRagdollLabProfile profile, TorsoControlPhase? torso, bool controlRecoveryActive, float errorDegrees, float dt)
         {
-            bool stableMotionWindow = IsStableMotionWindow(torso);
+            bool stableMotionWindow = IsStableMotionWindow(torso, controlRecoveryActive);
             bool immediate = errorDegrees >= profile.LegKneeSoftOffAxisTrackingHealthImmediateErrorDegrees;
             bool candidate = stableMotionWindow && errorDegrees >= profile.LegKneeSoftOffAxisTrackingHealthEnterErrorDegrees;
 
@@ -207,11 +204,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _continuousHealthPeakEntryErrorDegrees = Mathf.Max(_continuousHealthPeakEntryErrorDegrees, errorDegrees);
         }
 
-        private static bool IsStableMotionWindow(TwoBodyProxyReport torso)
+        private static bool IsStableMotionWindow(TorsoControlPhase? torso, bool controlRecoveryActive)
         {
-            if (torso == null || torso.ControlRecoveryActive || torso.MotionTransition)
+            if (torso == null || controlRecoveryActive || torso.Value.MotionTransition)
                 return false;
-            string phase = torso.MotionPhase ?? string.Empty;
+            string phase = torso.Value.MotionPhase ?? string.Empty;
             return phase.Equals("STEADY", System.StringComparison.OrdinalIgnoreCase) ||
                    phase.Equals("IDLE", System.StringComparison.OrdinalIgnoreCase);
         }

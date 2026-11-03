@@ -73,10 +73,15 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             }
             catch (Exception e) { return Invalid("HIP_PAIR_STAGE_EXCEPTION:" + e.GetType().Name); }
         }
-        internal bool StageHipTorque(PhysicsStepContext step, int localFixed, Vector3 torque, Vector3 desiredAlpha)
+        internal bool StageHipTorque(PhysicsStepContext step, int localFixed, Vector3 torque, Vector3 desiredAlpha,
+            Vector3 relativeRaw, Vector3 transportRaw, Vector3 beforeFloor, float maxAlpha)
         {
             if (!Report.Selected || !Report.Finite || !_staged || !_input.Valid || _input.TorqueRequested || !_input.Seed.Step.Matches(step) ||
                 _input.Seed.Fixed != localFixed || !V(torque) || !V(desiredAlpha)) return Invalid("HIP_PAIR_TORQUE_REQUEST_INVALID");
+            if (!HipAngularRequest.TryCreate(_input.ChildInertia, _input.ChildPrincipal, _input.ChildW,
+                torque, desiredAlpha, relativeRaw, transportRaw, beforeFloor, maxAlpha, out HipAngularRequest angular))
+                return Invalid("HIP_PAIR_ANGULAR_OWNERSHIP_INVALID");
+            _input.Angular = angular;
             _input.PureTorque = torque; _input.DesiredAlpha = desiredAlpha; _input.TorqueRequested = true;
             return true;
         }
@@ -116,16 +121,22 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 !V(c.Force) || !V(c.ChildTorque) || !V(c.ParentTorque) || !V(c.PredictedNetA) || !V(c.FeedbackResidualA) ||
                 !V(c.UpperCorrectionTorque) || !V(c.UpperActuatorTorque) || !V(c.UpperCorrectionAlpha) ||
                 !Same(c.ChildTorque, Vector3.Cross(c.ChildPoint - c.ChildCom, c.Force)) ||
+                !Same(c.ParentTorque, Vector3.Cross(c.ParentPoint - c.ParentCom, -c.Force)) ||
                 !Same(c.UpperCorrectionTorque, -c.ChildTorque) || !Same(c.UpperActuatorTorque, c.NetHipTorque + c.UpperCorrectionTorque) ||
                 !F(c.MotionScale) || c.MotionScale < 0f || c.MotionScale > 1f ||
-                !Same(c.NetHipTorque, c.PureHipTorque * c.MotionScale) ||
-                !Same(c.CommonAcceleration, c.ParentInput.Acceleration * c.MotionScale) || !V(c.AllocatedHipAlpha) ||
+                !Same(c.NetHipTorque, c.PureHipTorque * c.MotionScale) || !c.Angular.SameAs(_input.Angular) ||
+                !Same(c.ParentAngularReaction, c.ParentInput.JointTorqueReaction ? -c.MotionScale * c.Angular.RelativeTorque : Vector3.zero) ||
+                !V(c.BilateralAngularReaction) || (!c.ParentInput.JointTorqueReaction && !Same(c.BilateralAngularReaction, Vector3.zero)) ||
+                !V(c.CommonAcceleration) || c.CommonAcceleration.magnitude > PelvisHipCommandFrame.MaxMagnitude + 0.0001f ||
+                !V(c.PeerForce) || !V(c.AllocatedHipAlpha) ||
+                (c.CommonAcceleration - (c.Force + c.PeerForce) / c.ParentInput.Response.TotalMass - c.ParentInput.Acceleration * c.MotionScale).magnitude >
+                    0.0001f * (1f + c.ParentInput.Acceleration.magnitude) ||
                 !Same(c.AllocatedHipAlpha, _input.DesiredAlpha + HipPointPairMobility.InverseTensor(_input.ChildInertia, _input.ChildPrincipal, c.NetHipTorque - c.PureHipTorque)) ||
                 !Same(c.UpperCorrectionAlpha, HipPointPairMobility.InverseTensor(_input.ChildInertia, _input.ChildPrincipal, c.UpperCorrectionTorque)) ||
                 !F(c.UpperActuatorLimitNm) || c.UpperActuatorLimitNm != HipBilateralForceSolver.ActuatorLimit(c.PureHipTorque) ||
                 c.UpperCorrectionTorque.magnitude > HipBilateralForceSolver.UpperCorrectionTorqueLimit + 0.0001f ||
                 c.UpperActuatorTorque.magnitude > c.UpperActuatorLimitNm + 0.0001f ||
-                !V(c.PeerForce) || !V(c.AppliedA) ||
+                !V(c.AppliedA) ||
                 !Same(c.AppliedA, c.Force / c.ChildMass + (c.Force + c.PeerForce) / c.ParentInput.Response.TotalMass) ||
                 c.AppliedA.magnitude > HipCharacterJointResponseIsolation.TetherMaxAcceleration + 0.0001f ||
                 !F(c.Scale) || c.Scale < 0f || c.Scale > 1f || !F(c.PairPower) || !F(c.DampingPower) ||

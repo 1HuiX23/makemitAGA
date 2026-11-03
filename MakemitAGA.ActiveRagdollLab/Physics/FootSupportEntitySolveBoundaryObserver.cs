@@ -659,7 +659,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             report.SupportEntityBoundaryMode = Mode;
             report.SupportEntityBoundaryFinite = _finite;
             report.SupportEntityBoundaryInvalidReason = _invalidReason;
-            report.SupportEntityBoundaryResolvedLoadedSolves = _loadedResolved;
             report.SupportEntityBoundaryPositionSolverResolvedSolves = _positionSolverResolved;
             report.SupportEntityBoundaryCcdResolvedSolves = _ccdResolved;
             report.SupportEntityBoundaryCcdMismatchSolves = _ccdMismatch;
@@ -678,7 +677,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             report.SupportNormalWindowMode = NormalWindowMode;
             report.SupportNormalWindowFinite = _normalWindowFinite;
             report.SupportNormalWindowInvalidReason = _normalWindowInvalidReason;
-            report.SupportNormalWindowJoinedSolves = _normalJoined;
             report.SupportNormalWindowEvidenceReady = _normalWindowFinite && _motionFinite && _normalJoined >= MinimumResolvedSolves;
             report.SupportCallbackMomentumMode = CallbackMomentumMode;
             report.SupportCallbackMomentumFinite = _callbackAuditFinite;

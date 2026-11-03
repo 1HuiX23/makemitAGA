@@ -252,7 +252,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             if (report == null) return;
             float eligibleN = Mathf.Max(1, _eligibleSamples);
-            report.StanceLowerNativeGravityMode = Mode;
             report.StanceLowerNativeGravityArm = _arm;
             report.StanceLowerNativeGravityFinite = _finite;
             report.StanceLowerNativeGravityInvalidReason = _invalidReason;
@@ -263,11 +262,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             report.StanceLowerNativeGravityNonStanceAppliedSamples = _nonStanceAppliedSamples;
             report.StanceLowerNativeGravityReadbackFailures = _gravityReadbackFailures;
             report.StanceLowerNativeGravityExpectedNormalForceMean = _eligibleSamples > 0 ? _expectedNormalForceSum / eligibleN : 0f;
-            report.StanceLowerNativeGravityExpectedNormalForceMax = _expectedNormalForceMax;
             report.StanceLowerNativeGravityExpectedNormalImpulseMean = _eligibleSamples > 0 ? _expectedNormalImpulseSum / eligibleN : 0f;
-            report.StanceLowerNativeGravityExpectedNormalImpulseMax = _expectedNormalImpulseMax;
             report.StanceLowerNativeGravitySupportNormalSpeedAbsMean = _eligibleSamples > 0 ? _lowerSupportNormalSpeedAbsSum / eligibleN : 0f;
-            report.StanceLowerNativeGravitySupportNormalSpeedAbsMax = _lowerSupportNormalSpeedAbsMax;
             report.StanceLowerNativeGravityKneeTetherSupportNormalAccelerationMean = _eligibleSamples > 0 ? _kneeTetherSupportNormalAccelerationSum / eligibleN : 0f;
             report.StanceLowerNativeGravityKneeTetherSupportNormalAccelerationMin = _kneeTetherSupportNormalAccelerationHasSample ? _kneeTetherSupportNormalAccelerationMin : 0f;
             report.StanceLowerNativeGravityKneeTetherSupportNormalAccelerationMax = _kneeTetherSupportNormalAccelerationHasSample ? _kneeTetherSupportNormalAccelerationMax : 0f;
@@ -276,8 +272,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             report.StanceLowerNativeGravityLowerMass = _currentLowerMass;
             report.StanceLowerNativeGravityCurrentApplied = _currentApplied;
             report.StanceLowerNativeGravityCurrentScheduledFixed = _currentScheduledFixed;
-            report.StanceLowerNativeGravityFirstAppliedFixed = _firstAppliedFixed;
-            report.StanceLowerNativeGravityLastAppliedFixed = _lastAppliedFixed;
             report.StanceLowerNativeGravitySummary =
                 "mode=" + Mode +
                 "/arm=" + _arm +

@@ -14,8 +14,13 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             public static string ResolveRequestedArm(string requestedArm, PelvisRunScope scope)
             {
                 if (PelvisRunScopes.HasHipCoupling(scope))
-                    return string.Equals(requestedArm, "b", StringComparison.OrdinalIgnoreCase) || requestedArm == PelvisDynamicReceiverIsolation.DynamicHipArm
-                        ? PelvisDynamicReceiverIsolation.DynamicHipArm : null;
+                {
+                    if (string.Equals(requestedArm, "a", StringComparison.OrdinalIgnoreCase) || requestedArm == PelvisDynamicReceiverIsolation.DynamicHipArmA)
+                        return PelvisDynamicReceiverIsolation.DynamicHipArmA;
+                    if (string.Equals(requestedArm, "b", StringComparison.OrdinalIgnoreCase) || requestedArm == PelvisDynamicReceiverIsolation.DynamicHipArmB)
+                        return PelvisDynamicReceiverIsolation.DynamicHipArmB;
+                    return null;
+                }
                 if (PelvisRunScopes.HasUpperWeight(scope))
                     return string.Equals(requestedArm, "b", StringComparison.OrdinalIgnoreCase) || requestedArm == PelvisDynamicReceiverIsolation.DynamicUpperLoadArm
                         ? PelvisDynamicReceiverIsolation.DynamicUpperLoadArm : null;
@@ -66,12 +71,12 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
                 if (_pelvisWithLegs) _legChain.SelectFootRelativeReference(true);
                 _proxy.SetDrive(false);
                 string select = _proxy.SetPelvisReceiver(arm);
-                if (!_proxy.PelvisReceiver.Selected || _proxy.PelvisReceiver.Arm != arm || !_proxy.PelvisReceiver.Finite)
+                if (!_proxy.PelvisReceiverControl.Selected || _proxy.PelvisReceiverControl.Arm != arm || !_proxy.PelvisReceiverControl.Finite)
                     throw new InvalidOperationException("RECEIVER_SELECT_FAILED:" + select);
                 if (!_proxy.BindPelvisLegReference(_legTarget, _secondaryLegTarget))
                     throw new InvalidOperationException("LEG_PARENT_REFERENCE_BIND_FAILED:" + (_proxy.LegParentReferenceIssue ?? "SOURCE_TARGET_OR_NATIVE_POSE"));
                 string drive = _proxy.SetDrive(true);
-                if (!_proxy.DriveEnabled || !_proxy.PelvisReceiver.Active || !_proxy.PelvisReceiver.Finite)
+                if (!_proxy.DriveEnabled || !_proxy.PelvisReceiverControl.Active || !_proxy.PelvisReceiverControl.Finite)
                     throw new InvalidOperationException("RECEIVER_DRIVE_FAILED:" + drive);
             }
             public void AdvancePreparation(PhysicsStepContext step)
@@ -87,14 +92,14 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             private bool EnvironmentReady => _legChain != null && (_pelvisWithContact
                 ? (_legChain.DynamicContactSelected ? _legChain.DynamicContactMatchesScope(_pelvisScope) : !_pelvisTest.Session.Started && _legChain.FreeSpaceReady)
                 : !_legChain.DynamicContactSelected && _legChain.FreeSpaceReady);
-            public bool Healthy => _proxy != null && _proxy.DriveEnabled && _proxy.Report.FiniteState && _proxy.PelvisReceiver.Finite &&
-                (_pelvisWithLegs ? (_proxy.Report.UseDynamicTorsoRecovery &&
-                    _proxy.Report.HipGoalGateOnlyHip &&
-                    _proxy.Report.UseCoherentHipNormalReference &&
-                    _proxy.Report.HipNormalSampleAgePrediction == (_proxy.PelvisReceiver.Arm == PelvisDynamicReceiverIsolation.DynamicLegArmA) &&
+            public bool Healthy => _proxy != null && _proxy.DriveEnabled && _proxy.ControlState.FiniteState && _proxy.PelvisReceiverControl.Finite &&
+                (_pelvisWithLegs ? (_proxy.ControlPolicy.UseDynamicTorsoRecovery &&
+                    _proxy.ControlPolicy.HipGoalGateOnlyHip &&
+                    _proxy.ControlPolicy.UseCoherentHipNormalReference &&
+                    _proxy.ControlPolicy.HipNormalSampleAgePrediction == (_proxy.PelvisReceiverControl.Arm == PelvisDynamicReceiverIsolation.DynamicLegArmA) &&
                     _legChain != null && EnvironmentReady && !_legChain.AnyDriveAborted &&
                     _legChain.FootRelativeReferenceMatches(true) &&
-                    (!_legChain.DynamicParentsActive || _legChain.HipNormalReferenceMatches(_proxy.Report.UseCoherentHipNormalReference, _proxy.Report.HipNormalSampleAgePrediction)) &&
+                    (!_legChain.DynamicParentsActive || _legChain.HipNormalReferenceMatches(_proxy.ControlPolicy.UseCoherentHipNormalReference, _proxy.ControlPolicy.HipNormalSampleAgePrediction)) &&
                     (!_pelvisTest.Session.Started || _legChain.DynamicParentsActive)) : _legChain == null);
             public string Issue
             {
@@ -103,10 +108,10 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
                     if (_proxy == null) return "RECEIVER_MISSING";
                     if (_pelvisWithLegs && _legChain != null)
                     {
-                        if (!_proxy.Report.UseDynamicTorsoRecovery || !_proxy.Report.HipGoalGateOnlyHip ||
-                            !_proxy.Report.UseCoherentHipNormalReference ||
-                            _proxy.Report.HipNormalSampleAgePrediction != (_proxy.PelvisReceiver.Arm == PelvisDynamicReceiverIsolation.DynamicLegArmA) ||
-                            (_legChain.DynamicParentsActive && !_legChain.HipNormalReferenceMatches(_proxy.Report.UseCoherentHipNormalReference, _proxy.Report.HipNormalSampleAgePrediction)))
+                        if (!_proxy.ControlPolicy.UseDynamicTorsoRecovery || !_proxy.ControlPolicy.HipGoalGateOnlyHip ||
+                            !_proxy.ControlPolicy.UseCoherentHipNormalReference ||
+                            _proxy.ControlPolicy.HipNormalSampleAgePrediction != (_proxy.PelvisReceiverControl.Arm == PelvisDynamicReceiverIsolation.DynamicLegArmA) ||
+                            (_legChain.DynamicParentsActive && !_legChain.HipNormalReferenceMatches(_proxy.ControlPolicy.UseCoherentHipNormalReference, _proxy.ControlPolicy.HipNormalSampleAgePrediction)))
                             return "HIP_NORMAL_REFERENCE_V04800_POLICY_CONTRACT_LOST";
                         if (_legChain.AnyDriveAborted)
                         {
@@ -126,7 +131,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             }
             public bool Ready => _proxy != null && _proxy.PelvisReceiverReady && (!_pelvisWithLegs ||
                 (_legChain != null && _legChain.DynamicParentsActive && (!_pelvisWithContact || _legChain.DynamicContactMatchesScope(_pelvisScope))));
-            public bool Tracing => _proxy != null && _proxy.Report.TraceEnabled && _proxy.PelvisReceiver.TraceRunning &&
+            public bool Tracing => _proxy != null && _proxy.TraceEnabled && _proxy.PelvisReceiver.TraceRunning &&
                 (!_pelvisWithLegs || (_legChain != null && _legChain.TraceFullyEnabled));
             public string ReadinessSummary() => "passiveResolved=" + (_proxy?.PelvisReceiver?.PassiveResolved ?? 0) +
                 " | legReferenceBound=" + (_proxy != null && _proxy.LegParentReferenceBound) +
@@ -134,11 +139,14 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
                 " | footStepAttribution=READ_ONLY_V04710" +
                 " | footRelativeReference=" + (_pelvisWithLegs ? FootRelativeReference.ArmB : "NOT_BUILT") +
                 " | footReferenceBilateralMatched=" + (_legChain != null && _legChain.FootRelativeReferenceMatches(true)) +
-                " | torsoRecoveryPolicy=" + (_proxy != null && _proxy.Report.UseDynamicTorsoRecovery ? DynamicTorsoRecoveryGate.DynamicPolicy : DynamicTorsoRecoveryGate.LegacyPolicy) +
-                " | hipGoalGate=" + (_pelvisWithLegs ? (_proxy != null && _proxy.Report.HipGoalGateOnlyHip ? "HIP_ONLY_KEEP_KNEE" : "HIP_AND_KNEE") : "LEGACY_SCOPE") +
-                " | hipNormalReference=" + HipNormalReference.ArmFor(_pelvisWithLegs && _proxy != null && _proxy.Report.UseCoherentHipNormalReference,
-                    _pelvisWithLegs && _proxy != null && _proxy.Report.HipNormalSampleAgePrediction) +
+                " | torsoRecoveryPolicy=" + (_proxy != null && _proxy.ControlPolicy.UseDynamicTorsoRecovery ? DynamicTorsoRecoveryGate.DynamicPolicy : DynamicTorsoRecoveryGate.LegacyPolicy) +
+                " | hipGoalGate=" + (_pelvisWithLegs ? (_proxy != null && _proxy.ControlPolicy.HipGoalGateOnlyHip ? "HIP_ONLY_KEEP_KNEE" : "HIP_AND_KNEE") : "LEGACY_SCOPE") +
+                " | hipNormalReference=" + HipNormalReference.ArmFor(_pelvisWithLegs && _proxy != null && _proxy.ControlPolicy.UseCoherentHipNormalReference,
+                    _pelvisWithLegs && _proxy != null && _proxy.ControlPolicy.HipNormalSampleAgePrediction) +
                 " | hipNormalRecoveryHandoff=" + (_pelvisWithLegs ? HipCompositeReferenceShockAbsorberIsolation.NormalRecoveryHandoffMode : "NOT_BUILT") +
+                " | hipAngularControllerReaction=" + PelvisDynamicReceiverIsolation.HipReactionName(_proxy == null ? null : _proxy.PelvisReceiverControl.Arm) +
+                " | hipNormalParentPolicy=" + PelvisDynamicReceiverIsolation.HipNormalParentName(_proxy == null ? null : _proxy.PelvisReceiverControl.Arm) +
+                " | comDeficitFeedbackEnabled=" + (_proxy != null && PelvisDynamicReceiverIsolation.IsDynamicHipArm(_proxy.PelvisReceiverControl.Arm)) +
                 " | referenceBudget=" + (_proxy?.PelvisReceiver?.ReferenceBudgetMode ?? "<none>") +
                 " | referencePlanner=" + (_proxy?.PelvisReceiver?.ReferencePlannerMode ?? "<none>") + " | sameInputComparison=" + _pelvisWithLegs + "/scope=PELVIS_PLANNER_REFERENCE_ONLY" +
                 (_pelvisWithLegs && _legChain != null ? " | " + (_pelvisWithContact ? _legChain.DynamicContactBoundarySummary() : _legChain.FreeSpaceBoundarySummary()) : "");
@@ -149,8 +157,8 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             }
             public string QuiesceAndCapture(bool started, string header, StringBuilder cleanup)
             {
-                if (_proxy != null && _proxy.Report.TraceEnabled) _proxy.SetTrace(false);
-                if (_pelvisWithLegs && _legChain != null && _legChain.TraceEnabled) _legChain.SetTrace(false);
+                StopTraceOwners(_proxy != null && _proxy.TraceEnabled,
+                    _pelvisWithLegs && _legChain != null && _legChain.TraceEnabled, "PELVIS_TRACE_FINALIZE_FAILED");
                 string recovery = _proxy?.TorsoRecoverySummary ?? "TORSO_RECOVERY=UNAVAILABLE";
                 string legs = _pelvisWithLegs ? CaptureDynamicLegResult(started) : "legsFeet=NOT_BUILT";
                 if (_legChain != null) cleanup.AppendLine(_legChain.SetDrive(false));
@@ -160,7 +168,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
                 bool ready = started && _proxy != null && _proxy.PelvisReceiver.ExposureReady && nativeReadback;
                 return (started ? "resultScope=COMPLETED_RUN" : "resultScope=REJECTED_SETUP") + " | " + header +
                     " | RECEIVER_EXPOSURE_DATASET_READY=" + ready + " | RECEIVER_TRACKING_DATASET_READY=" +
-                    (ready && _proxy.PelvisReceiver.TrackingComplete) + " | scope=" + Scope + " | HipReaction=" + (PelvisRunScopes.HasHipCoupling(_pelvisScope) ? "TRANSLATION_AT_HIP_ANCHORS" : "NOT_ROUTED") + " | hipAngularControllerReaction=OFF | torsoGravity=OFF\n" +
+                    (ready && _proxy.PelvisReceiver.TrackingComplete) + " | scope=" + Scope + " | HipReaction=" + (PelvisRunScopes.HasHipCoupling(_pelvisScope) ? "TRANSLATION_AT_HIP_ANCHORS" : "NOT_ROUTED") + " | hipAngularControllerReaction=" + PelvisDynamicReceiverIsolation.HipReactionName(_proxy == null ? null : _proxy.PelvisReceiverControl.Arm) + " | torsoGravity=OFF\n" +
                     "PELVIS_LEG_REFERENCE_DATASET_READY=" + (ready && _proxy.PelvisReceiver.ParentReferenceReady) + " | scope=VIRTUAL_BILATERAL_HIP_REFERENCE_ONLY\n" +
                     (_proxy?.PelvisReceiver?.GetDetails() ?? "<no-receiver>") + "\n" + native +
                     "\n" + recovery + "\n[TORSO_AT_FINALIZE]\n" + (_proxy?.Report?.GetConsoleSummary() ?? "<not-built>") + "\n" + legs;

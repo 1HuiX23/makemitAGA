@@ -15,16 +15,20 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         internal float PeakUpperCorrectionNm, PeakUpperActuatorNm, PeakUpperNetTorqueResidualNm;
         internal int MotionLimitedSteps, FeedbackFallbackSteps;
         internal float MinimumMotionScale = 1f;
-        internal int PointBudgetSteps, UpperCorrectionBudgetSteps, UpperActuatorBudgetSteps, ReceiverBudgetSteps;
+        internal int AngularReactionSteps, AngularReactionNonzero;
+        internal float PeakAngularReactionNm, PeakAngularSplitClosureNm;
+        internal int PointBudgetSteps, UpperCorrectionBudgetSteps, UpperActuatorBudgetSteps, ReceiverBudgetSteps, CommonBudgetSteps;
         internal struct Command
         {
             internal bool JointSolved, FullFeedbackFeasible;
             internal float MotionScale;
+            internal HipAngularRequest Angular;
+            internal Vector3 ParentAngularReaction, BilateralAngularReaction;
             internal Vector3 NetHipTorque, CommonAcceleration, AllocatedHipAlpha;
             internal Vector3 UnboundedForce, PeerForce, PureHipTorque, KnownBiasA, PredictedNetA, FeedbackResidualA;
             internal Vector3 UpperCorrectionTorque, UpperActuatorTorque, UpperCorrectionAlpha;
             internal float UpperActuatorLimitNm;
-            internal float PointScale, UpperCorrectionScale, UpperActuatorScale, ReceiverScale, BilateralDampingPower;
+            internal float PointBudgetRatio, UpperCorrectionBudgetRatio, UpperActuatorBudgetRatio, ReceiverBudgetRatio, CommonBudgetRatio, BilateralDampingPower;
             internal PhysicsStepContext Step;
             internal PelvisHipCommandFrame ParentInput;
             internal int Fixed, ChildId, ParentId;
@@ -38,23 +42,29 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         internal void ResetTrace()
         {
             Samples = Writes = Nonzero = Clamps = CancelledCommands = 0;
+            AngularReactionSteps = AngularReactionNonzero = 0; PeakAngularReactionNm = PeakAngularSplitClosureNm = 0f;
             MotionLimitedSteps = FeedbackFallbackSteps = 0; MinimumMotionScale = 1f;
-            PointBudgetSteps = UpperCorrectionBudgetSteps = UpperActuatorBudgetSteps = ReceiverBudgetSteps = 0; PeakFeedbackResidualA = 0f;
+            PointBudgetSteps = UpperCorrectionBudgetSteps = UpperActuatorBudgetSteps = ReceiverBudgetSteps = CommonBudgetSteps = 0; PeakFeedbackResidualA = 0f;
             PeakUpperCorrectionNm = PeakUpperActuatorNm = PeakUpperNetTorqueResidualNm = 0f;
             PeakForceN = PeakGapM = PeakGeometryMomentNm = PeakUpperTorqueNm = PeakParentTorqueNm = 0f;
             PeakFreeResponseError = PeakPositiveDampingPower = RejectedGapM = 0f; ForcePeak = GapPeak = new Command();
         }
         internal void Record(Command c, float responseError)
         {
+            if (c.ParentInput.JointTorqueReaction) AngularReactionSteps++;
+            if (c.ParentAngularReaction.magnitude > 0.000001f) AngularReactionNonzero++;
+            PeakAngularReactionNm = Mathf.Max(PeakAngularReactionNm, c.ParentAngularReaction.magnitude);
+            PeakAngularSplitClosureNm = Mathf.Max(PeakAngularSplitClosureNm, c.Angular.ClosureNm);
             if (c.MotionScale < 0.999999f) MotionLimitedSteps++;
             if (!c.FullFeedbackFeasible) FeedbackFallbackSteps++;
             MinimumMotionScale = Mathf.Min(MinimumMotionScale, c.MotionScale);
             Samples++; Writes++; if (c.Force.magnitude > 0.000001f) Nonzero++;
             if (c.Scale < 0.999999f || c.MotionScale < 0.999999f) Clamps++;
-            if (c.PointScale < 0.999999f) PointBudgetSteps++;
-            if (c.UpperCorrectionScale < 0.999999f) UpperCorrectionBudgetSteps++;
-            if (c.UpperActuatorScale < 0.999999f) UpperActuatorBudgetSteps++;
-            if (c.ReceiverScale < 0.999999f) ReceiverBudgetSteps++;
+            if (c.PointBudgetRatio < 0.999999f) PointBudgetSteps++;
+            if (c.UpperCorrectionBudgetRatio < 0.999999f) UpperCorrectionBudgetSteps++;
+            if (c.UpperActuatorBudgetRatio < 0.999999f) UpperActuatorBudgetSteps++;
+            if (c.ReceiverBudgetRatio < 0.999999f) ReceiverBudgetSteps++;
+            if (c.CommonBudgetRatio < 0.999999f) CommonBudgetSteps++;
             PeakFeedbackResidualA = Mathf.Max(PeakFeedbackResidualA, c.FeedbackResidualA.magnitude);
             PeakUpperCorrectionNm = Mathf.Max(PeakUpperCorrectionNm, c.UpperCorrectionTorque.magnitude);
             PeakUpperActuatorNm = Mathf.Max(PeakUpperActuatorNm, c.UpperActuatorTorque.magnitude);
@@ -68,7 +78,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         }
         internal string GetDetails()
         {
-            var sb = new StringBuilder("mode=HIP_ANCHOR_TRANSLATION_PAIR_V041000_MOTION_FEASIBILITY_ALLOCATION/selected-finite-applied=" + Selected + "-" + Finite + "-" + CurrentApplied +
+            var sb = new StringBuilder("mode=HIP_ANCHOR_TRANSLATION_PAIR_V041020_SYSTEM_COM_RESPONSE/selected-finite-applied=" + Selected + "-" + Finite + "-" + CurrentApplied +
                 "/issue=" + (Issue ?? "<none>") + "/rejectedGapMm=" + F(RejectedGapM * 1000f) + "/inputEvidenceReady=" + EvidenceReady + "/ids(child-parent)=" + ChildId + "-" + ParentId +
                 "/samples-writes-nonzero-clamps-rollbackFailures-cancelled=" + Samples + "-" + Writes + "-" + Nonzero + "-" + Clamps + "-" + RollbackFailures + "-" + CancelledCommands +
                 "/peak(forceN-gapMm-geometryMomentNm-upperTorqueNm-parentTorqueNm)=" + F(PeakForceN) + "|" + F(PeakGapM * 1000f) + "|" + F(PeakGeometryMomentNm) + "|" + F(PeakUpperTorqueNm) + "|" + F(PeakParentTorqueNm) +
@@ -76,12 +86,15 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                 "/peakUpperTorque(correctionNm-actuatorNm-netResidualNm)=" + F(PeakUpperCorrectionNm) + "|" + F(PeakUpperActuatorNm) + "|" + F(PeakUpperNetTorqueResidualNm) +
                 "/basePD=400_40_IMPLICIT_FIXED_DT/compensatedForcePointA_cap=60/upperCorrectionTorqueCapNm=8/upperActuatorCapNm=MAX_8_ORIGINAL_REQUEST/receiverTotalTorqueCapNm=8" +
                 "/motionAllocation(limited-fallback-minScale)=" + MotionLimitedSteps + "-" + FeedbackFallbackSteps + "-" + F(MinimumMotionScale) +
-                "/fullRequestWouldLimit(point-upperCorrection-upperActuator-receiver)=" + PointBudgetSteps + "-" + UpperCorrectionBudgetSteps + "-" + UpperActuatorBudgetSteps + "-" + ReceiverBudgetSteps +
-                "/peakFeedbackResidualA=" + F(PeakFeedbackResidualA) + "/allocation=FEEDBACK_PRIORITY_COMMON_AND_UPPER_MOTION_ALLOCATION/diagonal=I_OVER_UPPER_MASS_PLUS_I_OVER_TOTAL_MASS/offDiagonal=I_OVER_TOTAL_MASS" +
+                "/fullRequestWouldLimit(point-upperCorrection-upperActuator-receiver-common)=" + PointBudgetSteps + "-" + UpperCorrectionBudgetSteps + "-" + UpperActuatorBudgetSteps + "-" + ReceiverBudgetSteps + "-" + CommonBudgetSteps +
+                "/peakFeedbackResidualA=" + F(PeakFeedbackResidualA) + "/allocation=FEEDBACK_PRIORITY_SYSTEM_COM_RESPONSE/commonActuatorCapMps2=12/qMeaning=SYSTEM_COM_AND_NET_UPPER_REQUEST" +
+                "/systemComModel=u_MINUS_SUM_UPPER_FORCE_OVER_TOTAL_MASS/allocationDiagonal=I_OVER_UPPER_MASS" +
                 "/upperCorrection=MINUS_R_CROSS_F/netUpperCommand=SCALED_CONTROLLER_TORQUE/upperActuatorTorque=ALLOCATED_NET_PLUS_POINT_CORRECTION" +
                 "/bias=FINAL_COMMON_AND_NET_UPPER_TORQUE/pointModel=FIXED_LEVERS_OTHER_LOADS_AND_DRAG_EXCLUDED" +
                 "/forcePointA_excludes=BASELINE_BIAS_OTHER_LOADS_DRAG/netUpperAngularInput=ALLOCATED_BEFORE_KNEE/dampingGate=BILATERAL_SUM_ONLY" +
-                "/forcePairClosure=ALGEBRAIC_ZERO/noParentAngularControllerMirror=True/wholeBodyBalanceCertified=False");
+                "/forcePairClosure=ALGEBRAIC_ZERO/fullUpperActuatorMirror=False/relativeReaction=PER_COMMAND/wholeBodyBalanceCertified=False");
+            sb.Append("/relativeReaction(steps-nonzero-peakNm-splitClosureNm)=").Append(AngularReactionSteps).Append('|')
+                .Append(AngularReactionNonzero).Append('|').Append(F(PeakAngularReactionNm)).Append('|').Append(F(PeakAngularSplitClosureNm));
             Append(sb, "PEAK_FORCE", ForcePeak); Append(sb, "PEAK_GAP", GapPeak); Append(sb, "CURRENT", Current);
             return sb.ToString();
         }
@@ -104,12 +117,16 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                 .Append("/actualForce(child-parent)=").Append(V(c.Force)).Append('|').Append(V(-c.Force))
                 .Append("/actualGeometryTorque(child-parent-net)=").Append(V(c.ChildTorque)).Append('|').Append(V(c.ParentTorque)).Append('|').Append(V(c.GeometryMoment))
                 .Append("/powerW(pair-ownDamping-bilateralDamping)=").Append(F(c.PairPower)).Append('|').Append(F(c.DampingPower)).Append('|').Append(F(c.BilateralDampingPower))
-                .Append("/jointSolve=").Append(c.JointSolved).Append("/fullRequestForceOnlyScales(point-upperCorrection-upperActuator-receiver)=").Append(F(c.PointScale)).Append('|').Append(F(c.UpperCorrectionScale)).Append('|').Append(F(c.UpperActuatorScale)).Append('|').Append(F(c.ReceiverScale))
+                .Append("/jointSolve=").Append(c.JointSolved).Append("/q1BudgetRatios(point-upperCorrection-upperActuator-receiver)=").Append(F(c.PointBudgetRatio)).Append('|').Append(F(c.UpperCorrectionBudgetRatio)).Append('|').Append(F(c.UpperActuatorBudgetRatio)).Append('|').Append(F(c.ReceiverBudgetRatio))
+                .Append("/q1CommonBudgetRatio=").Append(F(c.CommonBudgetRatio))
                 .Append("/jointForce(unbounded-peer)=").Append(V(c.UnboundedForce)).Append('|').Append(V(c.PeerForce))
                 .Append("/upperTorque(originalRequest-pointCorrection-actuator-netResidual)=").Append(V(c.PureHipTorque)).Append('|').Append(V(c.UpperCorrectionTorque))
                 .Append('|').Append(V(c.UpperActuatorTorque)).Append('|').Append(V(c.UpperActuatorTorque + c.ChildTorque - c.NetHipTorque))
+                .Append('/').Append(c.Angular.Details(c.MotionScale, c.ParentInput.JointTorqueReaction, c.ParentAngularReaction))
                 .Append("/allocation(motionScale-fullFeedbackFeasible-forceScale)=").Append(F(c.MotionScale)).Append('|').Append(c.FullFeedbackFeasible).Append('|').Append(F(c.Scale))
                 .Append("/allocatedCommonA-netHipTorque-alpha=").Append(V(c.CommonAcceleration)).Append('|').Append(V(c.NetHipTorque)).Append('|').Append(V(c.AllocatedHipAlpha))
+                .Append("/systemA(target-planned)=").Append(V(c.ParentInput.Acceleration * c.MotionScale)).Append('|')
+                .Append(V(c.CommonAcceleration - (c.Force + c.PeerForce) / c.ParentInput.Response.TotalMass))
                 .Append("/upperActuatorLimitNm=").Append(F(c.UpperActuatorLimitNm))
                 .Append("/upperCorrectionAlpha=").Append(V(c.UpperCorrectionAlpha))
                 .Append("/jointA(bias-planned-feedbackResidual)=").Append(V(c.KnownBiasA)).Append('|').Append(V(c.PredictedNetA)).Append('|').Append(V(c.FeedbackResidualA));

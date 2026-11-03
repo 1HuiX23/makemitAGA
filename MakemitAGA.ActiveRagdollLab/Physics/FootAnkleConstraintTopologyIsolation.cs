@@ -82,8 +82,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal string Arm => _armB ? ArmB : ArmA;
         internal bool CharacterJointArm => !_armB;
         internal bool IsProductionSelectorArm => _armB;
-        internal bool Finite => _finite;
-        internal string InvalidReason => _invalidReason;
         internal string CaptureAuthorityArm => _captureAuthority.Arm;
         internal bool CaptureAuthorityProduction => _captureAuthority.IsProductionPolicy;
         internal string PredictiveTailCaptureArm => _predictiveTailCapture.Arm;
@@ -359,11 +357,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             report.AnkleConstraintFinite = _finite;
             report.AnkleConstraintInvalidReason = _invalidReason;
             report.AnkleConstraintCurrentDynamic = _currentDynamic;
-            report.AnkleConstraintCurrentCorrectionAccelerationWorld = _currentCorrectionAccelerationWorld;
-            report.AnkleConstraintCurrentTransportAccelerationWorld = _currentTransportAccelerationWorld;
-            report.AnkleConstraintCurrentRawAccelerationWorld = _currentRawAccelerationWorld;
             report.AnkleConstraintCurrentAppliedAccelerationWorld = _currentAppliedAccelerationWorld;
-            report.AnkleConstraintCurrentClamped = _currentClamped;
             report.AnkleConstraintCurrentSummary =
                 "arm=" + Arm +
                 "/dynamic=" + _currentDynamic +

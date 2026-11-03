@@ -35,7 +35,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal string Arm => _arm;
         internal bool EnabledSpeculative => IsActiveArm(_arm);
         internal bool Finite => _finite;
-        internal string InvalidReason => _invalidReason;
 
         internal bool SetArm(string arm, Rigidbody footBody, FootAnkleFoundationReport report, out string error)
         {
@@ -126,13 +125,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             report.FootCollisionDetectionModeFinite = _finite;
             report.FootCollisionDetectionModeInvalidReason = _invalidReason;
             report.FootCollisionDetectionModeReadback = readback;
-            report.FootCollisionDetectionModeSummary =
-                "mode=" + Mode +
-                "/arm=" + _arm +
-                "/finite=" + _finite +
-                "/continuousSpeculative=" + string.Equals(_arm, ActiveArm, StringComparison.Ordinal) +
-                "/readback=" + readback +
-                "/reason=" + (_invalidReason ?? "<none>");
+            report.FootCollisionDetectionModeSpeculative = EnabledSpeculative;
         }
 
         private bool Invalidate(string reason, Rigidbody footBody, FootAnkleFoundationReport report)

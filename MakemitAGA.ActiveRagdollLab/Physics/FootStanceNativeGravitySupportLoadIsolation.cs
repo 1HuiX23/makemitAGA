@@ -351,26 +351,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             report.StanceFootNativeGravityGravityOffSignedNormalImpulseMean = _callbackGravityOffSamples > 0 ? _gravityOffSignedNormalImpulseSum / gravityOffCallbackN : 0f;
             report.StanceFootNativeGravityGravityOffSignedNormalImpulseMax = _gravityOffSignedNormalImpulseMax;
             report.StanceFootNativeGravityGravityWorld = _currentGravityWorld;
-            report.StanceFootNativeGravityGravityMagnitude = _currentGravityWorld.magnitude;
             report.StanceFootNativeGravityFootMass = _currentFootMass;
             report.StanceFootNativeGravityCurrentApplied = _currentApplied;
             report.StanceFootNativeGravityCurrentScheduledFixed = _currentScheduledFixed;
             report.StanceFootNativeGravityFirstAppliedFixed = _firstAppliedFixed;
             report.StanceFootNativeGravityLastAppliedFixed = _lastAppliedFixed;
-            report.StanceFootNativeGravitySummary =
-                "mode=" + Mode + "/arm=" + _arm + "/finite=" + _finite + "/enabled=" + Enabled +
-                "/n-eligible-applied-nonStance-readbackFail=" + _traceSamples + "-" + _eligibleSamples + "-" + _appliedSamples + "-" + _nonStanceAppliedSamples + "-" + _gravityReadbackFailures +
-                "/callbacks(total-gravityOn-gravityOff)=" + _callbackSamples + "-" + _callbackGravityOnSamples + "-" + _callbackGravityOffSamples +
-                "/expectedNormalForceMeanMaxN=" + F(report.StanceFootNativeGravityExpectedNormalForceMean) + "-" + F(_expectedNormalForceMax) +
-                "/expectedNormalImpulseMeanMaxNs=" + F(report.StanceFootNativeGravityExpectedNormalImpulseMean) + "-" + F(_expectedNormalImpulseMax) +
-                "/supportNormalSpeedAbsMeanMax=" + F(report.StanceFootNativeGravitySupportNormalSpeedAbsMean) + "-" + F(_supportNormalSpeedAbsMax) +
-                "/tetherSupportNormalA(mean-min-max)=" + F(report.StanceFootNativeGravityTetherSupportNormalAccelerationMean) + "-" + F(report.StanceFootNativeGravityTetherSupportNormalAccelerationMin) + "-" + F(report.StanceFootNativeGravityTetherSupportNormalAccelerationMax) +
-                "/reactionSignedJMeanMax(gravityOn)=" + F(report.StanceFootNativeGravityGravityOnSignedNormalImpulseMean) + "-" + F(_gravityOnSignedNormalImpulseMax) +
-                "/reactionSignedJMeanMax(gravityOff)=" + F(report.StanceFootNativeGravityGravityOffSignedNormalImpulseMean) + "-" + F(_gravityOffSignedNormalImpulseMax) +
-                "/gravity=" + V(_currentGravityWorld) + "/gMag=" + F(_currentGravityWorld.magnitude) + "/mass=" + F(_currentFootMass) +
-                "/currentApplied=" + _currentApplied + "/currentFixed=" + _currentScheduledFixed +
-                "/firstLastApplied=" + _firstAppliedFixed + "-" + _lastAppliedFixed +
-                "/reason=" + (string.IsNullOrEmpty(_invalidReason) ? "<none>" : _invalidReason);
         }
 
         private bool EnsureGravityState(Rigidbody footBody, bool enabled, out string error)
@@ -434,7 +419,5 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private static bool IsFinite(Vector3 v) => IsFinite(v.x) && IsFinite(v.y) && IsFinite(v.z);
         private static bool IsFinite(Quaternion q) => IsFinite(q.x) && IsFinite(q.y) && IsFinite(q.z) && IsFinite(q.w);
         private static bool IsFinite(float v) => !float.IsNaN(v) && !float.IsInfinity(v);
-        private static string F(float v) => v.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture);
-        private static string V(Vector3 v) => "(" + F(v.x) + "," + F(v.y) + "," + F(v.z) + ")";
     }
 }

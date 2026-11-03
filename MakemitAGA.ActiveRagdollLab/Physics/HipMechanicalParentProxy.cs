@@ -32,6 +32,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         private GameObject _object;
         private Rigidbody _body;
+        private bool _teardownRequested;
         private bool _useInertialized = true;
 
         private bool _hasPreviousProxyRotation;
@@ -39,14 +40,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private Vector3 _previousProxyAngularVelocity;
         private bool _hasPreviousProxyPosition;
         private Vector3 _previousProxyPosition;
-        private Vector3 _previousProxyLinearVelocity;
         private bool _hasPreviousRawPelvisAngularVelocity;
         private Vector3 _previousRawPelvisAngularVelocity;
 
         private Vector3 _measuredProxyAngularVelocity;
         private Vector3 _measuredProxyAngularAcceleration;
         private Vector3 _measuredProxyLinearVelocity;
-        private Vector3 _measuredProxyLinearAcceleration;
         private Vector3 _measuredRawPelvisAngularVelocity;
         private Vector3 _measuredRawPelvisAngularAcceleration;
         private Vector3 _commandedProxyAngularVelocity;
@@ -80,7 +79,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private float _peakCommandClosureAngularAccelerationError;
         private float _peakCommandClosureMaxAccelerationRatio;
 
-        internal bool Built => _object != null && _body != null;
+        internal bool Built => !_teardownRequested && _object != null && _body != null;
         internal Rigidbody Body => _body;
         internal bool UseInertialized => _useInertialized;
         internal string Mode => _useInertialized ? InertializedProxyMode : RealPelvisMode;
@@ -100,6 +99,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         internal void Build(Transform ownerRoot, int layer, Vector3 hipWorldPosition, Quaternion initialRotation, float maxAngularVelocity)
         {
+            if (_teardownRequested)
+                throw new System.InvalidOperationException("HIP_MECHANICAL_PARENT_TEARDOWN_REQUESTED");
             if (Built)
                 return;
 
@@ -151,9 +152,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _measuredProxyAngularVelocity = Vector3.zero;
             _measuredProxyAngularAcceleration = Vector3.zero;
             _previousProxyPosition = hipWorldPosition;
-            _previousProxyLinearVelocity = Vector3.zero;
             _measuredProxyLinearVelocity = Vector3.zero;
-            _measuredProxyLinearAcceleration = Vector3.zero;
             _hasPreviousProxyRotation = true;
             _hasPreviousProxyPosition = true;
             _hasPreviousRawPelvisAngularVelocity = false;
@@ -243,16 +242,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (_hasPreviousProxyPosition)
             {
                 Vector3 currentV = (currentPosition - _previousProxyPosition) / fixedDeltaTime;
-                _measuredProxyLinearAcceleration = (currentV - _previousProxyLinearVelocity) / fixedDeltaTime;
                 _measuredProxyLinearVelocity = currentV;
             }
             else
             {
                 _measuredProxyLinearVelocity = Vector3.zero;
-                _measuredProxyLinearAcceleration = Vector3.zero;
             }
             _previousProxyPosition = currentPosition;
-            _previousProxyLinearVelocity = _measuredProxyLinearVelocity;
             _hasPreviousProxyPosition = true;
 
             _measuredRawPelvisAngularVelocity = rawPelvisAngularVelocityWorld;
@@ -458,6 +454,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         internal void Destroy()
         {
+            _teardownRequested = true;
             // Do not hide ownership failures here.  The Single-Leg rollback caller aggregates and reports them,
             // so an exceptional Destroy failure cannot be misreported as cleanup success.
             if (_object != null) Object.Destroy(_object);

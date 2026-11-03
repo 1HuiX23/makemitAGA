@@ -9,6 +9,18 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     {
         private PelvisRunScope _dynamicScope = PelvisRunScope.DynamicLegFreeSpace;
         internal PelvisRunScope DynamicScope => _dynamicScope;
+        internal bool ContactEntryContinuous => _footFoundation != null && _footFoundation.ContactEntryContinuous;
+        internal bool StanceLoadAdmissionSelected => _footFoundation != null && _footFoundation.StanceLoadAdmissionSelected;
+        internal bool ContactEntryRecovery => _footFoundation != null && _footFoundation.ContactEntryRecovery;
+        internal bool GroundReferenceEnabled => _footFoundation != null && _footFoundation.GroundReferenceEnabled;
+        internal bool GroundReferenceApplied => _footFoundation != null && _footFoundation.GroundReferenceApplied;
+        internal bool GroundReferencePartial => _footFoundation != null && _footFoundation.GroundReferencePartial;
+        internal void SelectContactEntryContinuous(bool enabled, bool recovery = false, bool groundReference = false, bool partialGround = false, bool loadAdmission = false)
+        {
+            if (_footFoundation == null || _traceEnabled || _dynamicScope != PelvisRunScope.DynamicLegFreeSpace)
+                throw new InvalidOperationException("CONTACT_ENTRY_SELECTION_OUTSIDE_PREPARATION");
+            _footFoundation.SelectContactEntryContinuous(enabled, recovery, groundReference, partialGround, loadAdmission);
+        }
         internal bool DynamicContactSelected => PelvisRunScopes.IsContact(_dynamicScope);
         internal DynamicContactBoundaryIssue DynamicContactIssue => GetDynamicContactIssue(_dynamicScope);
         private DynamicContactBoundaryIssue GetDynamicContactIssue(PelvisRunScope scope)
@@ -89,7 +101,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             // Foot schedule and self-weight pair. The next lifecycle decides the next command.
             bool loaded = _stanceLowerNativeGravity.CurrentApplied;
             if (knee.CurrentFixed != _fixedUpdateSequence || knee.CurrentSourceFixed != _fixedUpdateSequence ||
-                _footFoundation.Report.FootControllerLastCompletedFixedSequence != _fixedUpdateSequence ||
+                _footFoundation.LastCompletedControlFixedSequence != _fixedUpdateSequence ||
                 knee.CurrentEligible != loaded || knee.CurrentApplied != loaded || knee.CurrentNormalConstraint != loaded ||
                 _kneeCharacterJointResponseIsolation.CurrentSupportNormalConstraint != loaded) return false;
             if (!loaded) return knee.CurrentUpperForceWorld == UnityEngine.Vector3.zero;
@@ -122,7 +134,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _footFoundation.Report.StanceFootNativeGravityCurrentApplied &&
                 _report.StanceLowerNativeGravityCurrentScheduledFixed > 0 &&
                 _report.StanceLowerNativeGravityCurrentScheduledFixed == _fixedUpdateSequence &&
-                _footFoundation.Report.FootControllerLastCompletedFixedSequence == _fixedUpdateSequence;
+                _footFoundation.LastCompletedControlFixedSequence == _fixedUpdateSequence;
         }
 
         private bool DynamicLowerWeightPairMatches() =>

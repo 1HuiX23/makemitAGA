@@ -13,7 +13,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
         {
             public string Scene => _sceneName + "#" + _sceneHandle;
             public bool CleanupPending => _cleanupPending;
-            private bool SharedTraceReady => _proxy != null && _proxy.Report.TraceEnabled && _legChain != null && _legChain.TraceFullyEnabled;
+            private bool SharedTraceReady => _proxy != null && _proxy.TraceEnabled && _legChain != null && _legChain.TraceFullyEnabled;
             public string ResolveArm(string requested)
             {
                 if (string.Equals(requested, "a", StringComparison.OrdinalIgnoreCase) || requested == UpperSelfWeightSupportNormalLoadTransferIsolation.ArmA)
@@ -27,24 +27,24 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
                 if (_cleanupPending) return "CLEANUP_PENDING";
                 if (PelvisTestActive) return "PELVIS_TEST_ACTIVE";
                 if (_legChain == null || !_legChain.IsBuilt)
-                    return "ARL ankle v0.4.100：bilateral leg foundation尚未创建。";
+                    return "ARL ankle v0.4.119：bilateral leg foundation尚未创建。";
                 if (_proxy == null || !_proxy.IsBuilt || !_proxy.DriveEnabled)
-                    return "ARL ankle v0.4.100：拒绝启动。请先保持 arl_drive(on)。";
+                    return "ARL ankle v0.4.119：拒绝启动。请先保持 arl_drive(on)。";
                 if (!_legChain.SourceContextReady) return "LEG_SOURCE_CONTEXT_NOT_READY | 等待下一动画帧后再启动。";
                 if (!_legChain.FrozenProductionStackReady)
-                    return "ARL ankle v0.4.100：拒绝启动。bilateral frozen production stack尚未READY；请先完成Knee PCA apply并执行 arl_hip_stack(on)。";
+                    return "ARL ankle v0.4.119：拒绝启动。bilateral frozen production stack尚未READY；请先完成Knee PCA apply并执行 arl_hip_stack(on)。";
                 if (!_legChain.FootProductionBaselineReady)
-                    return "ARL ankle v0.4.100：拒绝启动。Foot frozen production contract/readback不完整。";
+                    return "ARL ankle v0.4.119：拒绝启动。Foot frozen production contract/readback不完整。";
                 if (_proxy.Report.GravityEnabled || (_legChain.PrimaryReport != null && _legChain.PrimaryReport.GravityEnabled) ||
                     (_legChain.SecondaryReport != null && _legChain.SecondaryReport.GravityEnabled))
-                    return "ARL ankle v0.4.100：拒绝启动。通用torso/leg native gravity必须保持OFF；Foot/Lower gravity由冻结的V04180/V04190窄授权，Upper gravity仅由V04450 B exact-STANCE selector窄授权。";
+                    return "ARL ankle v0.4.119：拒绝启动。通用torso/leg native gravity必须保持OFF；Foot/Lower gravity由冻结的V04180/V04190窄授权，Upper gravity仅由V04450 B exact-STANCE selector窄授权。";
 
                 string expectedCapturePolicy = FootAnkleTranslationCaptureAuthorityIsolation.Production;
                 if (!string.Equals(_legChain.TranslationCaptureAuthorityArm, expectedCapturePolicy, StringComparison.Ordinal) || !_legChain.TranslationCaptureAuthorityArmsMatch)
-                    return "ARL ankle v0.4.100：frozen V0373 production capture policy bilateral readback失败。";
+                    return "ARL ankle v0.4.119：frozen V0373 production capture policy bilateral readback失败。";
                 string expectedAngularPolicy = FootAnkleAngularTransport.Production;
                 if (!string.Equals(_legChain.AnkleAngularTransportPolicy, expectedAngularPolicy, StringComparison.Ordinal))
-                    return "ARL ankle v0.4.100：common-mode angular transport policy readback失败。";
+                    return "ARL ankle v0.4.119：common-mode angular transport policy readback失败。";
 
                 if (_legChain.KneeAxisCalibrationCollecting) return "KNEE_PCA_STILL_COLLECTING";
                 return null;
@@ -193,7 +193,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             {
                 get
                 {
-                    if (_proxy == null || !_proxy.IsBuilt || !_proxy.DriveEnabled || !_proxy.Report.FiniteState)
+                    if (_proxy == null || !_proxy.IsBuilt || !_proxy.DriveEnabled || !_proxy.ControlState.FiniteState)
                         return "AUTO_TORSO_SCOPE_LOST";
                     if (_legChain == null || !_legChain.IsBuilt) return "AUTO_LEG_SCOPE_LOST";
                     if (!_legChain.SupportSurface.Finite || !_legChain.SupportSurface.Active) return "AUTO_SUPPORT_SCOPE_ABORT";
@@ -277,7 +277,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
                 _legChain.PrimaryReport == null || _legChain.SecondaryReport == null ||
                 _legChain.PrimaryFootReport == null || _legChain.SecondaryFootReport == null)
                 return false;
-            return !AnkleTestActive && !_proxy.DriveEnabled && _proxy.Report.FiniteState &&
+            return !AnkleTestActive && !_proxy.DriveEnabled && _proxy.ControlState.FiniteState &&
                 !_proxy.Report.GravityEnabled && !_proxy.Report.CollidersEnabled && AnkleLegStopReadbackSafe() &&
                 FootFreeSpaceContract(_legChain.PrimaryFootReport) && FootFreeSpaceContract(_legChain.SecondaryFootReport) &&
                 _legChain.PrimaryFootReport.Kinematic && _legChain.SecondaryFootReport.Kinematic &&

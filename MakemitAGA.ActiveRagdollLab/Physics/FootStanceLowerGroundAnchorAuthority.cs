@@ -28,8 +28,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal const float Kp = 20f;
         internal const float Kd = 6f;
         internal const float MaxAcceleration = 12f;
-        internal const int MinEligibleSamples = 30;
-        internal const int MinAppliedSamples = 30;
 
         private const float Epsilon = 0.0000001f;
 
@@ -235,37 +233,20 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (report == null) return;
             int eligibleN = Mathf.Max(1, _eligibleSamples);
             int appliedN = Mathf.Max(1, _appliedSamples);
-            report.StanceLowerGroundAuthorityMode = Mode;
             report.StanceLowerGroundAuthorityArm = _arm;
             report.StanceLowerGroundAuthorityFinite = _finite;
             report.StanceLowerGroundAuthorityInvalidReason = _invalidReason;
             report.StanceLowerGroundAuthorityEnabled = Enabled;
-            report.StanceLowerGroundAuthorityKp = Kp;
-            report.StanceLowerGroundAuthorityKd = Kd;
-            report.StanceLowerGroundAuthorityMaxAcceleration = MaxAcceleration;
-            report.StanceLowerGroundAuthorityTraceSamples = _samples;
-            report.StanceLowerGroundAuthorityEligibleSamples = _eligibleSamples;
-            report.StanceLowerGroundAuthoritySupportNormalGapSamples = _supportNormalGapSamples;
-            report.StanceLowerGroundAuthorityEpisodesStarted = _episodesStarted;
-            report.StanceLowerGroundAuthorityAppliedSamples = _appliedSamples;
-            report.StanceLowerGroundAuthorityClampSamples = _clampSamples;
-            report.StanceLowerGroundAuthorityNonStanceAppliedSamples = _nonStanceAppliedSamples;
             report.StanceLowerGroundAuthorityPositionErrorMeanMeters = _eligibleSamples > 0 ? _positionErrorSum / eligibleN : 0f;
-            report.StanceLowerGroundAuthorityPositionErrorMaxMeters = _positionErrorMax;
             report.StanceLowerGroundAuthorityVelocityErrorMean = _eligibleSamples > 0 ? _velocityErrorSum / eligibleN : 0f;
-            report.StanceLowerGroundAuthorityVelocityErrorMax = _velocityErrorMax;
             report.StanceLowerGroundAuthorityRawAccelerationMean = _eligibleSamples > 0 ? _rawAccelerationSum / eligibleN : 0f;
-            report.StanceLowerGroundAuthorityRawAccelerationMax = _rawAccelerationMax;
             report.StanceLowerGroundAuthorityAppliedAccelerationMean = _appliedSamples > 0 ? _appliedAccelerationSum / appliedN : 0f;
-            report.StanceLowerGroundAuthorityAppliedAccelerationMax = _appliedAccelerationMax;
             report.StanceLowerGroundAuthorityPositionErrorPlanarWorld = positionErrorPlanar;
             report.StanceLowerGroundAuthorityVelocityErrorPlanarWorld = velocityErrorPlanar;
             report.StanceLowerGroundAuthorityRawAccelerationWorld = rawAcceleration;
             report.StanceLowerGroundAuthorityAppliedAccelerationWorld = appliedAcceleration;
             report.StanceLowerGroundAuthorityCurrentClamped = clamped;
             report.StanceLowerGroundAuthorityCurrentApplied = applied;
-            report.StanceLowerGroundAuthorityDirectYawTorqueMax = 0f;
-            report.StanceLowerGroundAuthorityFirstAppliedFixed = _firstAppliedFixed;
             report.StanceLowerGroundAuthorityLastAppliedFixed = _lastAppliedFixed;
             report.StanceLowerGroundAuthoritySummary =
                 "mode=" + Mode + "/arm=" + _arm + "/finite=" + _finite + "/enabled=" + Enabled +

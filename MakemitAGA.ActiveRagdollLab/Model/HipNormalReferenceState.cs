@@ -9,6 +9,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
     {
         internal PhysicsStepContext Step;
         internal bool Valid, Selected, Applied, AlphaLimited, SpeedLimited, SampleAgePrediction;
+        internal bool ReceiverParentReference;
         internal string Reason;
         internal Quaternion PreviousR, InputR;
         internal Vector3 PreviousW, InputW, A;

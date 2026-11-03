@@ -39,7 +39,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private float _currentPredictionError;
         private float _currentPredictionAlignment;
         private float _currentGyroToInertiaRatio;
-        private Vector3 _currentPhysicalTorqueWorld;
         private float _peakDesiredA;
         private float _peakAngularSpeed;
         private float _peakInertiaAlphaTorque;
@@ -52,7 +51,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal bool Enabled => _enabled;
         internal string Arm => _enabled ? ArmB : ArmA;
         internal bool CurrentValid { get; private set; } = true;
-        // v0.3.3 read-only tap: exact physical torque already composed for the frozen v0.2.81 B actuator.
 
         internal void SetEnabled(bool enabled, SingleLegChainReport report)
         {
@@ -74,7 +72,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _currentPredictionError = 0f;
             _currentPredictionAlignment = 0f;
             _currentGyroToInertiaRatio = 0f;
-            _currentPhysicalTorqueWorld = Vector3.zero;
             _peakDesiredA = 0f;
             _peakAngularSpeed = 0f;
             _peakInertiaAlphaTorque = 0f;
@@ -107,7 +104,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _currentPredictionError = 0f;
             _currentPredictionAlignment = 0f;
             _currentGyroToInertiaRatio = 0f;
-            _currentPhysicalTorqueWorld = Vector3.zero;
 
             if (body == null || !IsFinite(desiredAccelerationWorld) ||
                 !IsFinite(body.rotation) || !IsFinite(body.angularVelocity) ||
@@ -155,7 +151,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 inertia,
                 physicalTorqueWorld - gyroTorqueWorld);
 
-            _currentPhysicalTorqueWorld = physicalTorqueWorld;
             _currentInertiaAlphaTorque = inertiaAlphaWorld.magnitude;
             _currentGyroTorque = gyroTorqueWorld.magnitude;
             _currentTotalTorque = physicalTorqueWorld.magnitude;

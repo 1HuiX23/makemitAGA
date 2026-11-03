@@ -9,10 +9,11 @@ namespace MakemitAGA.ActiveRagdollLab.Model
     {
         internal bool Valid, TorqueRequested;
         internal HipAnchorPairReport.Command Seed;
+        internal HipAngularRequest Angular;
         internal Vector3 ChildInertia, ChildComV, ChildW, PureTorque, DesiredAlpha;
         internal Quaternion ChildPrincipal;
 
-        internal bool Ready => Valid && TorqueRequested && Seed.Fixed > 0 &&
+        internal bool Ready => Valid && TorqueRequested && Angular.Valid && Seed.Fixed > 0 &&
             Seed.ChildId != Seed.ParentId && Seed.ChildId != 0 &&
             Seed.ParentInput.Matches(Seed.Step, Seed.ParentId) &&
             HipPointPairMobility.ValidBody(Seed.ChildMass, ChildInertia, ChildPrincipal) &&

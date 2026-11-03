@@ -88,9 +88,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private int _stanceSurfaceId;
         private int _stanceSurfaceSwitches;
         private bool _currentStrongStanceSample;
-        private bool _currentStrongSwingSample;
 
-        internal bool Finite => _finite;
         internal string State => _state;
         internal bool CurrentStrongStanceSample => _currentStrongStanceSample;
 
@@ -134,7 +132,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _stanceSurfaceId = 0;
             _stanceSurfaceSwitches = 0;
             _currentStrongStanceSample = false;
-            _currentStrongSwingSample = false;
             CopyToReport(report, false);
         }
 
@@ -156,7 +153,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (!traceEnabled)
             {
                 _currentStrongStanceSample = false;
-                _currentStrongSwingSample = false;
                 CopyToReport(report, false);
                 return;
             }
@@ -168,7 +164,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (!phaseTrackingEligible)
             {
                 _currentStrongStanceSample = false;
-                _currentStrongSwingSample = false;
                 _lastReason = "PHASE_TRACKING_NOT_ELIGIBLE";
                 CopyToReport(report, TraceQualified());
                 return;
@@ -227,7 +222,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 if (qualificationSampleEligible) _ambiguousSamples++;
             }
             _currentStrongStanceSample = strongStance;
-            _currentStrongSwingSample = strongSwing;
 
             if (strongStance)
                 HandleStanceEvidence(fixedSequence, dt, tangentialSpeed, normalSpeedAbs, clearanceAbs, groundColliderInstanceId, qualificationSampleEligible, report);
@@ -441,38 +435,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             report.GameNativeGaitPhaseFinite = _finite;
             report.GameNativeGaitPhaseInvalidReason = _invalidReason;
             report.GameNativeGaitPhaseState = _state;
-            report.GameNativeGaitTraceSamples = _traceSamples;
-            report.GameNativeGaitEligibleSamples = _eligibleSamples;
-            report.GameNativeGaitStanceSamples = _stanceSamples;
-            report.GameNativeGaitSwingSamples = _swingSamples;
-            report.GameNativeGaitTransitionSamples = _transitionSamples;
-            report.GameNativeGaitUnknownSamples = _unknownSamples;
-            report.GameNativeGaitStanceEntries = _stanceEntries;
-            report.GameNativeGaitSwingEntries = _swingEntries;
-            report.GameNativeGaitStanceToSwingTransitions = _stanceToSwingTransitions;
-            report.GameNativeGaitSwingToStanceTransitions = _swingToStanceTransitions;
-            report.GameNativeGaitAmbiguousSamples = _ambiguousSamples;
-            report.GameNativeGaitNoHitSamples = _noHitSamples;
-            report.GameNativeGaitFullFootprintSamples = _fullFootprintSamples;
-            report.GameNativeGaitSameSurfaceSamples = _sameSurfaceSamples;
-            report.GameNativeGaitFirstStanceFixed = _firstStanceFixed;
-            report.GameNativeGaitFirstSwingFixed = _firstSwingFixed;
-            report.GameNativeGaitLastTransitionFixed = _lastTransitionFixed;
             report.GameNativeGaitStanceTangentialSpeedMean = _stanceTangentialSpeedSum / Mathf.Max(1, _stanceSamples);
-            report.GameNativeGaitStanceTangentialSpeedMax = _stanceTangentialSpeedMax;
             report.GameNativeGaitSwingTangentialSpeedMean = _swingTangentialSpeedSum / Mathf.Max(1, _swingSamples);
-            report.GameNativeGaitSwingTangentialSpeedMax = _swingTangentialSpeedMax;
             report.GameNativeGaitStanceNormalSpeedAbsMean = _stanceNormalSpeedAbsSum / Mathf.Max(1, _stanceSamples);
-            report.GameNativeGaitStanceNormalSpeedAbsMax = _stanceNormalSpeedAbsMax;
             report.GameNativeGaitSwingNormalSpeedAbsMean = _swingNormalSpeedAbsSum / Mathf.Max(1, _swingSamples);
-            report.GameNativeGaitSwingNormalSpeedAbsMax = _swingNormalSpeedAbsMax;
             report.GameNativeGaitStanceClearanceAbsMeanMeters = _stanceClearanceAbsSum / Mathf.Max(1, _stanceSamples);
-            report.GameNativeGaitStanceClearanceAbsMaxMeters = _stanceClearanceAbsMax;
             report.GameNativeGaitSwingClearanceAbsMeanMeters = _swingClearanceAbsSum / Mathf.Max(1, _swingSamples);
-            report.GameNativeGaitSwingClearanceAbsMaxMeters = _swingClearanceAbsMax;
-            report.GameNativeGaitStanceSurfaceSwitches = _stanceSurfaceSwitches;
-            report.GameNativeGaitTraceQualified = qualified;
-            report.GameNativeGaitLastReason = _lastReason;
             report.GameNativeGaitTraceSummary =
                 "n=" + _traceSamples +
                 "/eligible=" + _eligibleSamples +

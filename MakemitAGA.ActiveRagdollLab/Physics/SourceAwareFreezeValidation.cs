@@ -19,7 +19,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     ///    post-close time. A new source event or trace stop censors the unfinished recovery instead of
     ///    falsely counting the upstream interruption as a controller failure.
     ///
-    /// Aggregate validation does not write physics. The legacy FreezeRecoveryActive report is also consumed
+    /// Aggregate validation does not write physics. The legacy published recovery state is also consumed
     /// by leg phase/FF qualification in legacy scopes. Both V04770 dynamic arms instead
     /// consumes DynamicTorsoRecoveryGate; preserve this validator for historical acceptance comparisons.
     /// </summary>
@@ -226,9 +226,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             TraceAbortDetail = "<none>";
         }
 
-        public void ObserveFixedStep(TwoBodyProxyReport report, SourceTurnDiscontinuityDiagnostics sourceTurn, float now)
+        public void ObserveFixedStep(TorsoControlState control, SourceTurnDiscontinuityDiagnostics sourceTurn, float now)
         {
-            if (!_sessionActive || report == null || sourceTurn == null)
+            if (!_sessionActive || control == null || sourceTurn == null)
                 return;
 
             bool sourceEventActive = sourceTurn.EventActive;
@@ -250,21 +250,21 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
             if (sourceEventActive)
             {
-                ObserveSourceEventStep(report);
+                ObserveSourceEventStep(control);
                 return;
             }
 
             if (_recoveryActive)
             {
-                ObserveRecoveryStep(report, now);
+                ObserveRecoveryStep(control, now);
                 return;
             }
 
-            ObserveNormalStep(report);
+            ObserveNormalStep(control);
         }
 
         public void AbortTraceSession(
-            TwoBodyProxyReport report,
+            TorsoControlState control,
             SourceTurnDiscontinuityDiagnostics sourceTurn,
             float now,
             string reason,
@@ -291,7 +291,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             DecisionReason = "DRIVE_DROPPED_DURING_TRACE";
         }
 
-        public void EndTraceSession(TwoBodyProxyReport report, SourceTurnDiscontinuityDiagnostics sourceTurn, float now)
+        public void EndTraceSession(TorsoControlState control, SourceTurnDiscontinuityDiagnostics sourceTurn, float now)
         {
             if (!_sessionActive)
                 return;
@@ -311,10 +311,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             }
 
             _sessionActive = false;
-            Evaluate(report, sourceTurn);
+            Evaluate(control, sourceTurn);
         }
 
-        public void CopyToReport(TwoBodyProxyReport report)
+        public void CopyToReport(TwoBodyProxyReport report, TorsoControlState control)
         {
             if (report == null)
                 return;
@@ -353,7 +353,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             report.FreezeSourceParentFeedforwardClampStepCount = _sourceParentFeedforwardClampSteps;
             report.FreezeSourceMaxAnchorErrorMeters = _sourceMaxAnchorErrorMeters;
 
-            report.FreezeRecoveryActive = _recoveryActive;
+            report.FreezeRecoveryActive = control.PublishLegacyRecovery(_recoveryActive);
             report.FreezeRecoveryStartedCount = _recoveryStartedCount;
             report.FreezeRecoveryCompletedCount = _recoveryCompletedCount;
             report.FreezeRecoveryPassedCount = _recoveryPassedCount;
@@ -377,7 +377,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             report.FreezeValidationThresholds = GetThresholdSummary();
         }
 
-        public string GetSummary(TwoBodyProxyReport report, SourceTurnDiscontinuityDiagnostics sourceTurn)
+        public string GetSummary(TorsoControlState control, SourceTurnDiscontinuityDiagnostics sourceTurn)
         {
             int sourceEvents = sourceTurn != null ? sourceTurn.EventCount : 0;
             int sourceDiscontinuities = sourceTurn != null ? sourceTurn.DiscontinuityEventCount : 0;
@@ -410,47 +410,47 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 " | thresholds=" + GetThresholdSummary();
         }
 
-        private void ObserveNormalStep(TwoBodyProxyReport report)
+        private void ObserveNormalStep(TorsoControlState control)
         {
-            float anchorRelativeSpeed = report.MeasuredAnchorRelativeVelocity.magnitude;
+            float anchorRelativeSpeed = control.MeasuredAnchorRelativeVelocity.magnitude;
 
-            if (!report.MotionTransition && report.MotionPhase == "STEADY")
+            if (!control.MotionTransition && control.MotionPhase == "STEADY")
             {
                 _normalSteadySamples++;
-                _normalSteadyRotationSum += Mathf.Max(0f, report.RotationErrorDegrees);
-                _normalSteadyRotationMax = Mathf.Max(_normalSteadyRotationMax, Mathf.Max(0f, report.RotationErrorDegrees));
-                _normalSteadyChestPositionSum += Mathf.Max(0f, report.ChestPositionErrorMeters);
-                _normalSteadyChestPositionMax = Mathf.Max(_normalSteadyChestPositionMax, Mathf.Max(0f, report.ChestPositionErrorMeters));
+                _normalSteadyRotationSum += Mathf.Max(0f, control.RotationErrorDegrees);
+                _normalSteadyRotationMax = Mathf.Max(_normalSteadyRotationMax, Mathf.Max(0f, control.RotationErrorDegrees));
+                _normalSteadyChestPositionSum += Mathf.Max(0f, control.ChestPositionErrorMeters);
+                _normalSteadyChestPositionMax = Mathf.Max(_normalSteadyChestPositionMax, Mathf.Max(0f, control.ChestPositionErrorMeters));
                 _normalSteadyAnchorRelativeSpeedSum += anchorRelativeSpeed;
                 _normalSteadyAnchorRelativeSpeedMax = Mathf.Max(_normalSteadyAnchorRelativeSpeedMax, anchorRelativeSpeed);
 
-                if (report.AngularAccelerationClamped)
+                if (control.AngularAccelerationClamped)
                     _normalAngularClampSteps++;
-                if (report.ParentFeedforwardAccelerationClamped)
+                if (control.ParentFeedforwardAccelerationClamped)
                     _normalParentFeedforwardClampSteps++;
             }
-            else if (report.MotionTransition && report.MotionPhase == "TURN")
+            else if (control.MotionTransition && control.MotionPhase == "TURN")
             {
                 _normalTurnSamples++;
-                _normalTurnRotationSum += Mathf.Max(0f, report.RotationErrorDegrees);
-                _normalTurnRotationMax = Mathf.Max(_normalTurnRotationMax, Mathf.Max(0f, report.RotationErrorDegrees));
+                _normalTurnRotationSum += Mathf.Max(0f, control.RotationErrorDegrees);
+                _normalTurnRotationMax = Mathf.Max(_normalTurnRotationMax, Mathf.Max(0f, control.RotationErrorDegrees));
                 _normalTurnAnchorRelativeSpeedSum += anchorRelativeSpeed;
                 _normalTurnAnchorRelativeSpeedMax = Mathf.Max(_normalTurnAnchorRelativeSpeedMax, anchorRelativeSpeed);
 
-                if (report.AngularAccelerationClamped)
+                if (control.AngularAccelerationClamped)
                     _normalAngularClampSteps++;
-                if (report.ParentFeedforwardAccelerationClamped)
+                if (control.ParentFeedforwardAccelerationClamped)
                     _normalParentFeedforwardClampSteps++;
             }
         }
 
-        private void ObserveSourceEventStep(TwoBodyProxyReport report)
+        private void ObserveSourceEventStep(TorsoControlState control)
         {
             _sourceEventFixedSteps++;
-            _sourceMaxAnchorErrorMeters = Mathf.Max(_sourceMaxAnchorErrorMeters, Mathf.Max(0f, report.AnchorErrorMeters));
-            if (!IsHealthy(report))
+            _sourceMaxAnchorErrorMeters = Mathf.Max(_sourceMaxAnchorErrorMeters, Mathf.Max(0f, control.AnchorErrorMeters));
+            if (!IsHealthy(control))
                 _sourceInvalidStateSteps++;
-            if (report.ParentFeedforwardAccelerationClamped)
+            if (control.ParentFeedforwardAccelerationClamped)
                 _sourceParentFeedforwardClampSteps++;
         }
 
@@ -474,25 +474,25 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _recoveryStartedCount++;
         }
 
-        private void ObserveRecoveryStep(TwoBodyProxyReport report, float now)
+        private void ObserveRecoveryStep(TorsoControlState control, float now)
         {
-            if (!IsHealthy(report))
+            if (!IsHealthy(control))
                 _currentRecoveryInvalidStateSteps++;
-            if (report.ParentFeedforwardAccelerationClamped)
+            if (control.ParentFeedforwardAccelerationClamped)
                 _currentRecoveryParentFeedforwardClampSteps++;
 
-            _currentRecoveryMaxAnchorErrorMeters = Mathf.Max(_currentRecoveryMaxAnchorErrorMeters, Mathf.Max(0f, report.AnchorErrorMeters));
+            _currentRecoveryMaxAnchorErrorMeters = Mathf.Max(_currentRecoveryMaxAnchorErrorMeters, Mathf.Max(0f, control.AnchorErrorMeters));
 
-            bool anchorRecovered = report.AnchorErrorMeters <= RecoveryAnchorErrorMaxMeters;
-            ObserveRecoveryAttributionStep(report, now, anchorRecovered);
+            bool anchorRecovered = control.AnchorErrorMeters <= RecoveryAnchorErrorMaxMeters;
+            ObserveRecoveryAttributionStep(control, now, anchorRecovered);
             UpdateRecoveryThreshold(
-                report.RotationErrorDegrees <= RecoveryRotationLooseDegrees && anchorRecovered,
+                control.RotationErrorDegrees <= RecoveryRotationLooseDegrees && anchorRecovered,
                 now,
                 ref _looseStableStart,
                 ref _looseRecovered,
                 ref _looseRecoverySeconds);
             UpdateRecoveryThreshold(
-                report.RotationErrorDegrees <= RecoveryRotationStrictDegrees && anchorRecovered,
+                control.RotationErrorDegrees <= RecoveryRotationStrictDegrees && anchorRecovered,
                 now,
                 ref _strictStableStart,
                 ref _strictRecovered,
@@ -661,7 +661,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _censoredRecoveryMaxAnchorErrorMeters = Mathf.Max(_censoredRecoveryMaxAnchorErrorMeters, _currentRecoveryMaxAnchorErrorMeters);
         }
 
-        private void Evaluate(TwoBodyProxyReport report, SourceTurnDiscontinuityDiagnostics sourceTurn)
+        private void Evaluate(TorsoControlState control, SourceTurnDiscontinuityDiagnostics sourceTurn)
         {
             if (TraceAborted)
             {
@@ -686,7 +686,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _normalTurnSamples >= MinNormalTurnSamples;
             NormalTrackingPass =
                 normalDataEnough &&
-                IsHealthy(report) &&
+                IsHealthy(control) &&
                 steadyRotMean <= NormalSteadyRotationMeanMaxDegrees &&
                 _normalSteadyRotationMax <= NormalSteadyRotationPeakMaxDegrees &&
                 steadyPosMean <= NormalSteadyChestPositionMeanMaxMeters &&
@@ -744,13 +744,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 DecisionReason = "UNKNOWN_GATE_FAIL";
         }
 
-        private static bool IsHealthy(TwoBodyProxyReport report)
+        private static bool IsHealthy(TorsoControlState control)
         {
-            return report != null &&
-                   report.FiniteState &&
-                   report.SourceAlive &&
-                   report.CharacterJointPresent &&
-                   report.CharacterJointConnectedBodyMatch;
+            return control != null &&
+                   control.FiniteState &&
+                   control.SourceAlive &&
+                   control.CharacterJointPresent &&
+                   control.CharacterJointConnectedBodyMatch;
         }
 
         private void ResetRecoveryState()
@@ -801,12 +801,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _currentRecoveryEndTargetRelativeAngularSpeed = 0f;
         }
 
-        private void ObserveRecoveryAttributionStep(TwoBodyProxyReport report, float now, bool anchorRecovered)
+        private void ObserveRecoveryAttributionStep(TorsoControlState control, float now, bool anchorRecovered)
         {
-            float rotation = Mathf.Max(0f, report.RotationErrorDegrees);
+            float rotation = Mathf.Max(0f, control.RotationErrorDegrees);
             float elapsed = Mathf.Max(0f, now - _recoveryCloseTime);
-            float targetSpeed = Mathf.Max(0f, report.MotionTargetSpeed);
-            float targetRelAngularSpeed = report.TargetRelativeAngularVelocity.magnitude;
+            float targetSpeed = Mathf.Max(0f, control.MotionTargetSpeed);
+            float targetRelAngularSpeed = control.TargetRelativeAngularVelocity.magnitude;
 
             _currentRecoverySampleCount++;
             _currentRecoveryRotationSum += rotation;
@@ -816,8 +816,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _currentRecoveryTargetSpeedMax = Mathf.Max(_currentRecoveryTargetSpeedMax, targetSpeed);
             _currentRecoveryTargetRelativeAngularSpeedSum += targetRelAngularSpeed;
             _currentRecoveryTargetRelativeAngularSpeedMax = Mathf.Max(_currentRecoveryTargetRelativeAngularSpeedMax, targetRelAngularSpeed);
-            _currentRecoveryLastMotionPhase = report.MotionPhase ?? "<none>";
-            _currentRecoveryLastMotionTransition = report.MotionTransition;
+            _currentRecoveryLastMotionPhase = control.MotionPhase ?? "<none>";
+            _currentRecoveryLastMotionTransition = control.MotionTransition;
             _currentRecoveryEndRotationDegrees = rotation;
             _currentRecoveryEndTargetSpeed = targetSpeed;
             _currentRecoveryEndTargetRelativeAngularSpeed = targetRelAngularSpeed;

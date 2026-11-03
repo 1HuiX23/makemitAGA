@@ -31,8 +31,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         // remaining bounded. The selector never exceeds rawMagnitude, so it cannot create extra command by itself.
         internal const float PredictiveReserveMaxAcceleration = 140f;
         internal const float Epsilon = 0.000001f;
-        internal const int MinTraceSamples = 300;
-        internal const int MinReserveActivationSamples = 1;
 
         private string _arm = ArmA;
         private bool _finite = true;
@@ -279,19 +277,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             report.TranslationPredictiveTailCaptureArm = _arm;
             report.TranslationPredictiveTailCaptureFinite = _finite;
             report.TranslationPredictiveTailCaptureInvalidReason = _invalidReason;
-            report.TranslationPredictiveTailCaptureEnabled = Enabled;
-            report.TranslationPredictiveTailCaptureTraceSamples = _traceSamples;
-            report.TranslationPredictiveTailCaptureDynamicSamples = _traceDynamicSamples;
-            report.TranslationPredictiveTailCaptureBaseEligibleSamples = _traceBaseCaptureEligibleSamples;
-            report.TranslationPredictiveTailCapturePredictedBreachSamples = _tracePredictedBreachSamples;
-            report.TranslationPredictiveTailCaptureReserveActiveSamples = _traceReserveActiveSamples;
-            report.TranslationPredictiveTailCapturePredictedFinalBreachSamples = _tracePredictedFinalBreachSamples;
-            report.TranslationPredictiveTailCaptureUnexpectedElevationSamples = _traceUnexpectedElevationSamples;
-            report.TranslationPredictiveTailCapturePredictedBaselineAnchorMaxMeters = _tracePredictedBaselineNextAnchorMax;
-            report.TranslationPredictiveTailCapturePredictedFinalAnchorMaxMeters = _tracePredictedFinalNextAnchorMax;
-            report.TranslationPredictiveTailCaptureFinalSelectedMaxAccelerationMax = _traceFinalSelectedMaxAccelerationMax;
-            report.TranslationPredictiveTailCaptureFirstReserveFixed = _traceFirstReserveFixed;
-            report.TranslationPredictiveTailCaptureLastReserveFixed = _traceLastReserveFixed;
 
             report.TranslationPredictiveTailCaptureCurrentSummary =
                 "arm=" + _arm +
@@ -336,17 +321,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     F(FootAnkleTranslationCaptureAuthorityIsolation.CaptureMaxAcceleration) + "-" +
                     F(PredictiveReserveMaxAcceleration) +
                 "/model=ONE_STEP_RADIAL_WITH_MEASURED_PARENT_TRANSPORT_AND_BASE_APPLIED_RADIAL";
-        }
-
-        internal string GetStatus(FootAnkleFoundationReport report)
-        {
-            CopyToReport(report);
-            return "mode=" + Mode +
-                   "/arm=" + _arm +
-                   "/finite=" + _finite +
-                   "/reason=" + (_invalidReason ?? "<none>") +
-                   " | current=" + (report != null ? report.TranslationPredictiveTailCaptureCurrentSummary : "<none>") +
-                   " | trace=" + (report != null ? report.TranslationPredictiveTailCaptureTraceSummary : "<none>");
         }
 
         private float Invalidate(string reason, float fallback, FootAnkleFoundationReport report)

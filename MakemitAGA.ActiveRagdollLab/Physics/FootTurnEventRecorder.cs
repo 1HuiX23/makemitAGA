@@ -72,6 +72,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private int _legCaptured, _legUnavailable, _legRawWValid;
         private int _quietFootLegMoving, _quietFootLegQuiet, _quietFootLegUnknown;
 
+        internal FootTurnResponseReceipt ResponseReceipt =>
+            new FootTurnResponseReceipt(_captured, _resolved, _censored, _pending, _sealed);
+
         internal void Reset(PelvisRunScope scope = PelvisRunScope.DynamicLegFreeSpace)
         {
             _traceScope = scope;
@@ -286,6 +289,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         internal string GetDetails()
         {
+            bool compact = RunLogPolicy.CompactLegWindows(_traceScope) && _invalid == 0 && _gaps == 0;
             var sb = new StringBuilder(8192);
             sb.Append("FOOT_TURN_V04650/readOnly=True/scope=").Append(PelvisRunScopes.HasHipCoupling(_traceScope) ? "DYNAMIC_PARENT_HIP_ANCHOR_PAIR_CONTACT" : PelvisRunScopes.HasUpperWeight(_traceScope) ? "DYNAMIC_PARENT_UPPER_SELF_WEIGHT_CONTACT" : PelvisRunScopes.HasKneeCoupling(_traceScope) ? "DYNAMIC_PARENT_KNEE_NORMAL_COUPLING_CONTACT" : _traceScope == PelvisRunScope.DynamicLegLowerSelfWeightContact ? "DYNAMIC_PARENT_LOWER_SELF_WEIGHT_CONTACT" : _traceScope == PelvisRunScope.DynamicLegFootSelfWeightContact ? "DYNAMIC_PARENT_FOOT_SELF_WEIGHT_CONTACT" : _traceScope == PelvisRunScope.DynamicLegUnloadedContact ? "DYNAMIC_PARENT_UNLOADED_CONTACT" : "DYNAMIC_PARENT_FREE_SPACE").Append("/sealed=").Append(_sealed)
                 .Append("/captured-resolved-censored-pending=").Append(_captured).Append('/').Append(_resolved).Append('/').Append(_censored).Append('/').Append(_pending)
@@ -298,11 +302,17 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 .Append("/quietFoot(legSourceMoving-legSourceQuiet-unknown)=").Append(_quietFootLegMoving)
                 .Append('/').Append(_quietFootLegQuiet).Append('/').Append(_quietFootLegUnknown)
                 .AppendLine("/rawW=EXISTING_RENDER_DERIVATIVE_BEFORE_CLAMP_BLEND/quiet=FOOT_W_LE0.05_FRESH_OR_HELD_LE120MS")
-                .AppendLine("legUnits=ROTATION_QUATERNION_WORLD_W_RADSEC_ALPHA_RADSEC2/body=SETTLED_PRE_N/commands=FOR_N_NOT_MEASURED_ALPHA/parentA=PRE_CAP_CONTRIBUTION/NA=UNAVAILABLE_NOT_ZERO/hipTargetW=ACTUAL_D_TARGET_NOT_AFF_SOURCE/hipFinalA=ACTUATOR_ALPHA_REQUEST_NOT_MEASURED_RESPONSE/modes(bits)=1:FRAME,2:SOURCE_ABSORBER,4:HIP_GOVERNOR,8:COMPOSITE_ABSORBER,16:PHYSICAL_RECOVERY,32:RELATIVE_AFF,64:PARENT_TRANSPORT,128:HIP_CLAMP");
+                .AppendLine(compact ? "legUnits=WORLD_W_RADSEC_ALPHA_RADSEC2_TAU_NM/commandA=ACTUATOR_REQUEST_NOT_MEASURED_RESPONSE/nextA=TOTAL_PLANT_RESPONSE_NOT_SINGLE_INPUT_CAUSALITY" : "legUnits=ROTATION_QUATERNION_WORLD_W_RADSEC_ALPHA_RADSEC2/body=SETTLED_PRE_N/commands=FOR_N_NOT_MEASURED_ALPHA/parentA=PRE_CAP_CONTRIBUTION/NA=UNAVAILABLE_NOT_ZERO/hipTargetW=ACTUAL_D_TARGET_NOT_AFF_SOURCE/hipFinalA=ACTUATOR_ALPHA_REQUEST_NOT_MEASURED_RESPONSE/modes(bits)=1:FRAME,2:SOURCE_ABSORBER,4:HIP_GOVERNOR,8:COMPOSITE_ABSORBER,16:PHYSICAL_RECOVERY,32:RELATIVE_AFF,64:PARENT_TRANSPORT,128:HIP_CLAMP");
             AppendStepProgressSummary(sb);
             AppendReferenceSummary(sb);
             AppendHipSummary(sb);
             AppendHipScopeSummary(sb);
+            if (compact)
+            {
+                AppendCompactWindows(sb);
+                return sb.ToString();
+            }
+            sb.AppendLine("turnLogFormat=FULL_DETAIL/reason=" + (RunLogPolicy.CompactLegWindows(_traceScope) ? "DIAGNOSTIC_INVALID_OR_GAP" : "OTHER_SCOPE"));
             sb.AppendLine("NORMAL_HIP_WINDOW_V04790/replaces=QUIET_RAW_WORLD_AWAY/triggerScope=NORMAL_WITH_VALID_HIP/scoreRad=MAX_RAW_LOCAL_BODY_ERROR_AND_VALID_B_INPUT_TO_PLAN_GAP/eachIndependentPeakMayDiffer=True/prePostMayCrossScopes=True/windowRowsNotRunHistogram=True/empty=NO_ELIGIBLE_NORMAL_HIP_EVIDENCE");
             sb.AppendLine("HIP_FF_GATE_V04770/readOnly=True/reason=ACTUAL_FF_OWNER_FIRST_MATCH/stateBits=1:NO_TORSO,2:SOURCE_TURN,4:SELECTED_TORSO_RECOVERY,8:HIP_RECOVERY,16:KNEE_RECOVERY,32:CONTROL_FRAME,64:HIP_UNHEALTHY,128:KNEE_UNHEALTHY,256:HIP_REFERENCE_GOAL_BRIDGE/healthBits=CONTEXT_NOT_EXTRA_FF_GATES/inputA=COHERENT_NORMAL_WORLD_A_WHEN_APPLIED_ELSE_RENDER_RELATIVE_A_IN_CONTROL_PARENT_WORLD_BASIS/selectedA=BEFORE_FINAL_HIP_SUM_AND_CAP_NOT_NET_BODY_A/staleThreshold=MAX_0_MAXAGE_PLUS_0.0001_SECONDS/NA=OPTIONAL_NOT_FOOT_OR_HIP_QUALIFICATION");
             sb.AppendLine("HIP_NORMAL_V04780/poseW=ONE_SHARED_FIXED_TRAJECTORY/normalFF=WORLD_PLANNER_A_NO_EXTRA_PARENT_A/limits=W_HIP40_OVER_KD12_A_FF20/notHumanLimits=True/NA=BASELINE_OR_OPTIONAL_ONLY/noNewRing=True");

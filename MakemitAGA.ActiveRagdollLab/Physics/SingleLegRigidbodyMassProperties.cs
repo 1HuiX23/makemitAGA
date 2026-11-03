@@ -32,16 +32,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             public bool ColliderEnabled;
             public Vector3 ColliderCenterLocal;
             public Vector3 ColliderSizeLocal;
-            public Vector3 LocalScale;
-            public Vector3 LossyScale;
             public Vector3 PhysicalBoxSize;
             public Vector3 RuntimeCenterOfMassLocal;
-            public Vector3 RuntimeWorldCenterOfMass;
             public Vector3 RuntimeInertiaTensor;
-            public Quaternion RuntimeInertiaTensorRotation;
             public Vector3 ExpectedCenterOfMassLocal;
             public Vector3 ExpectedUniformBoxInertiaTensor;
-            public Quaternion ExpectedInertiaTensorRotation;
             public float RuntimeAxisEffectiveInertia;
             public float ExpectedAxisEffectiveInertia;
             public bool RuntimeUnitTensorSuspect;
@@ -72,8 +67,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         public bool AuditCompleted => _auditCompleted;
         public bool BuildFoundationValidated => _buildFoundationValidated;
         public string LastError => _lastError;
-        public Snapshot Upper => _upper;
-        public Snapshot Lower => _lower;
 
         public bool ApplyValidatedBuildFoundation(
             Rigidbody upperBody,
@@ -206,16 +199,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 ColliderEnabled = collider.enabled,
                 ColliderCenterLocal = collider.center,
                 ColliderSizeLocal = collider.size,
-                LocalScale = collider.transform.localScale,
-                LossyScale = collider.transform.lossyScale,
                 PhysicalBoxSize = physical,
                 RuntimeCenterOfMassLocal = body.centerOfMass,
-                RuntimeWorldCenterOfMass = body.worldCenterOfMass,
                 RuntimeInertiaTensor = runtimeTensor,
-                RuntimeInertiaTensorRotation = runtimeTensorRotation,
                 ExpectedCenterOfMassLocal = expectedCom,
                 ExpectedUniformBoxInertiaTensor = expectedTensor,
-                ExpectedInertiaTensorRotation = Quaternion.identity,
                 RuntimeAxisEffectiveInertia = CalculateAxisEffectiveInertia(body.rotation, runtimeTensorRotation, runtimeTensor, axisWorld),
                 ExpectedAxisEffectiveInertia = CalculateAxisEffectiveInertia(body.rotation, Quaternion.identity, expectedTensor, axisWorld),
                 RuntimeUnitTensorSuspect = Approximately(runtimeTensor.x, 1f) && Approximately(runtimeTensor.y, 1f) && Approximately(runtimeTensor.z, 1f),
@@ -379,7 +367,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         private static bool IsFinite(float value) => !(float.IsNaN(value) || float.IsInfinity(value));
         private static bool IsFinite(Vector3 value) => IsFinite(value.x) && IsFinite(value.y) && IsFinite(value.z);
-        private static bool IsFinite(Quaternion value) => IsFinite(value.x) && IsFinite(value.y) && IsFinite(value.z) && IsFinite(value.w);
         private static string F(float value) => value.ToString("G6", CultureInfo.InvariantCulture);
         private static string V(Vector3 value) => "(" + F(value.x) + "," + F(value.y) + "," + F(value.z) + ")";
     }

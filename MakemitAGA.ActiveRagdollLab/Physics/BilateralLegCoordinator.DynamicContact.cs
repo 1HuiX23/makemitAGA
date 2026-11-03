@@ -22,6 +22,23 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 if (!_contactShadowSelfPairReadback || _contactShadowSelfPairPrimary != _primary.FootContactShadowCollider ||
                     _contactShadowSelfPairSecondary != _secondary.FootContactShadowCollider)
                     return DynamicContactBoundaryIssue.FootSelfPair;
+                bool continuousEntry = PelvisRunScopes.HasHipCoupling(_primary.DynamicScope);
+                bool recoveryEntry = continuousEntry;
+                bool partialGround = continuousEntry;
+                bool coherentKnee = continuousEntry;
+                bool plannedKneeFeedforward = continuousEntry;
+                bool loadAdmission = continuousEntry && _torso != null &&
+                    _torso.PelvisReceiverControl.Arm == PelvisDynamicReceiverIsolation.DynamicHipArmB;
+                if (_primary.ContactEntryContinuous != continuousEntry || _secondary.ContactEntryContinuous != continuousEntry ||
+                    _primary.ContactEntryRecovery != recoveryEntry || _secondary.ContactEntryRecovery != recoveryEntry ||
+                    _primary.StanceLoadAdmissionSelected != loadAdmission || _secondary.StanceLoadAdmissionSelected != loadAdmission ||
+                    _primary.GroundReferenceEnabled != continuousEntry || _secondary.GroundReferenceEnabled != continuousEntry ||
+                    _primary.GroundReferenceApplied != continuousEntry || _secondary.GroundReferenceApplied != continuousEntry ||
+                    _primary.GroundReferencePartial != partialGround || _secondary.GroundReferencePartial != partialGround ||
+                    _primary.KneeReferenceSelected != coherentKnee || _secondary.KneeReferenceSelected != coherentKnee ||
+                    _primary.KneePlannedFeedforwardSelected != plannedKneeFeedforward ||
+                    _secondary.KneePlannedFeedforwardSelected != plannedKneeFeedforward)
+                    return DynamicContactBoundaryIssue.ContactLifecycle;
                 DynamicContactBoundaryIssue primary = _primary.DynamicContactIssue;
                 return primary != DynamicContactBoundaryIssue.None ? primary : _secondary.DynamicContactIssue;
             }
@@ -50,6 +67,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             string support = ConfigureFootSupportSurface(FootSupportSurfaceIsolation.ArmB);
             if (!_supportSurface.Active || !_supportSurface.Finite || _supportSurface.Arm != FootSupportSurfaceIsolation.ArmB)
                 throw new InvalidOperationException("DYNAMIC_CONTACT_SUPPORT_SETUP_FAILED:" + support);
+            bool continuousEntry = PelvisRunScopes.HasHipCoupling(scope);
+            bool recoveryEntry = continuousEntry;
+            bool partialGround = continuousEntry;
+            bool loadAdmission = continuousEntry && _torso != null &&
+                _torso.PelvisReceiverControl.Arm == PelvisDynamicReceiverIsolation.DynamicHipArmB;
+            _primary.SelectContactEntryContinuous(continuousEntry, recoveryEntry, continuousEntry, partialGround, loadAdmission);
+            _secondary.SelectContactEntryContinuous(continuousEntry, recoveryEntry, continuousEntry, partialGround, loadAdmission);
             SetStanceOnlyContactQualification(true);
             // Select the existing gravity owner while native gravity is still OFF; only its post-controller
             // scheduler may enable Foot gravity for a subsequent exact-authorized stance solve.
@@ -65,18 +89,23 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         }
 
         internal string DynamicContactBoundarySummary() => "dynamicContactBoundary=V04870/selected=" + DynamicContactSelected +
+            "/kneeReference(primary-secondary)=" + (_primary?.KneeReferenceSelected ?? false) + ":" + (_secondary?.KneeReferenceSelected ?? false) +
+            "/kneePlannedFF(primary-secondary)=" + (_primary?.KneePlannedFeedforwardSelected ?? false) + ":" + (_secondary?.KneePlannedFeedforwardSelected ?? false) +
+            "/loadAdmission(primary-secondary)=" + (_primary?.StanceLoadAdmissionSelected ?? false) + ":" + (_secondary?.StanceLoadAdmissionSelected ?? false) +
             "/scope(primary-secondary)=" + (_primary?.DynamicScope.ToString() ?? "MISSING") + ":" + (_secondary?.DynamicScope.ToString() ?? "MISSING") +
             "/issue=" + DynamicContactIssue + "/primary=" + (_primary?.DynamicContactIssue ?? DynamicContactBoundaryIssue.MissingFoundation) +
             "/secondary=" + (_secondary?.DynamicContactIssue ?? DynamicContactBoundaryIssue.MissingFoundation) +
             "/support=" + _supportSurface.Arm + "/supportId=" + _supportSurface.SelectedId +
             "/footPairIgnored=" + _contactShadowSelfPairReadback +
             "/predictiveCapture=" + TranslationPredictiveTailCaptureArm +
+            "/entryPolicy=" + (_primary != null && _primary.ContactEntryContinuous ? (_primary.ContactEntryRecovery ? "SHALLOW_RECOVERY" : "STRICT_BOX") : "LEGACY_SERIAL") +
+            "/groundReference=" + (_primary != null && _primary.GroundReferenceEnabled ? (_primary.GroundReferenceApplied ? (_primary.GroundReferencePartial ? "FEASIBLE_OR_PARTIAL_RENDER_GOAL" : "FEASIBLE_RENDER_GOAL") : "OBSERVE_ONLY") : "OFF") +
             "/requiredContact=EXACT_STANCE/requiredZeroFriction=True/requiredCCD=SPECULATIVE/requiredContactOffsetMm=20/requiredPositionIterations=12/requiredVelocityIterations=CAPTURED" +
             "/requiredFootGravity=" + (_primary != null && PelvisRunScopes.HasFootWeight(_primary.DynamicScope) ? "EXACT_STANCE_NATIVE" : "OFF") +
             "/requiredLowerWeight=" + (_primary != null && PelvisRunScopes.HasLowerWeight(_primary.DynamicScope) ? "NATIVE_GRAVITY_PLUS_NORMAL_FORCE_PAIR" : "OFF") +
             "/requiredKneeReaction=" + (_primary != null && PelvisRunScopes.HasKneeCoupling(_primary.DynamicScope) ? "REDUCED_MASS_NORMAL_PD_PAIR" : "OFF") +
             "/requiredUpperGravity=" + (_primary != null && PelvisRunScopes.HasUpperWeight(_primary.DynamicScope) ? "EXACT_STANCE_SERIAL_SELF_WEIGHT" : "OFF") +
-            "/requiredTorsoGravity=OFF/requiredReciprocal=OFF/hipReaction=" + (_primary != null && PelvisRunScopes.HasHipCoupling(_primary.DynamicScope) ? "TRANSLATION_AT_HIP_ANCHORS" : "NOT_ROUTED") + "/hipAngularControllerReaction=OFF/loadedSupportCertified=False";
+            "/requiredTorsoGravity=OFF/requiredReciprocal=OFF/hipReaction=" + (_primary != null && PelvisRunScopes.HasHipCoupling(_primary.DynamicScope) ? "TRANSLATION_AT_HIP_ANCHORS" : "NOT_ROUTED") + "/hipAngularControllerReaction=" + PelvisDynamicReceiverIsolation.HipReactionName(_torso == null ? null : _torso.PelvisReceiverControl.Arm) + "/loadedSupportCertified=False";
 
         // Read-only qualification of THIS scope. Historical kinematic Pelvis load-path readiness is not reused.
         internal string DynamicContactEvidence(bool runReady, PelvisRunScope scope)
@@ -96,18 +125,35 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             bool upper = !upperWeight || (UpperWeightEvidenceReady(PrimaryReport, PrimaryFootReport) && UpperWeightEvidenceReady(SecondaryReport, SecondaryFootReport));
             bool hip = !PelvisRunScopes.HasHipCoupling(scope) || (_primary.HipAnchorPair.EvidenceReady && _secondary.HipAnchorPair.EvidenceReady &&
                 _primary.HipAnchorPair.Samples == PrimaryReport.TraceSamples && _secondary.HipAnchorPair.Samples == SecondaryReport.TraceSamples);
-            bool ready = hip && upper && runReady && DynamicContactMatchesScope(scope) && surface && left && right && gravity && lower && knee;
+            bool boundary = DynamicContactMatchesScope(scope);
+            bool lowerLedger = lowerWeight && LowerLedgerEvidenceReady(PrimaryFootReport) && LowerLedgerEvidenceReady(SecondaryFootReport);
+            bool upperLedger = upperWeight && UpperLedgerEvidenceReady(PrimaryReport?.UpperSelfWeightSupport) &&
+                UpperLedgerEvidenceReady(SecondaryReport?.UpperSelfWeightSupport);
+            bool wrench = upperWeight && _hipPelvisLoadPath.Report.DynamicMode && _hipPelvisLoadPath.Report.EvidenceReady;
+            bool ready = hip && upper && runReady && boundary && surface && left && right && gravity && lower && knee;
+            string missing = "";
+            if (!runReady) missing += "RUNTIME_SAFETY;";
+            if (!boundary) missing += "DYNAMIC_BOUNDARY;";
+            if (!surface) missing += "SUPPORT_EXPOSURE;";
+            if (!left) missing += "LEFT_CONTACT;";
+            if (!right) missing += "RIGHT_CONTACT;";
+            if (!gravity) missing += "FOOT_GRAVITY;";
+            if (!lower) missing += "LOWER_WEIGHT;";
+            if (!knee) missing += "KNEE_COUPLING;";
+            if (!upper) missing += "UPPER_WEIGHT;";
+            if (!hip) missing += "HIP_PAIR;";
             return PelvisRunScopes.Dataset(scope) + "=" + ready +
                 " | runtimeAndSafetyReady=" + runReady + " | supportExposureReady=" + surface +
                 " | bilateralContactEvidence(primary-secondary)=" + left + ":" + right +
-                " | gravityScopeEvidenceReady=" + gravity + " | footSelfWeightEvidenceReady=" + (footSelfWeight && ready) +
-                " | lowerSelfWeightEvidenceReady=" + (lowerWeight && ready) +
-                " | hipAnchorTranslationPairEvidenceReady=" + (PelvisRunScopes.HasHipCoupling(scope) && ready) +
-                " | dynamicHipWrenchInputEvidenceReady=" + (upperWeight && ready && _hipPelvisLoadPath.Report.DynamicMode && _hipPelvisLoadPath.Report.EvidenceReady) +
-                " | upperSelfWeightEvidenceReady=" + (upperWeight && ready) +
-                " | upperLoadLedgerEvidenceReady=" + (upperWeight && ready && PrimaryReport.UpperSelfWeightSupport.LedgerFinite && SecondaryReport.UpperSelfWeightSupport.LedgerFinite) +
-                " | kneeNormalCouplingEvidenceReady=" + (kneeCoupling && ready) +
-                " | lowerLoadLedgerEvidenceReady=" + (lowerWeight && ready && LowerLedgerEvidenceReady(PrimaryFootReport) && LowerLedgerEvidenceReady(SecondaryFootReport)) +
+                " | gravityScopeEvidenceReady=" + gravity + " | footSelfWeightEvidenceReady=" + (footSelfWeight && gravity) +
+                " | lowerSelfWeightEvidenceReady=" + (lowerWeight && lower) +
+                " | hipAnchorTranslationPairEvidenceReady=" + (PelvisRunScopes.HasHipCoupling(scope) && hip) +
+                " | dynamicHipWrenchInputEvidenceReady=" + wrench +
+                " | upperSelfWeightEvidenceReady=" + (upperWeight && upper) +
+                " | upperLoadLedgerEvidenceReady=" + upperLedger +
+                " | kneeNormalCouplingEvidenceReady=" + (kneeCoupling && knee) +
+                " | lowerLoadLedgerEvidenceReady=" + lowerLedger +
+                " | evidenceSemantics=LOCAL_PREREQUISITES_NOT_AGGREGATE_PASS_V041190 | missingPrerequisites=" + (missing.Length == 0 ? "<none>" : missing) +
                 " | loadedSupportCertified=False | wholeBodyBalanceCertified=False\n" + DynamicContactBoundarySummary() +
                 "\n" + _supportSurface.Summary() + "\n" + ContactEvidenceSummary("PRIMARY", PrimaryFootReport) +
                 "\n" + ContactEvidenceSummary("SECONDARY", SecondaryFootReport);
@@ -131,6 +177,14 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private static bool LowerLedgerEvidenceReady(FootAnkleFoundationReport foot) => foot != null &&
             foot.DynamicNormalLoadFinite && foot.DynamicNormalLoadEvidenceReady &&
             foot.SupportNormalWindowFinite && foot.SupportNormalWindowEvidenceReady;
+
+        // Finite defaults alone are not collected evidence. Keep the existing load-exposure
+        // minimum and require the ledger's complete resolved/censored accounting independently.
+        private static bool UpperLedgerEvidenceReady(UpperSelfWeightSupportReport r) => r != null &&
+            r.LedgerFinite && r.Samples > 0 && r.LedgerCaptured == r.Samples &&
+            r.LedgerLoaded >= UpperSelfWeightSupportNormalLoadTransferIsolation.MinimumEligibleSamples &&
+            r.LedgerResolved >= r.LedgerLoaded && r.LedgerCensored >= 0 &&
+            r.LedgerResolved + r.LedgerCensored == r.LedgerCaptured;
 
         private static bool KneeCouplingEvidenceReady(SingleLegChainReport leg, FootAnkleFoundationReport foot)
         {
@@ -178,7 +232,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             r.StanceFootNativeGravityArm == FootStanceNativeGravitySupportLoadIsolation.ArmA && r.StanceFootNativeGravityFinite &&
             r.StanceFootNativeGravityAppliedSamples == 0 && r.StanceFootNativeGravityCallbackGravityOnSamples == 0 &&
             r.StanceFootNativeGravityNonStanceAppliedSamples == 0 && r.StanceFootNativeGravityReadbackFailures == 0;
-        private static bool ContactEvidenceReady(FootAnkleFoundationReport r) => r != null && r.Finite &&
+        private static bool ContactEvidenceReady(FootAnkleFoundationReport r) => r != null && r.Finite && r.ContactEntryEvidenceReady &&
             r.ContactShadowFinite && r.ContactShadowTraceQualified && r.StanceContactLifecycleFinite &&
             r.StanceContactLifecycleTraceQualified && r.MechanicalReactionFinite && r.MechanicalReactionTraceQualified &&
             r.ContactShadowIsolationFailures == 0 && r.ContactShadowRestoreFailures == 0 &&
@@ -190,7 +244,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             "/mechanical(impulseRead-response-nonzero)=" + r.MechanicalReactionTraceImpulseReadSamples + "-" +
             r.MechanicalReactionTraceResponseSamples + "-" + r.MechanicalReactionTraceNonZeroImpulseSamples +
             "/qualified(identity-lifecycle-mechanical)=" + r.ContactShadowTraceQualified + "-" +
-            r.StanceContactLifecycleTraceQualified + "-" + r.MechanicalReactionTraceQualified;
+            r.StanceContactLifecycleTraceQualified + "-" + r.MechanicalReactionTraceQualified +
+            "/contactEntry=" + (r.ContactEntrySummary ?? "<none>");
 
         internal bool RestoreDynamicContact(StringBuilder evidence)
         {

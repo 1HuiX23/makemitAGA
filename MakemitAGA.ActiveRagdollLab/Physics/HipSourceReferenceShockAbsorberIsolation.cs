@@ -2,6 +2,7 @@ using System;
 using MakemitAGA.ActiveRagdollLab.Configuration;
 using MakemitAGA.ActiveRagdollLab.Model;
 using UnityEngine;
+using static MakemitAGA.ActiveRagdollLab.Physics.HipReferenceTrajectoryMath;
 
 namespace MakemitAGA.ActiveRagdollLab.Physics
 {
@@ -400,41 +401,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _currentOutputAngularAcceleration = 0f;
             _currentMaxW = 0f;
             _currentMaxA = 0f;
-        }
-
-        private static Vector3 ComputeBrakingDesiredAngularVelocity(Quaternion from, Quaternion to, float maxA, float maxW, float dt)
-        {
-            Quaternion delta = Normalize(to * Quaternion.Inverse(from));
-            delta.ToAngleAxis(out float angleDegrees, out Vector3 axis);
-            if (!Finite(angleDegrees) || !Finite(axis) || axis.sqrMagnitude < 1e-12f)
-                return Vector3.zero;
-            if (angleDegrees > 180f) angleDegrees -= 360f;
-            float angleRad = angleDegrees * Mathf.Deg2Rad;
-            if (Mathf.Abs(angleRad) < 1e-6f)
-                return Vector3.zero;
-            axis.Normalize();
-            float stoppingLimitedW = Mathf.Sqrt(Mathf.Max(0f, 2f * maxA * Mathf.Abs(angleRad)));
-            float oneStepSpeed = Mathf.Abs(angleRad) / Mathf.Max(0.0001f, dt);
-            float desiredSpeed = Mathf.Min(maxW, Mathf.Min(stoppingLimitedW, oneStepSpeed));
-            return axis * Mathf.Sign(angleRad) * desiredSpeed;
-        }
-
-        private static Quaternion IntegrateRotation(Quaternion pose, Vector3 angularVelocityLocal, float dt)
-        {
-            float speed = angularVelocityLocal.magnitude;
-            if (!Finite(speed) || speed < 1e-7f)
-                return Normalize(pose);
-            Vector3 axis = angularVelocityLocal / speed;
-            Quaternion step = Quaternion.AngleAxis(speed * dt * Mathf.Rad2Deg, axis);
-            return Normalize(step * pose);
-        }
-
-        private static Quaternion Normalize(Quaternion q)
-        {
-            float mag = Mathf.Sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
-            if (!Finite(mag) || mag < 1e-8f) return Quaternion.identity;
-            float inv = 1f / mag;
-            return new Quaternion(q.x * inv, q.y * inv, q.z * inv, q.w * inv);
         }
 
         private static bool Finite(Quaternion q) => Finite(q.x) && Finite(q.y) && Finite(q.z) && Finite(q.w);

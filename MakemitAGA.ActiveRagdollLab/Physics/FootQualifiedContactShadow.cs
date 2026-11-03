@@ -32,13 +32,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal const int MinMatchedCallbacks = 5;
         internal const int SourceIsolationRescanFixedInterval = 30;
 
-        private sealed class OwnedIgnorePair
-        {
-            internal Collider Foot;
-            internal Collider Other;
-        }
-
-        private readonly List<OwnedIgnorePair> _ownedIgnorePairs = new List<OwnedIgnorePair>();
+        private readonly OwnedCollisionIgnorePairs _ownedIgnorePairs = new OwnedCollisionIgnorePairs();
         private readonly HashSet<int> _sourceColliderRegistry = new HashSet<int>();
         private readonly List<Collider> _sourceColliderRefs = new List<Collider>();
         private Transform _sourceRoot;
@@ -89,7 +83,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal bool Prepared => _prepared;
         internal bool Active => _active;
         internal bool Finite => _finite;
-        internal string InvalidReason => _invalidReason;
         internal int AuthorizedColliderId => _authorizedColliderId;
         internal Collider AuthorizedCollider => _authorizedCollider;
         internal bool LastCallbackWasAuthorized { get; private set; }
@@ -188,9 +181,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                             continue;
                         }
 
+                        // Record the original unignored pair before touching native state. A setter
+                        // may throw after changing it, so rollback must already own the restoration.
+                        OwnIgnorePair(other);
                         UnityEngine.Physics.IgnoreCollision(_footCollider, other, true);
-                        _ownedIgnorePairs.Add(new OwnedIgnorePair { Foot = _footCollider, Other = other });
-                        _ownedIsolationPairs++;
+                        if (other.enabled && other.gameObject.activeInHierarchy &&
+                            !UnityEngine.Physics.GetIgnoreCollision(_footCollider, other))
+                            throw new InvalidOperationException("SCENE_PAIR_ISOLATION_READBACK_FAILED:" + other.GetInstanceID());
                     }
                 }
 
@@ -515,51 +512,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             report.ContactShadowLastCallbackColliderInstanceId = _lastCallbackColliderId;
             report.ContactShadowLastCallbackColliderPath = _lastCallbackColliderPath;
             report.ContactShadowTraceQualified = traceQualified;
-            report.ContactShadowCurrentSummary =
-                "arm=" + _arm +
-                "/prepared=" + _prepared +
-                "/active=" + _active +
-                "/authorizedId=" + _authorizedColliderId +
-                "/authorizedSurface=" + Clean(_authorizedColliderPath) +
-                "/footCollider=" + (_footCollider != null && _footCollider.enabled) +
-                "/contactActive=" + _contactActive +
-                "/sourceRegistry=" + _sourceRegistryCount +
-                "/sourceAux=" + _sourceAuxiliaryRegistryCount +
-                "/sourceReadbackFail=" + _sourceIsolationReadbackFailures;
-            report.ContactShadowTraceSummary =
-                "fixed=" + _traceFixedSamples +
-                "/rayMatch=" + _traceRaycastMatchSamples +
-                "/rayNoHit=" + _traceRaycastNoHitSamples +
-                "/rayMismatch=" + _traceRaycastMismatchSamples +
-                "/callback(E-S-X)=" + _traceEnter + "-" + _traceStay + "-" + _traceExit +
-                "/matched=" + _traceMatchedCallbacks +
-                "/unexpected=" + _traceUnexpectedCallbacks +
-                "/sceneColliders=" + _sceneColliderCount +
-                "/ownedIgnore=" + _ownedIsolationPairs +
-                "/alreadyIgnored=" + _alreadyIgnoredPairs +
-                "/sourceRegistry(aux)=" + _sourceRegistryCount + "(" + _sourceAuxiliaryRegistryCount + ")" +
-                "/sourceLate=" + _sourceLateDiscoveries +
-                "/sourceRepair=" + _sourceIsolationRepairs +
-                "/sourceReadbackFail=" + _sourceIsolationReadbackFailures +
-                "/sourceCallback(E-S-X)=" + _sourceCallbackEnter + "-" + _sourceCallbackStay + "-" + _sourceCallbackExit +
-                "/sourceQuarantined=" + _sourceCallbacksQuarantined +
-                "/lastSource=" + _lastSourceColliderId + ":" + Clean(_lastSourceColliderPath) +
-                "/isolationFailures=" + _isolationFailures +
-                "/restoreFailures=" + _restoreFailures +
-                "/last=" + Clean(_lastCallbackPhase) + ":" + _lastCallbackColliderId + ":" + Clean(_lastCallbackColliderPath) +
-                "/TRACE_CONTACT_SHADOW_QUALIFIED=" + traceQualified +
-                "/thresholds(rayMatch-callback)=" + MinRaycastMatchSamples + "-" + MinMatchedCallbacks +
-                "/gravityReadback=STANCE_NATIVE_GRAVITY_OWNER/mechanicalReaction=READ_DOWNSTREAM_V0430_SUPPORT_NORMAL_ONLY";
-        }
-
-        internal string GetStatus(FootAnkleFoundationReport report)
-        {
-            CopyToReport(report);
-            return "mode=" + Mode +
-                   "/finite=" + _finite +
-                   "/reason=" + (_invalidReason ?? "<none>") +
-                   " | current=" + (report != null ? report.ContactShadowCurrentSummary : "<none>") +
-                   " | trace=" + (report != null ? report.ContactShadowTraceSummary : "<none>");
+            report.ContactShadowFootColliderEnabled = _footCollider != null && _footCollider.enabled;
+            report.ContactShadowMinRaycastMatchSamples = MinRaycastMatchSamples;
+            report.ContactShadowMinMatchedCallbacks = MinMatchedCallbacks;
         }
 
         private void ResetSourceIsolationState()
@@ -702,9 +657,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 bool ignored = UnityEngine.Physics.GetIgnoreCollision(_footCollider, other);
                 if (!ignored)
                 {
+                    OwnIgnorePair(other);
                     UnityEngine.Physics.IgnoreCollision(_footCollider, other, true);
-                    _ownedIgnorePairs.Add(new OwnedIgnorePair { Foot = _footCollider, Other = other });
-                    _ownedIsolationPairs++;
                     _sourceIsolationRepairs++;
                 }
 
@@ -781,6 +735,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 reason = "AUTHORIZED_COLLIDER_DISABLED";
                 return false;
             }
+            if (!_authorizedCollider.gameObject.activeInHierarchy)
+            {
+                reason = "AUTHORIZED_COLLIDER_INACTIVE_HIERARCHY";
+                return false;
+            }
             if (_authorizedCollider.isTrigger)
             {
                 reason = "AUTHORIZED_COLLIDER_BECAME_TRIGGER";
@@ -807,21 +766,17 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             return true;
         }
 
+        private void OwnIgnorePair(Collider other)
+        {
+            // IgnoreCollision can be reset by source activation changes. Reapplying the
+            // same owned pair needs one restoration receipt, not one receipt per stride.
+            if (_ownedIgnorePairs.Remember(_footCollider, other))
+                _ownedIsolationPairs++;
+        }
+
         private int RestoreOwnedIgnorePairs()
         {
-            int failures = 0;
-            for (int i = _ownedIgnorePairs.Count - 1; i >= 0; i--)
-            {
-                OwnedIgnorePair pair = _ownedIgnorePairs[i];
-                try
-                {
-                    if (pair.Foot != null && pair.Other != null)
-                        UnityEngine.Physics.IgnoreCollision(pair.Foot, pair.Other, false);
-                    // Drop only successful/dead pairs. An exception retains ownership for retry/rollback.
-                    _ownedIgnorePairs.RemoveAt(i);
-                }
-                catch { failures++; }
-            }
+            int failures = _ownedIgnorePairs.RestoreAll();
             _restoreFailures += failures;
             return failures;
         }

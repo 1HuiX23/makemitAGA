@@ -16,7 +16,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (_supportSurface == null || !_supportSurface.Active || !_supportSurface.Finite ||
                 _supportSurface.Arm != FootSupportSurfaceIsolation.ArmB || _supportSurface.SelectedId == 0)
                 return DynamicContactBoundaryIssue.SupportSurface;
-            if (!_stanceContactLifecycle.Enabled || !_stanceContactLifecycle.Finite)
+            if (!_loadAdmission.Finite || !_stanceContactLifecycle.Enabled || !_stanceContactLifecycle.Finite ||
+                (_groundReference.Enabled && !_groundReference.Finite))
                 return DynamicContactBoundaryIssue.ContactLifecycle;
             // Prepared-but-released contact is valid during swing. Active contact must name the exact owned Box.
             if (!_contactShadow.Finite || !_contactShadow.RuntimeContractValid(_collider) ||
@@ -55,6 +56,14 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             string required = footSelfWeight ? FootStanceNativeGravitySupportLoadIsolation.ArmB : FootStanceNativeGravitySupportLoadIsolation.ArmA;
             if (_stanceFootNativeGravity.Arm != required || !_stanceFootNativeGravity.Finite ||
                 _body.useGravity != _stanceFootNativeGravity.CurrentApplied) return false;
+            if (_loadAdmission.Selected)
+            {
+                // Preparation may retain a completed calibration step in the Foot report.
+                // A newly selected admission has no command receipt yet and must remain unloaded.
+                if (!_loadAdmission.HasStep) return !_stanceFootNativeGravity.CurrentApplied;
+                if (!_loadAdmission.Matches(_report.RuntimeContext, LastCompletedControlFixedSequence) ||
+                    _stanceFootNativeGravity.CurrentApplied != _loadAdmission.Eligible) return false;
+            }
             if (!_body.useGravity) return true;
             // Before the next Foot controller clears gravity, the previous completed stance solve may own it.
             // ENTER/EXIT callbacks describe the solved contact, not the eligibility used to issue
@@ -62,7 +71,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             // above, and the next lifecycle releases gravity before any further physics advance.
             return footSelfWeight &&
                 _report.StanceFootNativeGravityCurrentScheduledFixed > 0 &&
-                _report.StanceFootNativeGravityCurrentScheduledFixed == _report.FootControllerLastCompletedFixedSequence;
+                _report.StanceFootNativeGravityCurrentScheduledFixed == LastCompletedControlFixedSequence;
         }
     }
 }

@@ -13,7 +13,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     /// </summary>
     internal sealed class KneeSupportNormalReactionIsolation
     {
-        internal const string Mode = "KNEE_REDUCED_MASS_NORMAL_PD_CAUSAL_AB_V04430";
         internal const string ArmA = "A_V04430_CHILD_ONLY_BASELINE";
         internal const string ArmB = "B_V04430_REDUCED_MASS_NORMAL_PD";
         internal const int MinimumEligibleSamples = 50;

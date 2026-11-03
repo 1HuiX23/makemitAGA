@@ -84,7 +84,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private string _invalidReason;
         private string _lastReadFailureStage;
         private string _lastReadFailureType;
-        private string _lastReadFailureMessage;
 
         private bool _preValid;
         private int _preFixedSequence;
@@ -129,7 +128,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private bool _previousSupportValid;
 
         // v0.4.3.2 read-only attribution. These counters classify which lateral probe diverged from
-        // the center/primary support surface. Episode records retain first/peak-spread/last snapshots only.
+        // the center/primary support surface. The active episode retains first/peak-spread/last
+        // snapshots until its close-time log; closed details are not duplicated in an unread catalog.
         private int _traceInvalidLateralLeftOnlySamples;
         private int _traceInvalidLateralRightOnlySamples;
         private int _traceInvalidLateralBothSamples;
@@ -141,12 +141,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private int _alternateColliderRecordCount;
         private int _alternateColliderOverflowCount;
         private string _alternateColliderCatalogCache = "<none>";
-        private readonly InvalidEpisodeRecord[] _invalidEpisodeRecords = new InvalidEpisodeRecord[MaxInvalidEpisodeRecords];
         private int _invalidEpisodeRecordCount;
         private int _invalidEpisodeRecordOverflowCount;
         private bool _invalidEpisodeActive;
         private InvalidEpisodeRecord _activeInvalidEpisode;
-        private string _invalidEpisodeAttributionCache = "<none>";
 
         private int _traceProjectionSamples;
         private int _traceReadFailures;
@@ -156,7 +154,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private int _traceImpulseReadFailures;
         private int _traceRelativeVelocityReadSamples;
         private int _traceRelativeVelocityReadFailures;
-        private int _tracePostBodyReadSamples;
         private int _tracePostBodyReadFailures;
         private int _traceNonZeroImpulseSamples;
         private int _traceAlignedImpulseSamples;
@@ -210,8 +207,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private float _lastPositionResidual;
         private int _lastCollisionPreFixedSequence;
 
-        internal bool Finite => _finite;
-        internal string InvalidReason => _invalidReason;
 
         // v0.4.4.1 read-only diagnostic taps. The sequence is latched at collision-callback time so a
         // subsequent CapturePrePhysics call cannot make a previous callback look like the current step.
@@ -229,7 +224,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _invalidReason = null;
             _lastReadFailureStage = null;
             _lastReadFailureType = null;
-            _lastReadFailureMessage = null;
 
             _preValid = false;
             _preFixedSequence = 0;
@@ -280,12 +274,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _alternateColliderRecordCount = 0;
             _alternateColliderOverflowCount = 0;
             _alternateColliderCatalogCache = "<none>";
-            Array.Clear(_invalidEpisodeRecords, 0, _invalidEpisodeRecords.Length);
             _invalidEpisodeRecordCount = 0;
             _invalidEpisodeRecordOverflowCount = 0;
             _invalidEpisodeActive = false;
             _activeInvalidEpisode = new InvalidEpisodeRecord();
-            _invalidEpisodeAttributionCache = "<none>";
             _traceProjectionSamples = 0;
             _traceReadFailures = 0;
             _tracePrePhysicsSamples = 0;
@@ -294,7 +286,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _traceImpulseReadFailures = 0;
             _traceRelativeVelocityReadSamples = 0;
             _traceRelativeVelocityReadFailures = 0;
-            _tracePostBodyReadSamples = 0;
             _tracePostBodyReadFailures = 0;
             _traceNonZeroImpulseSamples = 0;
             _traceAlignedImpulseSamples = 0;
@@ -638,7 +629,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     }
                     else
                     {
-                        _tracePostBodyReadSamples++;
                         Vector3 observedDeltaV = postVelocity - _preVelocity;
                         Vector3 observedDeltaW = postAngularVelocity - _preAngularVelocity;
                         Vector3 noAccelerationPosition = _prePosition + _preVelocity * _preDt;
@@ -720,9 +710,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             report.MechanicalReactionFinite = _finite;
             report.MechanicalReactionInvalidReason = _invalidReason;
             report.MechanicalReactionReadbackClean = readbackClean;
-            report.MechanicalReactionLastReadFailureStage = _lastReadFailureStage;
-            report.MechanicalReactionLastReadFailureType = _lastReadFailureType;
-            report.MechanicalReactionLastReadFailureMessage = _lastReadFailureMessage;
             report.MechanicalReactionSolverWitnessQualified = solverWitness;
             report.MechanicalReactionSupportNormalWitnessQualified = supportNormalWitness;
             report.MechanicalReactionTraceCallbacks = _traceCallbacks;
@@ -736,47 +723,15 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             report.MechanicalReactionTraceSupportInvalidGeometryNotReady = _traceSupportInvalidGeometryNotReady;
             report.MechanicalReactionTraceSupportInvalidFootprintNotSameSurface = _traceSupportInvalidFootprintNotSameSurface;
             report.MechanicalReactionTraceSupportInvalidNormalNonFiniteOrZero = _traceSupportInvalidNormalNonFiniteOrZero;
-            report.MechanicalReactionTraceSupportPredicateGeometryNotReady = _traceSupportPredicateGeometryNotReady;
-            report.MechanicalReactionTraceSupportPredicateFootprintNotSameSurface = _traceSupportPredicateFootprintNotSameSurface;
-            report.MechanicalReactionTraceSupportPredicateNormalNonFiniteOrZero = _traceSupportPredicateNormalNonFiniteOrZero;
-            report.MechanicalReactionTraceSupportPredicateHitCountLt5 = _traceSupportPredicateHitCountLt5;
-            report.MechanicalReactionTraceSupportPredicateHitCountLt3 = _traceSupportPredicateHitCountLt3;
-            report.MechanicalReactionTraceSupportPredicatePrimarySurfaceNotSame = _traceSupportPredicatePrimarySurfaceNotSame;
-            report.MechanicalReactionTraceSupportPredicateClearanceGateFail = _traceSupportPredicateClearanceGateFail;
-            report.MechanicalReactionTraceSupportPredicateSpreadGateFail = _traceSupportPredicateSpreadGateFail;
-            report.MechanicalReactionTraceSupportPredicateNormalDotGateFail = _traceSupportPredicateNormalDotGateFail;
-            report.MechanicalReactionTraceSupportInvalidEnter = _traceSupportInvalidEnter;
-            report.MechanicalReactionTraceSupportInvalidStay = _traceSupportInvalidStay;
-            report.MechanicalReactionTraceSupportInvalidOtherPhase = _traceSupportInvalidOtherPhase;
-            report.MechanicalReactionTraceSupportInvalidEpisodes = _traceSupportInvalidEpisodes;
             report.MechanicalReactionTraceSupportInvalidMaxStreak = _traceSupportInvalidMaxStreak;
-            report.MechanicalReactionTraceSupportInvalidFirstCallbackIndex = _traceSupportInvalidFirstCallbackIndex;
-            report.MechanicalReactionTraceSupportInvalidLastCallbackIndex = _traceSupportInvalidLastCallbackIndex;
-            report.MechanicalReactionTraceSupportInvalidFirstPreFixedSequence = _traceSupportInvalidFirstPreFixedSequence;
-            report.MechanicalReactionTraceSupportInvalidLastPreFixedSequence = _traceSupportInvalidLastPreFixedSequence;
-            report.MechanicalReactionTraceInvalidLateralLeftOnlySamples = _traceInvalidLateralLeftOnlySamples;
-            report.MechanicalReactionTraceInvalidLateralRightOnlySamples = _traceInvalidLateralRightOnlySamples;
-            report.MechanicalReactionTraceInvalidLateralBothSamples = _traceInvalidLateralBothSamples;
-            report.MechanicalReactionTraceInvalidNoLateralDivergenceSamples = _traceInvalidNoLateralDivergenceSamples;
-            report.MechanicalReactionTraceInvalidPrimaryProbeDivergenceSamples = _traceInvalidPrimaryProbeDivergenceSamples;
-            report.MechanicalReactionTraceAlternateColliderUniqueCount = _alternateColliderRecordCount;
-            report.MechanicalReactionTraceAlternateColliderOverflowCount = _alternateColliderOverflowCount;
-            report.MechanicalReactionTraceAlternateColliderCatalog = _alternateColliderCatalogCache;
-            report.MechanicalReactionTraceInvalidEpisodeAttribution = _invalidEpisodeAttributionCache;
             report.MechanicalReactionTraceProjectionSamples = _traceProjectionSamples;
             report.MechanicalReactionTraceReadFailures = _traceReadFailures;
-            report.MechanicalReactionTracePrePhysicsSamples = _tracePrePhysicsSamples;
             report.MechanicalReactionTraceResponseSamples = _traceResponseSamples;
             report.MechanicalReactionTraceImpulseReadSamples = _traceImpulseReadSamples;
             report.MechanicalReactionTraceImpulseReadFailures = _traceImpulseReadFailures;
-            report.MechanicalReactionTraceRelativeVelocityReadSamples = _traceRelativeVelocityReadSamples;
             report.MechanicalReactionTraceRelativeVelocityReadFailures = _traceRelativeVelocityReadFailures;
-            report.MechanicalReactionTracePostBodyReadSamples = _tracePostBodyReadSamples;
             report.MechanicalReactionTracePostBodyReadFailures = _tracePostBodyReadFailures;
             report.MechanicalReactionTraceNonZeroImpulseSamples = _traceNonZeroImpulseSamples;
-            report.MechanicalReactionTraceAlignedImpulseSamples = _traceAlignedImpulseSamples;
-            report.MechanicalReactionTraceOpposedImpulseSamples = _traceOpposedImpulseSamples;
-            report.MechanicalReactionTraceNearZeroImpulseSamples = _traceNearZeroImpulseSamples;
 
             report.MechanicalReactionTraceImpulseMagnitudeMean = Mean(_impulseMagnitudeSum, _traceImpulseReadSamples);
             report.MechanicalReactionTraceImpulseMagnitudeMax = _traceImpulseMagnitudeMax;
@@ -859,7 +814,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 "/lateralDivergence(L-R-B-none)=" + _traceInvalidLateralLeftOnlySamples + "-" + _traceInvalidLateralRightOnlySamples + "-" + _traceInvalidLateralBothSamples + "-" + _traceInvalidNoLateralDivergenceSamples +
                 "/primaryProbeDivergence=" + _traceInvalidPrimaryProbeDivergenceSamples +
                 "/alternateCollider(unique-overflow)=" + _alternateColliderRecordCount + "-" + _alternateColliderOverflowCount +
-                "/episodeRecord(stored-overflow)=" + _invalidEpisodeRecordCount + "-" + _invalidEpisodeRecordOverflowCount +
+                "/closedEpisodeBuckets(first24-overflow)=" + _invalidEpisodeRecordCount + "-" + _invalidEpisodeRecordOverflowCount +
                 "/projection=" + _traceProjectionSamples +
                 "/readFail=" + _traceReadFailures +
                 "/stageFail(imp-rel-post)=" + _traceImpulseReadFailures + "-" + _traceRelativeVelocityReadFailures + "-" + _tracePostBodyReadFailures +
@@ -891,18 +846,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 "/TRACE_SUPPORT_NORMAL_REACTION_QUALIFIED=" + qualified +
                 "/thresholds(supportN-projection-impulse-relVel-response-nonZeroImpulse)=" + MinSupportNormalSamples + "-" + MinProjectionSamples + "-" + MinImpulseReadSamples + "-" + MinRelativeVelocityReadSamples + "-" + MinPrePhysicsResponseSamples + "-" + MinNonZeroImpulseSamples +
                 "/observerOnly=True/gravityReadback=STANCE_NATIVE_GRAVITY_OWNER/noForceWrite=True";
-        }
-
-        internal string GetStatus(FootAnkleFoundationReport report)
-        {
-            CopyToReport(report);
-            return "mode=" + (report != null ? report.MechanicalReactionMode : "<none>") +
-                   "/finite=" + (report != null && report.MechanicalReactionFinite) +
-                   "/reason=" + (report != null ? Clean(report.MechanicalReactionInvalidReason) : "<none>") +
-                   " | current=" + (report != null ? report.MechanicalReactionCurrentSummary : "<none>") +
-                   " | trace=" + (report != null ? report.MechanicalReactionTraceSummary : "<none>") +
-                   " | alternateColliders=" + (report != null ? Clean(report.MechanicalReactionTraceAlternateColliderCatalog) : "<none>") +
-                   " | invalidEpisodes=" + (report != null ? Clean(report.MechanicalReactionTraceInvalidEpisodeAttribution) : "<none>");
         }
 
         internal void EndTrace(FootAnkleFoundationReport report)
@@ -1046,8 +989,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (!_invalidEpisodeActive)
                 return;
 
+            // Preserve the historical first-24/overflow counts. Details are emitted once
+            // below; no closed-episode array or duplicate formatted catalog is consumed.
             if (_invalidEpisodeRecordCount < MaxInvalidEpisodeRecords)
-                _invalidEpisodeRecords[_invalidEpisodeRecordCount++] = _activeInvalidEpisode;
+                _invalidEpisodeRecordCount++;
             else
                 _invalidEpisodeRecordOverflowCount++;
 
@@ -1060,11 +1005,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                              " | peakSpread={" + FormatProbeSample(_activeInvalidEpisode.PeakSpread) + "}" +
                              " | last={" + FormatProbeSample(_activeInvalidEpisode.Last) + "}" +
                              " | alternateColliders={" + _alternateColliderCatalogCache + "}";
-            Plugin.Logger?.LogWarning(message);
+            try { Plugin.Logger?.LogWarning(message); }
+            catch { } // The episode is already recorded; logging cannot keep it open or block quiesce.
 
             _invalidEpisodeActive = false;
             _activeInvalidEpisode = new InvalidEpisodeRecord();
-            RebuildInvalidEpisodeAttributionCache();
         }
 
         private void RebuildAlternateColliderCatalogCache()
@@ -1086,28 +1031,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _alternateColliderCatalogCache = value;
         }
 
-        private void RebuildInvalidEpisodeAttributionCache()
-        {
-            if (_invalidEpisodeRecordCount <= 0)
-            {
-                _invalidEpisodeAttributionCache = "<none>";
-                return;
-            }
-
-            string value = string.Empty;
-            for (int i = 0; i < _invalidEpisodeRecordCount; i++)
-            {
-                InvalidEpisodeRecord episode = _invalidEpisodeRecords[i];
-                if (i > 0) value += ";";
-                value += "E" + episode.EpisodeIndex + "[F:" + FormatProbeSampleCompact(episode.First) +
-                         "|P:" + FormatProbeSampleCompact(episode.PeakSpread) +
-                         "|L:" + FormatProbeSampleCompact(episode.Last) + "]";
-            }
-            if (_invalidEpisodeRecordOverflowCount > 0)
-                value += ";overflow=" + _invalidEpisodeRecordOverflowCount;
-            _invalidEpisodeAttributionCache = value;
-        }
-
         private static string FormatProbeSample(ProbeAttributionSample sample)
         {
             return "cb=" + sample.CallbackIndex +
@@ -1127,16 +1050,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                        : "NA");
         }
 
-        private static string FormatProbeSampleCompact(ProbeAttributionSample sample)
-        {
-            return sample.CallbackIndex + "@" + sample.PreFixedSequence +
-                   ",div=" + DivergenceCode(sample) +
-                   ",ids=" + sample.CenterId + "/" + sample.ToeId + "/" + sample.HeelId + "/" + sample.LeftId + "/" + sample.RightId +
-                   ",clrMm=" + ClearanceValue(sample.CenterHit, sample.CenterClearance) + "/" + ClearanceValue(sample.ToeHit, sample.ToeClearance) + "/" + ClearanceValue(sample.HeelHit, sample.HeelClearance) + "/" + ClearanceValue(sample.LeftHit, sample.LeftClearance) + "/" + ClearanceValue(sample.RightHit, sample.RightClearance) +
-                   ",spread=" + F(sample.Spread * 1000f) +
-                   ",poseErrMmDeg=" + (sample.PoseValid ? F(sample.PhysicalTargetPositionErrorMeters * 1000f) + "/" + F(sample.PhysicalTargetRotationErrorDegrees) : "NA");
-        }
-
         private static string DivergenceCode(ProbeAttributionSample sample)
         {
             string code = string.Empty;
@@ -1150,11 +1063,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private static string ProbeText(bool hit, int id, float clearance)
         {
             return hit ? id + "@" + F(clearance * 1000f) + "mm" : "NO_HIT";
-        }
-
-        private static string ClearanceValue(bool hit, float clearance)
-        {
-            return hit ? F(clearance * 1000f) : "NA";
         }
 
         private static int ProbeId(FootSoleProbePointSnapshot point)
@@ -1186,7 +1094,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _traceReadFailures++;
             _lastReadFailureStage = stage ?? "UNKNOWN";
             _lastReadFailureType = e != null ? e.GetType().Name : "UnknownException";
-            _lastReadFailureMessage = e != null ? Clean(e.Message) : "<none>";
             if (string.IsNullOrEmpty(_invalidReason))
                 _invalidReason = "READBACK_STAGE_FAILURE:" + _lastReadFailureStage + ":" + _lastReadFailureType;
         }

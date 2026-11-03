@@ -8,19 +8,20 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     ///
     /// This is deliberately different from v0.2.7:
     /// - v0.2.7 used target A only to predict a D-term reference W.
-    /// - The validated core keeps raw relative pose and raw sample-held target W unchanged, then adds a bounded
-    ///   target-angular-acceleration contribution directly to the existing acceleration demand.
+    /// - This owner does not alter pose/W. It gates and bounds the upstream-selected
+    ///   acceleration derivative before the existing PD/FF allocator and actuator.
+    ///   Legacy inputs are held source A; coherent-reference inputs are same-step planned A.
     ///
     /// Safety / isolation:
     /// - this module never changes actuator authority; Hip phase-aware 40/80 authority (v0.2.29) and Knee limits are selected elsewhere; v0.2.30 may additionally suppress FF while the virtual Hip parent frame is catching up.
-    /// - Source Turn, torso recovery, physical Hip/Knee recovery, and active Hip control-frame inertialization are suppressed
-    ///   so MiSide single-sample turn discontinuities and unresolved body-recovery transients are never injected as feedforward acceleration.
+    /// - Raw A remains suppressed during source/torso recovery. The V041180 planned policy may consume only the caller-validated,
+    ///   same-Fixed bounded Knee reference A in those two phases. Hip, physical recovery, frame and age gates remain.
     /// - very stale Render acceleration samples are suppressed instead of being trusted indefinitely.
     /// </summary>
     internal sealed class SingleLegAngularAccelerationFeedforward
     {
         public const string ModeName = "TARGET_RELATIVE_ANGULAR_ACCELERATION_ACTUATION_FEEDFORWARD";
-        public const string GateModeName = "PRODUCTION_NORMAL_ON_PLUS_SUPPRESS_SOURCE_TURN_TORSO_OR_PHYSICAL_LEG_RECOVERY_CONTROL_FRAME_HIP_GOAL_SCOPE_PER_LANE_STALE_SAMPLE";
+        public const string GateModeName = "V041180_PER_LANE_RAW_SOURCE_RECOVERY_OFF_PLANNED_KNEE_AB_PHYSICAL_FRAME_GOAL_AGE_RETAINED";
 
         private bool _enabled;
         private bool _activeThisStep;
@@ -37,15 +38,17 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         private int _activeFixedSteps;
         private int _kneeActiveFixedSteps, _kneeGoalEligibleSteps, _kneeGoalNonzeroSelectedSteps;
-        private int _suppressedSourceTurnFixedSteps;
-        private int _suppressedRecoveryFixedSteps;
-        private int _suppressedStaleSampleFixedSteps;
         private int _hipClampCount;
         private int _kneeClampCount;
         private float _hipAppliedSum;
         private float _hipAppliedMax;
         private float _kneeAppliedAbsSum;
         private float _kneeAppliedAbsMax;
+        private bool _kneePlannedSourceRecoveryActive, _kneeAllocationRecorded;
+        private int _kneeSourceRecoveryRequestedSteps, _kneeSourceRecoveryEligibleSteps;
+        private int _kneeSourceRecoveryNonzeroSelectedSteps, _kneeSourceRecoveryNonzeroSubmittedDeltaSteps;
+        private int _kneeSourceRecoveryPhysicalBlockedSteps, _kneeSourceRecoveryFrameBlockedSteps;
+        private int _kneeSourceRecoveryGoalBlockedSteps, _kneeSourceRecoveryStaleBlockedSteps;
 
         public bool Enabled => _enabled;
         public bool ActiveThisStep => _activeThisStep || _kneeActiveThisStep;
@@ -85,21 +88,23 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             _activeFixedSteps = 0;
             _kneeActiveFixedSteps = _kneeGoalEligibleSteps = _kneeGoalNonzeroSelectedSteps = 0;
-            _suppressedSourceTurnFixedSteps = 0;
-            _suppressedRecoveryFixedSteps = 0;
-            _suppressedStaleSampleFixedSteps = 0;
             _hipClampCount = 0;
             _kneeClampCount = 0;
             _hipAppliedSum = 0f;
             _hipAppliedMax = 0f;
             _kneeAppliedAbsSum = 0f;
             _kneeAppliedAbsMax = 0f;
+            _kneeSourceRecoveryRequestedSteps = _kneeSourceRecoveryEligibleSteps = 0;
+            _kneeSourceRecoveryNonzeroSelectedSteps = _kneeSourceRecoveryNonzeroSubmittedDeltaSteps = 0;
+            _kneeSourceRecoveryPhysicalBlockedSteps = _kneeSourceRecoveryFrameBlockedSteps = 0;
+            _kneeSourceRecoveryGoalBlockedSteps = _kneeSourceRecoveryStaleBlockedSteps = 0;
         }
 
         public bool Step(
             Vector3 hipTargetRelativeAngularAccelerationWorld,
             float kneeTargetAxisAngularAccelerationSigned,
-            TwoBodyProxyReport torso,
+            TorsoControlPhase? torso,
+            bool controlRecoveryActive,
             float sourceSampleAgeSeconds,
             float gain,
             float maxFeedforwardAcceleration,
@@ -108,7 +113,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             bool physicalKneeRecoveryPending,
             bool suppressForHipReferenceBridge,
             bool suppressForHipReferenceGoal = false,
-            bool hipGoalGateOnlyHip = false)
+            bool hipGoalGateOnlyHip = false,
+            bool allowPlannedKneeSourceRecovery = false)
         {
             ResetStepState(_enabled ? "WAITING_FOR_NORMAL_WINDOW" : "DISABLED");
             if (!IsFinite(hipTargetRelativeAngularAccelerationWorld) ||
@@ -131,60 +137,35 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 return true;
             }
 
-            if (torso.SourceTurnEventActive)
-            {
-                _suppressionReason = _kneeSuppressionReason = "SOURCE_TURN";
-                _suppressedSourceTurnFixedSteps++;
-                return true;
-            }
-
-            if (torso.ControlRecoveryActive)
-            {
-                _suppressionReason = _kneeSuppressionReason = "RECOVERY";
-                _suppressedRecoveryFixedSteps++;
-                return true;
-            }
-
-            if (physicalHipRecoveryPending || physicalKneeRecoveryPending)
-            {
-                _suppressionReason = physicalHipRecoveryPending && physicalKneeRecoveryPending
-                    ? "PHYSICAL_HIP_AND_KNEE_RECOVERY"
-                    : (physicalHipRecoveryPending ? "PHYSICAL_HIP_RECOVERY" : "PHYSICAL_KNEE_RECOVERY");
-                _kneeSuppressionReason = _suppressionReason;
-                _suppressedRecoveryFixedSteps++;
-                return true;
-            }
-
-            if (suppressForHipReferenceBridge)
-            {
-                _suppressionReason = _kneeSuppressionReason = "HIP_CONTROL_FRAME_RECOVERY";
-                _suppressedRecoveryFixedSteps++;
-                return true;
-            }
-
-            // V04770 A retains the V04760 whole-module goal gate. B limits only this NEW gate to Hip;
-            // all older common source/torso/physical/frame/freshness protections still govern Knee.
-            if (suppressForHipReferenceGoal)
-            {
-                _suppressionReason = "HIP_REFERENCE_GOAL_UNSTABLE";
-                _suppressedRecoveryFixedSteps++;
-                if (!hipGoalGateOnlyHip)
-                { _kneeSuppressionReason = _suppressionReason; return true; }
-            }
-
             float maxAge = Mathf.Max(0f, maxSourceSampleAgeSeconds);
-            if (sourceSampleAgeSeconds > maxAge + 0.0001f)
+            bool stale = sourceSampleAgeSeconds > maxAge + 0.0001f;
+            bool sourceRecovery = torso.Value.SourceTurnEventActive || controlRecoveryActive;
+            // Resolve both complete gate chains. A source/torso exemption must never
+            // hide a concurrent physical recovery, virtual frame, goal or stale input.
+            _suppressionReason = ResolveGate(torso.Value.SourceTurnEventActive, controlRecoveryActive,
+                physicalHipRecoveryPending, physicalKneeRecoveryPending, suppressForHipReferenceBridge,
+                suppressForHipReferenceGoal, stale, false);
+            _kneeSuppressionReason = ResolveGate(torso.Value.SourceTurnEventActive, controlRecoveryActive,
+                physicalHipRecoveryPending, physicalKneeRecoveryPending, suppressForHipReferenceBridge,
+                suppressForHipReferenceGoal && !hipGoalGateOnlyHip, stale, allowPlannedKneeSourceRecovery);
+
+            _activeThisStep = _suppressionReason == null;
+            _kneeActiveThisStep = _kneeSuppressionReason == null;
+            _kneePlannedSourceRecoveryActive = allowPlannedKneeSourceRecovery && sourceRecovery && _kneeActiveThisStep;
+            if (allowPlannedKneeSourceRecovery && sourceRecovery)
             {
-                if (!suppressForHipReferenceGoal) _suppressionReason = "STALE_SOURCE_SAMPLE";
-                _kneeSuppressionReason = "STALE_SOURCE_SAMPLE";
-                _suppressedStaleSampleFixedSteps++;
-                return true;
+                _kneeSourceRecoveryRequestedSteps++;
+                if (_kneeActiveThisStep) _kneeSourceRecoveryEligibleSteps++;
+                else if (physicalHipRecoveryPending || physicalKneeRecoveryPending) _kneeSourceRecoveryPhysicalBlockedSteps++;
+                else if (suppressForHipReferenceBridge) _kneeSourceRecoveryFrameBlockedSteps++;
+                else if (suppressForHipReferenceGoal && !hipGoalGateOnlyHip) _kneeSourceRecoveryGoalBlockedSteps++;
+                else if (stale) _kneeSourceRecoveryStaleBlockedSteps++;
             }
 
             float safeGain = Mathf.Max(0f, gain);
             float maxFf = Mathf.Max(0f, maxFeedforwardAcceleration);
-            if (!suppressForHipReferenceGoal) _hipRawWorld = hipTargetRelativeAngularAccelerationWorld * safeGain;
-            _kneeRawSigned = kneeTargetAxisAngularAccelerationSigned * safeGain;
+            if (_activeThisStep) _hipRawWorld = hipTargetRelativeAngularAccelerationWorld * safeGain;
+            if (_kneeActiveThisStep) _kneeRawSigned = kneeTargetAxisAngularAccelerationSigned * safeGain;
 
             _hipAppliedWorld = ClampMagnitude(_hipRawWorld, maxFf);
             _kneeAppliedSigned = Mathf.Clamp(_kneeRawSigned, -maxFf, maxFf);
@@ -193,12 +174,15 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (_hipClamped) _hipClampCount++;
             if (_kneeClamped) _kneeClampCount++;
 
-            _activeThisStep = !suppressForHipReferenceGoal;
-            _kneeActiveThisStep = true;
             if (_activeThisStep) { _suppressionReason = "ACTIVE_NORMAL_WINDOW"; _activeFixedSteps++; }
-            _kneeSuppressionReason = "ACTIVE_NORMAL_WINDOW";
-            _kneeActiveFixedSteps++;
-            if (suppressForHipReferenceGoal)
+            if (_kneeActiveThisStep)
+            {
+                _kneeSuppressionReason = _kneePlannedSourceRecoveryActive ? "ACTIVE_PLANNED_SOURCE_RECOVERY" : "ACTIVE_NORMAL_WINDOW";
+                _kneeActiveFixedSteps++;
+            }
+            if (_kneePlannedSourceRecoveryActive && Mathf.Abs(_kneeAppliedSigned) > 0.0001f)
+                _kneeSourceRecoveryNonzeroSelectedSteps++;
+            if (_kneeActiveThisStep && suppressForHipReferenceGoal && !sourceRecovery)
             {
                 _kneeGoalEligibleSteps++;
                 if (Mathf.Abs(_kneeAppliedSigned) > 0.0001f) _kneeGoalNonzeroSelectedSteps++;
@@ -213,6 +197,40 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             return IsFinite(_hipAppliedWorld) && IsFinite(_kneeAppliedSigned);
         }
 
+        private static string ResolveGate(bool sourceTurn, bool torsoRecovery, bool physicalHip, bool physicalKnee,
+            bool frame, bool goal, bool stale, bool plannedSourceRecovery)
+        {
+            if (!plannedSourceRecovery && sourceTurn) return "SOURCE_TURN";
+            if (!plannedSourceRecovery && torsoRecovery) return "RECOVERY";
+            if (physicalHip || physicalKnee)
+                return physicalHip && physicalKnee ? "PHYSICAL_HIP_AND_KNEE_RECOVERY" :
+                    (physicalHip ? "PHYSICAL_HIP_RECOVERY" : "PHYSICAL_KNEE_RECOVERY");
+            if (frame) return "HIP_CONTROL_FRAME_RECOVERY";
+            if (goal) return "HIP_REFERENCE_GOAL_UNSTABLE";
+            if (stale) return "STALE_SOURCE_SAMPLE";
+            return null;
+        }
+
+        // Called after the existing Knee AddTorque succeeds. Count a change in the
+        // submitted flexion command versus same-state capped PD, not native response.
+        // Both opposing-FF suppression and final saturation can remove the change.
+        internal void RecordKneeSubmittedCommand(float feedback, float finalFlexion, float maxAcceleration)
+        {
+            if (!_kneePlannedSourceRecoveryActive || _kneeAllocationRecorded) return;
+            _kneeAllocationRecorded = true;
+            if (IsFinite(feedback) && IsFinite(finalFlexion) && IsFinite(maxAcceleration) && maxAcceleration > 0f &&
+                Mathf.Abs(finalFlexion - Mathf.Clamp(feedback, -maxAcceleration, maxAcceleration)) > 0.0001f)
+                _kneeSourceRecoveryNonzeroSubmittedDeltaSteps++;
+        }
+
+        internal string GetKneeSourceRecoverySummary() =>
+            "KNEE_PLANNED_FF_V041180/requested-eligible-selectedNonzero-submittedDeltaNonzero=" +
+            _kneeSourceRecoveryRequestedSteps + "|" + _kneeSourceRecoveryEligibleSteps + "|" +
+            _kneeSourceRecoveryNonzeroSelectedSteps + "|" + _kneeSourceRecoveryNonzeroSubmittedDeltaSteps +
+            "/blockedFirst(physical-frame-goal-stale)=" + _kneeSourceRecoveryPhysicalBlockedSteps + "|" +
+            _kneeSourceRecoveryFrameBlockedSteps + "|" + _kneeSourceRecoveryGoalBlockedSteps + "|" +
+            _kneeSourceRecoveryStaleBlockedSteps + "/delta=SAME_STATE_FINAL_MINUS_CAPPED_PD_AFTER_SUBMIT_NOT_RESPONSE";
+
         private void ResetStepState(string reason)
         {
             _activeThisStep = false;
@@ -225,6 +243,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _kneeAppliedSigned = 0f;
             _hipClamped = false;
             _kneeClamped = false;
+            _kneePlannedSourceRecoveryActive = _kneeAllocationRecorded = false;
         }
 
         private static Vector3 ClampMagnitude(Vector3 value, float maxMagnitude)

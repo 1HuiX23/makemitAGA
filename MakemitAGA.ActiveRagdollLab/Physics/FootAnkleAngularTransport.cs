@@ -78,8 +78,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         internal bool Enabled => true;
         internal string Policy => Production;
-        internal bool Finite => _finite;
-        internal string InvalidReason => _invalidReason;
 
         // v0.4.4.1 read-only diagnostic taps for contact-induced axial-debt attribution.
         internal bool CurrentActive => _currentActive;

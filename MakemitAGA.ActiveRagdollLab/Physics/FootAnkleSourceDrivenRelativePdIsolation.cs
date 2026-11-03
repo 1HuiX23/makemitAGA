@@ -4,22 +4,12 @@ using UnityEngine;
 namespace MakemitAGA.ActiveRagdollLab.Physics
 {
     /// <summary>
-    /// ARL v0.3.58 source-bone-driven relative Ankle controller, frozen since v0.3.69 with the v0.3.68 persistence-conditioned target-A path promoted.
-    ///
-    /// Historical A = kinematic source-following baseline.
-    /// Historical B = Dynamic Foot + one bounded internal Lower<->Foot torque-pair controller whose target is the source
-    ///     Lower->sole relative pose sampled from the real ankle/toe animation. v0.3.63 allows the positional backend
-    ///     to be either the historical CharacterJoint baseline or the new ARL-owned translation-only tether.  The controller is explicitly relative: it does not command world-space Foot
-    ///     orientation and does not reuse the rejected v0.3.54 direct-Lower correction route.
-    ///
-    /// Control law in source/physical Lower local space:
-    ///   alphaRel = Kp * log(qSourceRel * inverse(qPhysicalRel))
-    ///            + Kd * (sourceRelativeW - physicalRelativeW)
-    ///            + bounded persistence-conditioned source-relative target-A feedforward (v0.3.69+ frozen production path)
-    /// The desired relative angular acceleration is bounded, mapped through the two-body effective inertia, and
-    /// realized as an equal/opposite physical torque pair (+tau Foot, -tau Lower) using ForceMode.Force.
-    /// Gravity, Foot Collider/contact and GSP remain OFF. Angular tracking authority remains this controller only;
-    /// v0.3.63's tether arm has no native angular constraint.
+    /// Frozen relative ankle PD: a bounded internal Lower/Foot torque pair on the no-Joint tether.
+    /// In Lower local space, alphaRel = Kp*log(qTarget*inverse(qPhysical)) + Kd*(targetW-physicalW)
+    /// + bounded target-A feedforward. Two-body effective inertia maps this into +tau Foot / -tau Lower.
+    /// The source persistence conditioner or selected relative reference owns target-A; final authority
+    /// remains MaxRelA30 / MaxTau0.35. Contact/gravity are owned separately by the selected run scope.
+    /// The historical kinematic A is retained as the unbuilt/drive-off state, not a selectable experiment.
     /// </summary>
     internal sealed class FootAnkleSourceDrivenRelativePdIsolation
     {
@@ -145,7 +135,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             bool traceEnabled,
             Rigidbody footBody,
             CharacterJoint ankleJoint,
-            bool characterJointBackend,
             Rigidbody lowerBody,
             Vector3 footAnchorLocal,
             Vector3 lowerAnchorLocal,
@@ -191,11 +180,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
             bool expectedDynamic = DynamicActive;
             bool jointExists = ankleJoint != null;
-            bool connected = jointExists && ankleJoint.connectedBody == lowerBody;
             bool kinematic = footBody.isKinematic;
-            bool dynamicBackendContract = characterJointBackend
-                ? (jointExists && connected && JointMappingMatches(ankleJoint))
-                : !jointExists;
+            // The native-Joint backend is retired; every shipped scope uses the tether.
+            bool dynamicBackendContract = !jointExists;
             bool structuralContract = !footBody.useGravity &&
                                       (_armB ? (dynamicBackendContract && (expectedDynamic ? !kinematic : kinematic))
                                              : (!jointExists && kinematic));
@@ -437,23 +424,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                    "/reason=" + (_invalidReason ?? "<none>") +
                    " | current=" + (report != null ? report.AnkleDriveCurrentSummary : "<none>") +
                    " | trace=" + (report != null ? report.AnkleDriveTraceSummary : "<none>");
-        }
-
-        private bool JointMappingMatches(CharacterJoint joint)
-        {
-            if (joint == null) return false;
-            Vector3 axis = joint.axis;
-            Vector3 swingAxis = joint.swingAxis;
-            if (!FiniteVector(axis) || !FiniteVector(swingAxis) || axis.sqrMagnitude < 0.5f || swingAxis.sqrMagnitude < 0.5f)
-                return false;
-            axis.Normalize();
-            swingAxis.Normalize();
-            return Vector3.Dot(axis, Vector3.right) >= 0.999f &&
-                   Vector3.Dot(swingAxis, Vector3.up) >= 0.999f &&
-                   Mathf.Abs(joint.lowTwistLimit.limit + FlexionLimitDegrees) <= 0.05f &&
-                   Mathf.Abs(joint.highTwistLimit.limit - FlexionLimitDegrees) <= 0.05f &&
-                   Mathf.Abs(joint.swing1Limit.limit - AxialLimitDegrees) <= 0.05f &&
-                   Mathf.Abs(joint.swing2Limit.limit - InversionLimitDegrees) <= 0.05f;
         }
 
         private bool Invalidate(string reason, bool traceEnabled, FootAnkleFoundationReport report)

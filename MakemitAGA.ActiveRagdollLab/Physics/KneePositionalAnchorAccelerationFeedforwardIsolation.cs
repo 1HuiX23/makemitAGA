@@ -41,30 +41,35 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal bool Enabled => _enabled;
         internal string Arm => _enabled ? ArmB : ArmA;
         internal bool CurrentValid { get; private set; } = true;
-        internal Vector3 CurrentFeedforwardWorld => _currentFeedforwardWorld;
 
         internal void SetEnabled(bool enabled, SingleLegChainReport report)
         {
             _enabled = enabled;
+            ResetForDrive(report);
+        }
+
+        // Physical estimator lifetime is drive/mode ownership, never trace ownership.
+        internal void ResetForDrive(SingleLegChainReport report)
+        {
+            _hasPreviousParentAnchorVelocity = false;
+            _previousParentAnchorVelocity = Vector3.zero;
+            _currentParentAnchorSpeed = 0f;
+            _currentFeedforwardAcceleration = 0f;
+            _currentFeedforwardWorld = Vector3.zero;
+            CurrentValid = true;
             ResetDiagnostics(report);
         }
 
         internal void ResetDiagnostics(SingleLegChainReport report)
         {
-            _hasPreviousParentAnchorVelocity = false;
-            _previousParentAnchorVelocity = Vector3.zero;
             _steps = 0;
             _warmupSteps = 0;
             _activeSteps = 0;
             _invalidSteps = 0;
-            _currentParentAnchorSpeed = 0f;
-            _currentFeedforwardAcceleration = 0f;
             _peakParentAnchorSpeed = 0f;
             _peakFeedforwardAcceleration = 0f;
-            _currentFeedforwardWorld = Vector3.zero;
             _lastEvidence = "<none>";
             _abortEvidence = "<none>";
-            CurrentValid = true;
             CopyToReport(report);
         }
 

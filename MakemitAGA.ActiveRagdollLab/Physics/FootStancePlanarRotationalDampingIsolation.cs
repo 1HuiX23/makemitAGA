@@ -13,7 +13,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     /// </summary>
     internal sealed class FootStancePlanarRotationalDampingIsolation
     {
-        internal const string Mode = "STANCE_PLANAR_FOOT_ROTATION_DAMPING_ISOLATION_V04300";
         internal const string ArmA = "A_V04290_FULL_POINT_DAMPING_BASELINE";
         internal const string ArmB = "B_V04300_REMOVE_FOOT_ROT_PLANAR_DAMPING";
         internal const int MinimumLoadedSolves = 50;
@@ -25,7 +24,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         internal bool Enabled => _enabled;
         internal string Arm => _enabled ? ArmB : ArmA;
-        internal bool Finite => _finite;
         internal string InvalidReason => _invalidReason;
         internal bool CurrentActive => _active;
 
@@ -129,13 +127,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal void CopyToReport(FootAnkleFoundationReport report)
         {
             if (report == null) return;
-            report.StancePlanarDampingMode = Mode;
             report.StancePlanarDampingArm = Arm;
             report.StancePlanarDampingEnabled = _enabled;
-            report.StancePlanarDampingQuiesced = _quiesced;
             report.StancePlanarDampingFinite = _finite;
-            report.StancePlanarDampingInvalidReason = _invalidReason;
-            report.StancePlanarDampingCurrentActive = _active;
             report.StancePlanarDampingLoadedSolves = _loaded;
             report.StancePlanarDampingNonzeroWrites = _nonzeroWrites;
             // Summary is formatted on report requests, not each hot-path Evaluate/write/capture.

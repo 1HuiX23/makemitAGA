@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- ARL v0.4.100: same-step Hip force / net Upper torque coordination, bounded correction and actual-command evidence.
+  <!-- ARL v0.4.119: Both arms use v118 B Knee and Foot controls; B alone qualifies near-surface full serial stance-load admission, preserving all safety gates and force caps.
        Shared clocks and session ownership; legacy loaded baseline retained. -->
   <!-- Load the user's path before deriving BepInExCore and InteropDir. -->
   <Import Project="LocalPaths.props" Condition="Exists('LocalPaths.props')" />
@@ -12,15 +12,23 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <AssemblyName>MakemitAGA.ActiveRagdollLab</AssemblyName>
     <RootNamespace>MakemitAGA.ActiveRagdollLab</RootNamespace>
-    <Version>0.4.100</Version>
-    <AssemblyVersion>0.4.100</AssemblyVersion>
-    <FileVersion>0.4.100</FileVersion>
+    <Version>0.4.119</Version>
+    <AssemblyVersion>0.4.119</AssemblyVersion>
+    <FileVersion>0.4.119</FileVersion>
     <CodePage>65001</CodePage>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <MiSideRoot Condition="'$(MiSideRoot)' == ''">C:\dpan\jgggggg\steam\steamapps\common\MiSide</MiSideRoot>
     <BepInExCore>$(MiSideRoot)\BepInEx\core</BepInExCore>
     <InteropDir>$(MiSideRoot)\BepInEx\interop</InteropDir>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Contract tests link production sources into a separate executable. Test ports and
+         the limited math shim must never become part of the game plugin. -->
+    <Compile Remove="Tests/**/*.cs" />
+    <!-- One authoritative template for both the shipped example and runtime creation. -->
+    <EmbeddedResource Include="ActiveRagdollLabProfile.example.txt" LogicalName="MakemitAGA.ActiveRagdollLab.ProfileTemplate" />
+  </ItemGroup>
 
   <ItemGroup>
     <Reference Include="0Harmony">

@@ -1,5 +1,4 @@
 using System;
-using System.Text;
 using HarmonyLib;
 using MakemitAGA.ActiveRagdollLab.Runtime;
 
@@ -416,7 +415,9 @@ namespace MakemitAGA.ActiveRagdollLab
             {
                 allSucceeded = false;
                 string result = "EXCEPTION " + e.GetType().Name + " / " + e.Message;
-                Plugin.Logger?.LogError("[ARL][TEST_BUNDLE][" + bundle + "][" + step + "] " + result);
+                // Reporting a failed step must not interrupt the remaining cleanup steps.
+                try { Plugin.Logger?.LogError("[ARL][TEST_BUNDLE][" + bundle + "][" + step + "] " + result); }
+                catch { }
                 return result;
             }
         }
@@ -429,11 +430,10 @@ namespace MakemitAGA.ActiveRagdollLab
 
         private static void PrintHelp()
         {
-            PrintGame("<b>MakemitAGA Active Ragdoll Lab v0.4.100</b>\n" +
-                "本轮：髋锚点纠偏优先的共同运动预算；Upper补偿8Nm、总矩max(8Nm,原基线)，骨盆baseline 2Nm/总矩8Nm；原安全门保留。\n" +
-                "arl_test_setup / arl_pelvis_hip_test(b|stop) / arl_test_status / arl_test_cleanup\n" +
+            PrintGame("<b>MakemitAGA Active Ragdoll Lab v0.4.119</b>\n" +
+                "arl_test_setup / arl_pelvis_hip_test(a|b|stop) / arl_test_status / arl_test_cleanup\n" +
                 "arl_test_report（仅需重新展开完整诊断时使用）\n" +
-                ActiveRagdollLabRuntime.StartPelvisHipTest() + "\nUpper只读审计回归arl_pelvis_upper_load_test(b|stop)，小腿自重回归arl_pelvis_lower_load_test(b|stop)，Foot自重对照arl_pelvis_foot_load_test(b|stop)，无载荷接触对照arl_pelvis_contact_test(b|stop)，无接触对照arl_pelvis_leg_test(a|b|stop)。\n\n" +
+                ActiveRagdollLabRuntime.StartPelvisHipTest() + "\nUpper只读审计回归arl_pelvis_upper_load_test(b|stop)，膝部法向耦合回归arl_pelvis_knee_test(b|stop)，小腿自重回归arl_pelvis_lower_load_test(b|stop)，Foot自重对照arl_pelvis_foot_load_test(b|stop)，无载荷接触对照arl_pelvis_contact_test(b|stop)，无接触对照arl_pelvis_leg_test(a|b|stop)。\n旧腿足承重回归arl_ankle_test(b|stop)；既有Upper自重OFF对照仍接受a。\n\n" +
                 "骨盆独立范围保留arl_pelvis_test_setup与arl_pelvis_test(b|stop)；两个会话互斥。\n" +
                 "arl_profile_template / arl_profile_reload / arl_profile_status\n" +
                 "arl_audit[(对象完整名称)] / arl_audit_report / arl_build[(对象完整名称)]\n" +
@@ -441,7 +441,7 @@ namespace MakemitAGA.ActiveRagdollLab
                 "arl_trace(on/off) / arl_leg_drive(on/off) / arl_leg_status\n" +
                 "arl_knee_axis_calibrate(on/off) / arl_knee_axis_status / arl_knee_axis_apply / arl_knee_axis_reset\n" +
                 "arl_hip_stack(on/off) / arl_hip_stack_status\n" +
-                "arl_bilateral_status / arl_foot_status / arl_knee_safety_status / arl_leg_freeze_status\n" +
+                "arl_bilateral_status / arl_foot_status / arl_foot_requal_status / arl_knee_safety_status / arl_leg_freeze_status\n" +
                 "arl_reset_pose / arl_rollback\n" +
                 "任何自动停止立即收尾、保存完整日志；STARTED前的pending并非正式run。");
         }

@@ -3,10 +3,11 @@ using System;
 using System.Globalization;
 using System.Text;
 using UnityEngine;
+using MakemitAGA.ActiveRagdollLab.Physics;
 
 namespace MakemitAGA.ActiveRagdollLab.Model
 {
-    internal sealed class PelvisReceiverReport
+    internal sealed partial class PelvisReceiverReport
     {
         internal string Arm = "OFF_V04470_PELVIS_RECEIVER", TraceArm, Issue;
         internal bool Selected, Dynamic, Active, Ready, Quiesced, Finite = true, BaselineCaptured, BaselineRestored = true;
@@ -79,6 +80,10 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         internal bool AngularEvidenceReady => TrackingComplete && AngularEvidenceSamples == TrackingSamples && AngularEvidenceInvalid == 0;
         internal struct TrackingFrame
         {
+            // Read-only membership in the existing source-stop classifier, sampled at N.
+            internal bool InStopWindow;
+            internal int StopStartFixed;
+            internal Vector3 StopDirection;
             internal bool Enabled, Valid, Dynamic, CommandAlphaAvailable, SourceActive, SourceFresh, Projected;
             internal bool LinearClamped, AngularClamped, TorqueClamped, ChildAngularClamped;
             internal bool ReferenceSpeedLimited, ReferenceAlphaLimited;
@@ -87,6 +92,8 @@ namespace MakemitAGA.ActiveRagdollLab.Model
             internal string SourcePhase, Issue;
             internal float Time, Dt, Position, Rotation, NativeGap, TargetNativeGap, VirtualGap, VelocityError;
             internal Vector3 CommandW;
+            internal PelvisComReferencePlanner.ComPlan ComReference;
+            internal PhysicsStepContext ComReferenceStep, ComFeedbackStep;
             internal Vector3 CommandCom, CommandComV, CommandComA, ComReferenceA, NativeGoalCom, NativeGoalV;
             internal Vector3 ComError, ComVelocityError, RawRenderComError, BodyChestPosition, PdA, FeedforwardA;
             internal Vector3 SourceV, BodyW, SourceWVector, RotationErrorVector, RawRotationErrorVector, ReferenceRotationErrorVector;
@@ -171,7 +178,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         private float _stopHold;
         private Vector3 _stopDirection;
         private StopFrame _stop;
-        private void ObserveStop(TrackingFrame f)
+        private void ObserveStop(ref TrackingFrame f)
         {
             float speed = f.SourceV.magnitude;
             if (!FiniteValue(speed) || f.RawTimingGroup >= 2 || (LastTracking.Valid && LastTracking.Fixed + 1 != f.Fixed))
@@ -187,6 +194,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                 _stop = new StopFrame { StartFixed = f.Fixed, StartTime = f.Time, Direction = _stopDirection };
             }
             if (!_stopActive) return;
+            f.InStopWindow = true; f.StopStartFixed = _stop.StartFixed; f.StopDirection = _stop.Direction;
             // Error is target-body: negative projection means body ahead along pre-stop motion.
             float signedControl = Vector3.Dot(f.ComError, _stop.Direction);
             float signedRaw = Vector3.Dot(f.RawRenderComError, _stop.Direction);
@@ -231,6 +239,8 @@ namespace MakemitAGA.ActiveRagdollLab.Model
 
         internal struct Frame
         {
+            internal MotionInput Motion;
+            internal PhysicsStepContext MotionNextStep;
             internal PelvisHipAttitudeCommand HipAttitude;
             internal int Fixed, Settled;
             internal bool Resolved, Censored, HipReactionRecorded;
@@ -274,7 +284,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
             "/hipAttitude(commits-clamps)=" + HipReactionRecords + "-" + HipAttitudeClamps +
             "/hipAttitudePeakNm(request-total-residual)=" + F(HipAttitudeRequestedPeak) + "|" + F(HipAttitudeAppliedPeak) + "|" + F(HipAttitudeResidualPeak) +
             "/torqueStatsMeaning=BASELINE2_EXCEPT_HIP_ATTITUDE_AND_RECEIVER_TOTAL_TORQUE_J" +
-            "/torsoGravity=OFF/HipParentReaction=" + (TraceHipTranslation ? "TRANSLATION_AT_HIP_ANCHORS" : "NOT_ROUTED") + "/hipReactionInputRecords=" + HipReactionRecords + "/hipAngularControllerReaction=OFF/commonTargetAFF=" + (Dynamic ? "GOVERNED_COM_A_GAIN1" : "OFF") + "/traceCommonTargetAFF=" + (TraceDynamic ? "GOVERNED_COM_A_GAIN1" : "OFF") + "/ChestRelativeAngular=EXISTING_CHILD_ONLY/wholeBodySupport=NOT_QUALIFIED";
+            "/torsoGravity=OFF/HipParentReaction=" + (TraceHipTranslation ? "TRANSLATION_AT_HIP_ANCHORS" : "NOT_ROUTED") + "/hipReactionInputRecords=" + HipReactionRecords + "/hipAngularControllerReaction=" + PelvisDynamicReceiverIsolation.HipReactionName(TraceHipTranslation ? TraceArm : Arm) + "/hipNormalParentPolicy=" + PelvisDynamicReceiverIsolation.HipNormalParentName(TraceHipTranslation ? TraceArm : Arm) + "/commonTargetAFF=" + (Dynamic ? "GOVERNED_COM_A_GAIN1" : "OFF") + "/traceCommonTargetAFF=" + (TraceDynamic ? "GOVERNED_COM_A_GAIN1" : "OFF") + "/ChestRelativeAngular=EXISTING_CHILD_ONLY/wholeBodySupport=NOT_QUALIFIED";
         internal string GetDetails()
         {
             var sb = new StringBuilder(GetSummary());
@@ -311,12 +321,16 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                 .Append("/issue=").Append(ParentReferenceIssue ?? "<none>")
                 .Append("/scope=REFERENCE_CONTRACT_ONLY/legBodies-joints-forces=RUNTIME_SCOPE_OWNED/nativeV=COM_V/commandV=ORIGIN_V/UpperTarget=SOURCE_RELATIVE_POSE_ONLY");
             AppendStops(sb);
-            sb.Append("\nAngularEvidenceReady qualifies reference/command/body clock coverage; joint availability is counted separately. Angular evidence: sampledInputW is the held/filtered bridge input, sourceW is the raw render derivative; bridge pose correction and reference braking correction are separate. The retained V04580 arrival reference subtracts relativeW*(|relativeW|/(2*sameStepBrakeCap)+dt) from the phase-aligned shortest rotation vector before gain4. Both retained V04670 planners keep that arrival estimate and ordinary alpha4. B may remove additional previous world W up to total alpha8 inside the same full-vector inertial budget1; it cannot spend that reserve accelerating through zero. The paired alternative uses the same actual-run native tensor, not a second physical plant. Its bounded motion cannot predict future source stops. V04590 publishes settled native COM kinematics and final governed command N for the two Hip points. This reference contract does not create bodies or apply leg forces; the runtime scope and combined bundle report physical leg participation. Hip translation reaction is routed only in the typed Hip scope; pure Upper angular-controller reaction remains OFF. Pelvis inertiaTau/gyroTau remain the self-body terms; pelvisInertiaN adds the applied orbital terms, reduced mass, current native parent COM lever and pre-cap summed torque. The baseline uses mu=mp*mc/(mp+mc), with Chest COM at the joint; Chest self-spin inertia is independent. Angular AFF uses the current FINAL governed world-W derivative with dt_N, gain1 in the fixed baseline; its physical cache is independent of these diagnostics. P/D/AFF are summed before the baseline alpha40/torque2 caps. Baseline angular tracking fields exclude the later same-step Hip compensation; its committed total torque, delta and residual are in receiverRow and hipPointResponseFrame. The typed Hip scope limits the complete receiver torque to 8Nm after combining both actual Hip inputs. Joint readback is diagnostic only and never fed back as compensation. Final issued commands without a following solve are not given a synthetic cleanup response. Reference and committed P/C commands belong to N; body delta-W/previous commands and native joint readback belong to solve N-1. Delta-W uses the previous interval dt. First/gapped responses and unavailable joint getters are NA. Native joint values are uncalibrated raw readback, not signed Pelvis torque or a closed angular ledger. Child AddTorque is Acceleration; its command remains rad/s^2, not Nm. Positive direction rates mean distance opening under the stated held velocities; source clocks and source/bridge motion remain visible. The quiet-source peak is one retained frame, with no new observer/ring/per-step output. Diagnostic gaps never alter physics or the existing tracking metrics.");
+            AppendMotionEvidence(sb);
+            sb.Append("\nreceiverReactionContract=V041070/receiverTotalIncludesJointReaction=True/externalAndTotalCapNm=8/attitudeResidualIncludesIntentionalReaction=True/pointForceReactionNotRepeated=True");
+            sb.Append("\nreceiverEvidenceNotes=V041060/reference-and-commands=N/response-and-jointReadback=SOLVE_N_MINUS_1/responseDt=PREVIOUS_COMMAND_DT/noSyntheticCleanupResponse=True/jointReadback=UNCALIBRATED_NOT_FEEDBACK/childAngularCommandUnits=RAD_PER_SEC2_NOT_NM/diagnosticFailureChangesPhysics=False")
+                .Append("\nreceiverComContract=P_PLUS_C_MASS_WEIGHTED_NOT_WHOLE_BODY/q=SYSTEM_RESPONSE_RETENTION_NOT_ACTUATOR_RATIO/commonCapMps2=12/referenceLimits=3MPS_6MPS2/deficitFeedback=V105_A_WITH_SETTLED_COM_BRAKE_GUARD/previousReceipt=ADJACENT_COMMITTED_NOT_CURRENT_FEASIBILITY/rawWindow=24PRE_8POST/stopWindow=8PRE_48POST");
             return sb + "\nThe two-body linear ledger includes the committed common COM forces; native joint forces are internal to the free two-body subsystem. Angular/whole-body closure and natural support are separate questions. In the typed Hip scope this ledger includes both committed Hip translation impulses and their parent moments; pelvisTorqueJ is the final receiver total, including the bounded compensation. Other leg forces are outside the P/C subsystem. Other scopes have no Hip reaction input. The legacy freeze verdict is a reference, not receiver certification.";
         }
 
         internal void ResetTracking()
         {
+            ResetMotionEvidence();
             ParentReferenceSamples = ParentReferenceInvalid = 0; ParentReferenceIssue = null;
             ParentHipControlGapPeak = ParentHipBridgeShiftPeak = ParentSourceLocalDriftPeak = 0f;
             Array.Clear(RawTiming, 0, RawTiming.Length);
@@ -450,7 +464,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
             if (!PeakRawPositionTracking.Valid || f.RawRenderPosition > PeakRawPositionTracking.RawRenderPosition) PeakRawPositionTracking = f;
             if (!PeakRawRotationTracking.Valid || f.RawRenderRotation > PeakRawRotationTracking.RawRenderRotation) PeakRawRotationTracking = f;
             PositionErrorPeak = Mathf.Max(PositionErrorPeak, f.Position); RotationErrorPeak = Mathf.Max(RotationErrorPeak, f.Rotation);
-            ObserveStop(f);
+            ObserveStop(ref f);
             TrackingRing[TrackingNext] = f; TrackingNext = (TrackingNext + 1) % TrackingRing.Length;
             TrackingCount = Mathf.Min(TrackingCount + 1, TrackingRing.Length); TrackingSamples++; LastTracking = f;
         }
@@ -730,6 +744,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                 .Append("/receiverClamps(L-A-T)=").Append(f.Dynamic ? f.LinearClamped + "-" + f.AngularClamped + "-" + f.TorqueClamped : "NA_INACTIVE_OR_LEGACY")
                 .Append("/childAngularClamp=").Append(f.ChildAngularClamped);
             AppendAngularEvidence(sb, f); AppendParentReference(sb, f);
+            AppendComReference(sb, f.ComReference, f.ComReferenceStep, f.ComFeedbackStep);
             if (f.RuntimeContextExpected) sb.Append('/').Append(f.RuntimeContext.Status());
         }
         private static string RawTimingName(int i) => i == 0 ? "FRESH_LE_100MS" : i == 1 ? "HELD_LE_100MS" : i == 2 ? "STALE_GT_100MS" : "UNKNOWN";

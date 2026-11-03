@@ -10,6 +10,8 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         internal PhysicsStepContext Step;
         internal SourceStepContext Source;
         internal int Fixed, Modes;
+        internal LegLandingReferenceInput LandingInput; // Optional; never part of Matches or a control gate.
+        internal string SourcePhase; // Current existing torso source classifier; window selection only.
         internal HipGoalPathEvidence HipGoalPath; // Optional; deliberately excluded from Matches.
         internal bool HipCommitted, KneeCommitted, RawWorldWValid;
         internal float RawSourceDt, HipMaxA;

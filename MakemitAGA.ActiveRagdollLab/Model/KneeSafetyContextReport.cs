@@ -32,7 +32,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public string GetFullText()
         {
             StringBuilder sb = new StringBuilder(4096);
-            sb.AppendLine("MakemitAGA Active Ragdoll Lab 0.4.2.1 - Minimal Knee Hard-Safety Context Recorder");
+            sb.AppendLine("MakemitAGA Active Ragdoll Lab " + Plugin.PluginVersion + " - Minimal Knee Hard-Safety Context Recorder");
             sb.AppendLine(GetConsoleSummary());
             sb.AppendLine("abortReason=" + (AbortReason ?? "<none>"));
             sb.AppendLine("key=" + (Key ?? "<none>"));

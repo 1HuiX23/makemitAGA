@@ -6,10 +6,10 @@ using UnityEngine;
 namespace MakemitAGA.ActiveRagdollLab.Model
 {
     /// <summary>
-    /// v0.2.51 单腿链紧凑报告；保留 v0.2.50 linear transport，并新增 RAW→STRICT mechanical activation-sync 诊断。
-    /// 只保留当前 real-inertia 主线仍会产生或消费的状态：Knee PCA、transport/axis attribution、A-FF、
-    /// angular/phase timing、Hip frame/coupling read-only attribution、validated uniform-box mass properties、anchor/clamp/trace 与 fail-fast。
-    /// 历史只读实验若已无生产者/消费者，只保留必要 closure 常量；详细字段留在旧 ZIP，不进入活动报告模型。
+    /// 单腿链当前状态与有实际消费者的诊断快照：PCA、reference/transport、A-FF、
+    /// phase/clock、validated inertia、load receipts、anchor/clamp/trace 与 fail-fast。
+    /// 文本只读取已复制的托管值；控制就绪仍由各 owner 的 typed contract 判断。
+    /// 历史实验的完整实现留在归档源码，无消费者的镜像字段不进入活动报告。
     /// </summary>
     internal sealed class SingleLegChainReport
     {
@@ -17,18 +17,17 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public bool DriveEnabled;
         public bool GravityEnabled;
         public bool CollidersEnabled;
-        public bool VisualEnabled;
         public bool Finite = true;
         public string Stage = "UNBUILT";
         public string Detail;
         internal string HipNormalReferenceSummary;
+        internal string KneeReferenceSummary;
+        internal string KneePlannedFeedforwardSummary;
         public string Side;
         public string ResolutionMode;
         public string UpperLegPath;
         public string LowerLegPath;
         public string FootPath;
-        public float UpperLegLength;
-        public float LowerLegLength;
         public bool HipCharacterJointPresent;
         public bool HipConnectedBodyMatch;
 
@@ -76,7 +75,24 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         // v0.2.48 guard-decoupled strict mechanical-parent angular-acceleration transport FF. No authority increase: final SUM still
         // uses the historical Hip MaxA 40/80/80. REAL_PELVIS raw acceleration is intentionally never consumed.
         public string HipMechanicalParentTransportMode;
-        public string HipMechanicalParentTransportKey;
+        public string HipMechanicalParentTransportKey => HipMechanicalParentTransportMode == null ? null :
+            "mode=" + HipMechanicalParentTransportMode +
+                " | strictEnabled=" + HipMechanicalParentTransportEnabled +
+                " | recoverySupport=DEDICATED_V088_" + (HipMechanicalParentTransportEnabled ? "ON" : "OFF_MASTER") +
+                " | healthyNormalArm=" + HipMechanicalParentNormalTransportArm +
+                " | phaseOwnership=" + HipMechanicalParentNormalTransportScopeArm +
+                " | steps(total/active/strict/recovery/healthyEligible/healthyActive/healthyBypass/nonHealthyBlocked/disabled/real/inactiveFrame/invalid/clamp)=" +
+                HipMechanicalParentTransportSteps + "/" + HipMechanicalParentTransportActiveSteps + "/" + HipMechanicalParentTransportStrictActiveSteps + "/" + HipMechanicalParentRecoveryTransportActiveSteps + "/" + HipMechanicalParentHealthyNormalEligibleSteps + "/" + 0 + "/" + HipMechanicalParentTransportNormalBypassSteps + "/" + HipMechanicalParentTransportScopeBlockedSteps + "/" + HipMechanicalParentTransportDisabledSteps + "/" + HipMechanicalParentTransportRealParentSteps + "/" + HipMechanicalParentTransportInactiveFrameSteps + "/" + HipMechanicalParentTransportInvalidSteps + "/" + HipMechanicalParentTransportClampSteps +
+                " | nonHealthyBlocked(source/recovery/unhealthyNoRecovery)=" + HipMechanicalParentTransportScopeBlockedSourceSteps + "/" + HipMechanicalParentTransportScopeBlockedRecoverySteps + "/" + HipMechanicalParentTransportScopeBlockedUnhealthySteps +
+                " | current(active/recovery/healthyNormal/branch/reason/transport/relative/raw/applied/maxA/clamp)=" +
+                HipMechanicalParentTransportActiveThisStep + "/" + HipMechanicalParentRecoveryTransportActiveThisStep + "/" + false + "/" + HipMechanicalParentTransportActiveBranch + "/" + HipMechanicalParentTransportSuppressionReason + "/" + TransportNumber(HipMechanicalParentTransportCurrentMagnitude) + "/" + TransportNumber(HipMechanicalParentTransportCurrentRelativeCorrectionMagnitude) + "/" + TransportNumber(HipMechanicalParentTransportCurrentCombinedRawMagnitude) + "/" + TransportNumber(HipMechanicalParentTransportCurrentCombinedAppliedMagnitude) + "/" + TransportNumber(HipMechanicalParentTransportCurrentMaxAngularAcceleration) + "/" + HipMechanicalParentTransportCombinedClamped +
+                " | peak(transport/relative/raw/applied/transportToMaxA/rawToMaxA)=" +
+                TransportNumber(HipMechanicalParentTransportPeakMagnitude) + "/" + TransportNumber(HipMechanicalParentTransportPeakRelativeCorrectionMagnitude) + "/" + TransportNumber(HipMechanicalParentTransportPeakCombinedRawMagnitude) + "/" + TransportNumber(HipMechanicalParentTransportPeakCombinedAppliedMagnitude) + "/" + TransportNumber(HipMechanicalParentTransportPeakToMaxARatio) + "/" + TransportNumber(HipMechanicalParentTransportPeakCombinedRawToMaxARatio) +
+                " | totalAuthority=UNCHANGED_HIP_MAXA_40_80_80" +
+                " | recoveryVector=SAME_UPCOMING_PARENT_A_AS_V087_VALIDATED_BASELINE" +
+                " | sourceA=STRICT_CONTROL_FRAME_BRANCH_ONLY" +
+                " | guardPoseRebase=NEVER_USED_BY_TRANSPORT_FF" +
+                " | rawPelvisA=NEVER_USED_BY_TRANSPORT_FF";
         public bool HipMechanicalParentTransportEnabled;
         // v0.2.88: post-frame physical recovery support is explicit and common to both arms;
         // NormalTransportEnabled now means TRUE Healthy Normal transport only (A=OFF/B=ON).
@@ -117,12 +133,32 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public float HipMechanicalParentTransportPeakCombinedAppliedMagnitude;
         public float HipMechanicalParentTransportPeakToMaxARatio;
         public float HipMechanicalParentTransportPeakCombinedRawToMaxARatio;
-        public string HipMechanicalParentTransportLastEvidence;
+        public string HipMechanicalParentTransportLastEvidence => HipMechanicalParentTransportMode == null ? null : HipMechanicalParentTransportSteps == 0 ? "<none>" :
+            "active=" + HipMechanicalParentTransportActiveThisStep +
+            "/branch=" + HipMechanicalParentTransportActiveBranch +
+            "/reason=" + HipMechanicalParentTransportSuppressionReason +
+            "/transport=" + TransportNumber(HipMechanicalParentTransportCurrentMagnitude) +
+            "/relative=" + TransportNumber(HipMechanicalParentTransportCurrentRelativeCorrectionMagnitude) +
+            "/combinedRaw=" + TransportNumber(HipMechanicalParentTransportCurrentCombinedRawMagnitude) +
+            "/applied=" + TransportNumber(HipMechanicalParentTransportCurrentCombinedAppliedMagnitude) +
+            "/maxA=" + TransportNumber(HipMechanicalParentTransportCurrentMaxAngularAcceleration) +
+            "/clamp=" + HipMechanicalParentTransportCombinedClamped;
+
+        private static string TransportNumber(float value) => value.ToString("0.######", CultureInfo.InvariantCulture);
 
         // v0.2.50 bounded whole-leg common-mode Hip-anchor linear transport. Same acceleration is applied at both
         // Upper/Lower Rigidbody COMs with ForceMode.Acceleration; no direct torque and no new profile knob.
         public string HipAnchorLinearTransportMode;
-        public string HipAnchorLinearTransportKey;
+        public string HipAnchorLinearTransportKey => HipAnchorLinearTransportMode == null ? null :
+            "mode=" + HipAnchorLinearTransportMode +
+                " | enabled=" + HipAnchorLinearTransportEnabled +
+                " | boundSource=" + HipAnchorLinearTransportBoundSource +
+                " | current(active/reason/raw/applied/maxA/clamp)=" + HipAnchorLinearTransportActiveThisStep + "/" + (HipAnchorLinearTransportSuppressionReason ?? "<none>") + "/" + TransportNumber(HipAnchorLinearTransportCurrentRawAcceleration) + "/" + TransportNumber(HipAnchorLinearTransportCurrentAppliedAcceleration) + "/" + TransportNumber(HipAnchorLinearTransportCurrentMaxAcceleration) + "/" + HipAnchorLinearTransportClampedThisStep +
+                " | steps(total/active/disabled/real/inactiveFrame/invalid/clamp)=" + HipAnchorLinearTransportSteps + "/" + HipAnchorLinearTransportActiveSteps + "/" + HipAnchorLinearTransportDisabledSteps + "/" + HipAnchorLinearTransportRealParentSteps + "/" + HipAnchorLinearTransportInactiveFrameSteps + "/" + HipAnchorLinearTransportInvalidSteps + "/" + HipAnchorLinearTransportClampSteps +
+                " | peak(raw/applied/rawToBound)=" + TransportNumber(HipAnchorLinearTransportPeakRawAcceleration) + "/" + TransportNumber(HipAnchorLinearTransportPeakAppliedAcceleration) + "/" + TransportNumber(HipAnchorLinearTransportPeakRawToBoundRatio) +
+                " | application=UPPER_AND_LOWER_COM_SAME_ACCELERATION_FORCEMODE_ACCELERATION_NO_DIRECT_TORQUE" +
+                " | rawPelvisLinearA=NEVER_USED_DIRECTLY" +
+                " | last=" + (HipAnchorLinearTransportLastEvidence ?? "<none>");
         public string HipAnchorLinearTransportBoundSource;
         public bool HipAnchorLinearTransportEnabled;
         public bool HipAnchorLinearTransportActiveThisStep;
@@ -157,7 +193,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public float KneeSwing1LimitReadbackDegrees;
         public float KneeSwing2LimitReadbackDegrees;
 
-        // v0.2.2 source-only PCA calibration. Only explicit apply can change the ARL-owned Knee CharacterJoint flexion axis.
+        // Source-only PCA calibration. Explicit apply updates the controller axis and any preview Knee joint.
         public bool KneeAxisCalibrationCollecting;
         public bool KneeAxisCalibrationReady;
         public string KneeAxisCalibrationReason;
@@ -285,19 +321,15 @@ namespace MakemitAGA.ActiveRagdollLab.Model
 
         public float KneeRelativeComTransportErrorMagnitude;
 
-        // Current raw-pose control diagnostics. v0.2.17 removed the optional Single-Leg pose bridge;
-        // these fields now compare the active raw sampled target against the physics body.
+        // Compare the selected active control target against the physics body.
+        // Current dynamic scopes may select a continuous planned reference; legacy scopes retain held source targets.
         public float HipControlRotationErrorDegrees;
         public float KneeControlAxisErrorDegrees;
 
-        // Active D-target diagnostics. The optional v0.2.7 velocity bridge is retired. Legacy field name retained:
-        // KneeRawSampledAxisAngularVelocitySigned actually mirrors the TargetVelocityBlend-filtered Render sample-held W,
-        // not the v0.2.114 pre-blend raw Render W tap.
-        public float KneeRawSampledAxisAngularVelocitySigned;
-
         // v0.2.8 validated Single-Leg target angular-acceleration ACTUATION feedforward.
         // The feedforward contribution is added to the existing PD acceleration demand, but the final actuator output
-        // remains clamped by the original Hip/Knee MaxAngularAcceleration. Source Turn/Recovery/stale samples suppress it.
+        // remains clamped by the original Hip/Knee MaxAngularAcceleration. Hip and Knee gates are independent;
+        // planned Knee A has the explicit source/torso-recovery exemption, while physical/frame/age gates remain.
         public bool LegAngularAccelerationFeedforwardEnabled;
         public string LegAngularAccelerationFeedforwardMode;
         public string LegAngularAccelerationFeedforwardGateMode;
@@ -326,7 +358,8 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public float KneeLowerAppliedAngularAccelerationMagnitude;
         public float KneeFlexionAppliedAngularAccelerationMagnitude;
 
-        // v0.2.25 production software anatomical constraint. The physical CharacterJoint remains wide.
+        // Production software anatomical constraint. Only the initial preview has a wide Knee joint;
+        // the frozen post-PCA stack uses the translation tether and software off-axis PD.
         // v0.2.26 added read-only recovery attribution; v0.2.27 keeps the same P/D law but phase-schedules only the soft MaxA ceiling.
         public bool KneeSoftOffAxisControlEnabled;
         public float KneeSoftOffAxisAngularSpring;
@@ -796,7 +829,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public float HipTargetRelativeAngularAccelerationMagnitude;
         public float HipPdPContributionMagnitude;
         public float HipPdDContributionMagnitude;
-        // Controller-local signed 3D velocities retained for actuator/reference audit; active D target is raw Render sample-held W.
+        // Signed velocities for actuator/reference audit; D consumes the selected reference W.
         public float KneeTargetAxisAngularVelocitySigned;
         public float KneeBodyAxisAngularVelocitySigned;
         public float KneeAxisAngularVelocityErrorSigned;
@@ -805,7 +838,6 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public float KneePdDContributionSigned;
         // Explicit Render->FixedUpdate/body-measurement timing semantics retained for safety/clock diagnostics.
         public PhysicsStepContext RuntimeContext;
-        public SourceStepContext RuntimeSourceContext;
         public bool RuntimeParentMatched;
         public int FixedUpdateSequence;
         public int TargetRenderSampleSequence;
@@ -849,7 +881,6 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         // v0.4.19 Physical Lower native-gravity support-load causal A/B. Both arms keep the v0.4.18
         // Foot-gravity baseline; B additionally enables native gravity on Lower only for exact authorized STANCE.
         // Diagnostics attribute theoretical Lower self-weight and the existing child-only Knee tether support-normal acceleration.
-        public string StanceLowerNativeGravityMode;
         public string StanceLowerNativeGravityArm;
         public bool StanceLowerNativeGravityFinite = true;
         public string StanceLowerNativeGravityInvalidReason;
@@ -860,11 +891,8 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public int StanceLowerNativeGravityNonStanceAppliedSamples;
         public int StanceLowerNativeGravityReadbackFailures;
         public float StanceLowerNativeGravityExpectedNormalForceMean;
-        public float StanceLowerNativeGravityExpectedNormalForceMax;
         public float StanceLowerNativeGravityExpectedNormalImpulseMean;
-        public float StanceLowerNativeGravityExpectedNormalImpulseMax;
         public float StanceLowerNativeGravitySupportNormalSpeedAbsMean;
-        public float StanceLowerNativeGravitySupportNormalSpeedAbsMax;
         public float StanceLowerNativeGravityKneeTetherSupportNormalAccelerationMean;
         public float StanceLowerNativeGravityKneeTetherSupportNormalAccelerationMin;
         public float StanceLowerNativeGravityKneeTetherSupportNormalAccelerationMax;
@@ -873,26 +901,18 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public float StanceLowerNativeGravityLowerMass;
         public bool StanceLowerNativeGravityCurrentApplied;
         public int StanceLowerNativeGravityCurrentScheduledFixed;
-        public int StanceLowerNativeGravityFirstAppliedFixed;
-        public int StanceLowerNativeGravityLastAppliedFixed;
         public string StanceLowerNativeGravitySummary;
 
         // v0.4.20 support-normal reciprocal Foot<->Lower load-transfer telemetry. v0.4.21 freezes this B/ON
         // in both arms; it remains useful attribution for the independent self-weight transfer experiment.
         public KneeSupportNormalReactionReport KneeSupportReaction;
         public UpperSelfWeightSupportReport UpperSelfWeightSupport;
-        public string StanceFootLowerReciprocalMode;
         public string StanceFootLowerReciprocalArm;
         public bool StanceFootLowerReciprocalFinite = true;
         public string StanceFootLowerReciprocalInvalidReason;
         public bool StanceFootLowerReciprocalEnabled;
-        public int StanceFootLowerReciprocalTraceSamples;
-        public int StanceFootLowerReciprocalEligibleSamples;
         public int StanceFootLowerReciprocalAppliedSamples;
         public int StanceFootLowerReciprocalNonStanceAppliedSamples;
-        public int StanceFootLowerReciprocalZeroReactionSamples;
-        public int StanceFootLowerReciprocalUpwardLowerReactionSamples;
-        public int StanceFootLowerReciprocalDownwardLowerReactionSamples;
         public float StanceFootLowerReciprocalFootTetherSupportNormalAccelerationMean;
         public float StanceFootLowerReciprocalFootTetherSupportNormalAccelerationMin;
         public float StanceFootLowerReciprocalFootTetherSupportNormalAccelerationMax;
@@ -905,16 +925,10 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public int StanceFootLowerReciprocalCurrentFixed;
         public float StanceFootLowerReciprocalCurrentFootMass;
         public float StanceFootLowerReciprocalCurrentLowerMass;
-        public float StanceFootLowerReciprocalCurrentFootTetherSupportNormalAcceleration;
-        public float StanceFootLowerReciprocalCurrentFootTetherSupportNormalForce;
-        public float StanceFootLowerReciprocalCurrentLowerSupportNormalAcceleration;
         public Vector3 StanceFootLowerReciprocalCurrentReactionForceWorld;
-        public int StanceFootLowerReciprocalFirstAppliedFixed;
-        public int StanceFootLowerReciprocalLastAppliedFixed;
         public string StanceFootLowerReciprocalSummary;
 
         // v0.4.21 independent Lower self-weight support-normal load-transfer causal A/B.
-        public string StanceLowerSelfWeightTransferMode;
         public string StanceLowerSelfWeightTransferArm;
         public bool StanceLowerSelfWeightTransferFinite = true;
         public string StanceLowerSelfWeightTransferInvalidReason;
@@ -935,13 +949,8 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public int StanceLowerSelfWeightTransferCurrentFixed;
         public float StanceLowerSelfWeightTransferCurrentLowerMass;
         public float StanceLowerSelfWeightTransferCurrentFootMass;
-        public float StanceLowerSelfWeightTransferCurrentExpectedForce;
-        public float StanceLowerSelfWeightTransferCurrentExpectedImpulse;
-        public float StanceLowerSelfWeightTransferCurrentLowerSupportAcceleration;
         public float StanceLowerSelfWeightTransferCurrentFootLoadAcceleration;
         public Vector3 StanceLowerSelfWeightTransferCurrentForceWorld;
-        public int StanceLowerSelfWeightTransferFirstAppliedFixed;
-        public int StanceLowerSelfWeightTransferLastAppliedFixed;
         public string StanceLowerSelfWeightTransferSummary;
 
         public bool DriveAborted;
@@ -1023,7 +1032,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         {
             StringBuilder sb = new StringBuilder(8192);
             sb.AppendLine(RuntimeContext.Status() + "/parentMatched=" + RuntimeParentMatched);
-            sb.AppendLine("MakemitAGA Active Ragdoll Lab 0.4.2.1 - Per-Side Frozen Single-Leg / Foot-Ankle Requalification Foundation Report");
+            sb.AppendLine("MakemitAGA Active Ragdoll Lab " + Plugin.PluginVersion + " - Per-Side Frozen Single-Leg / Foot-Ankle Requalification Foundation Report");
             sb.AppendLine("stage=" + (Stage ?? "<none>"));
             sb.AppendLine("detail=" + (Detail ?? "<none>"));
             sb.AppendLine("built=" + Built);
@@ -1087,6 +1096,8 @@ namespace MakemitAGA.ActiveRagdollLab.Model
             sb.AppendLine("hipRelativeComTransportErrorMagnitude=" + F(HipRelativeComTransportErrorMagnitude));
             sb.AppendLine("kneeRelativeComTransportErrorMagnitude=" + F(KneeRelativeComTransportErrorMagnitude));
             sb.AppendLine(HipNormalReferenceSummary ?? "HIP_NORMAL_REFERENCE_V04800=NO_COMPLETED_TRACE");
+            sb.AppendLine(KneeReferenceSummary ?? "KNEE_REFERENCE_V041170=NO_COMPLETED_TRACE");
+            sb.AppendLine(KneePlannedFeedforwardSummary ?? "KNEE_PLANNED_FF_V041180=NO_COMPLETED_TRACE");
             sb.AppendLine("legAngularAccelerationFeedforwardEnabled=" + LegAngularAccelerationFeedforwardEnabled);
             sb.AppendLine("LEG_FF_SPLIT_V04770/hipActive-kneeActive=" + HipAngularAccelerationFeedforwardActiveThisStep + "/" + KneeAngularAccelerationFeedforwardActiveThisStep +
                 "/hipReason=" + (LegAngularAccelerationFeedforwardSuppressionReason ?? "<none>") + "/kneeReason=" + (KneeAngularAccelerationFeedforwardSuppressionReason ?? "<none>") +

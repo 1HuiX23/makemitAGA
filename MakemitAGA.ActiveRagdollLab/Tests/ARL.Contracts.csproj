@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net6.0</TargetFramework>
+    <LangVersion>10.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <Version>0.4.119</Version>
+    <AssemblyName>ARL.Contracts</AssemblyName>
+  </PropertyGroup>
+  <!-- Link the real implementations, rather than keeping a second copy of their algorithms.
+       No project reference to the game plugin: these contracts require only the .NET SDK. -->
+  <ItemGroup>
+    <Compile Include="../Runtime/RuntimeStepClock.cs" Link="Production/RuntimeStepClock.cs" />
+    <Compile Include="../Runtime/StepContextCursor.cs" Link="Production/StepContextCursor.cs" />
+    <Compile Include="../Runtime/RunSession.cs" Link="Production/RunSession.cs" />
+    <Compile Include="../Runtime/AutomaticStopNotice.cs" Link="Production/AutomaticStopNotice.cs" />
+    <Compile Include="../Runtime/PelvisTestCoordinator.cs" Link="Production/PelvisTestCoordinator.cs" />
+    <Compile Include="../Runtime/AnkleTestCoordinator.cs" Link="Production/AnkleTestCoordinator.cs" />
+    <Compile Include="../Physics/HipReferenceTrajectoryMath.cs" Link="Production/HipReferenceTrajectoryMath.cs" />
+    <Compile Include="../Physics/TargetRenderSampleTiming.cs" Link="Production/TargetRenderSampleTiming.cs" />
+    <Compile Include="../Physics/FootControlEvidenceState.cs" Link="Production/FootControlEvidenceState.cs" />
+    <Compile Include="../Model/FootControlEvidenceSnapshot.cs" Link="Production/FootControlEvidenceSnapshot.cs" />
+    <Compile Include="../Model/FootFixedStepEvidence.cs" Link="Production/FootFixedStepEvidence.cs" />
+  </ItemGroup>
+</Project>

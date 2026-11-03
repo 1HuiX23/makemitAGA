@@ -56,7 +56,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private int _traceConfirmedCosineSamples;
 
         internal Vector3 CurrentConditionedTargetAccelerationLocal => _currentConditioned;
-        internal bool Finite => _finite;
         // Existing held Render decision, exposed as values; never parse formatted report text.
         internal string CurrentStage => _currentStage;
         internal bool CurrentRawValid => _hasPreviousValid;

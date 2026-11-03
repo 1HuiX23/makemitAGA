@@ -12,7 +12,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     // Independent joined prediction includes both Hip pairs, final
     // Upper actuator torque and final receiver input; residuals still include Knee/load/drag
     // and integration. Neither prediction represents the complete native solve.
-    internal sealed class HipPointResponseAudit
+    internal sealed partial class HipPointResponseAudit
     {
         internal struct ResponseFrame
         {
@@ -20,6 +20,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             internal HipAttitudeBudgetSample Budget;
             internal PelvisHipAttitudeCommand Attitude;
             internal HipGoalPathEvidence GoalPath;
+            internal HipNormalReferenceState NormalReference;
+            internal PelvisReceiverReport.TrackingFrame ReceiverTracking;
             internal bool Resolved, Censored, Cancelled, HipTorqueCaptured;
             internal string Issue;
             internal PhysicsStepContext NextStep;
@@ -42,6 +44,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private ResponseFrame _pending, _peakResidual, _peakGap;
         private bool _hasPending;
         private ResponseFrame _lastBudgetFrame, _beforeFirstTorqueCap, _firstTorqueCap, _firstCompensatedOver;
+        private ResponseFrame _lastMotionFrame, _beforeMinimumMotion, _minimumMotion, _afterMinimumMotion;
         internal int BudgetSamples, BudgetMissing, GoalPathMissing, PreserveRawOverSteps, PreserveAppliedOverSteps;
         internal float PeakPreserveRawTorque, PeakPreserveAppliedTorque;
         internal int Captured, Resolved, Censored, Cancelled, Invalid, MissingHipTorque;
@@ -56,10 +59,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _next = _count = Captured = Resolved = Censored = Cancelled = Invalid = MissingHipTorque = 0;
             PeakResidual = PeakPostGap = PeakPointClosure = 0f; LastIssue = null;
             _lastBudgetFrame = _beforeFirstTorqueCap = _firstTorqueCap = _firstCompensatedOver = new ResponseFrame();
+            _lastMotionFrame = _beforeMinimumMotion = _minimumMotion = _afterMinimumMotion = new ResponseFrame();
             BudgetSamples = BudgetMissing = GoalPathMissing = PreserveRawOverSteps = PreserveAppliedOverSteps = 0;
             PeakPreserveRawTorque = PeakPreserveAppliedTorque = 0f;
             CoupledInputJoins = MissingCoupledInputs = 0;
             PeakParentComResidual = PeakParentAlphaResidual = PeakKnownFixedLeverResidual = 0f;
+            ResetRotationWindow();
         }
         internal void Capture(HipAnchorPairReport.Command c, Rigidbody child, Rigidbody parent)
         {
@@ -87,10 +92,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     (f.ParentV + Vector3.Cross(f.ParentW, f.ParentLever) - c.ParentV).magnitude > 0.0001f)
                 { Fault("CAPTURE_NATIVE_STATE_INVALID"); return; }
                 _pending = f; _hasPending = true; Captured++;
+                _rotationSessionStep = c.Step; _rotationSessionFixed = c.Fixed;
             }
             catch { Fault("CAPTURE_NATIVE_READ_EXCEPTION"); }
         }
-        // Run after both real force pairs and both baseline + correction torque writes returned.
+        // Run after both real force pairs, full Upper actuator torques and final receiver input returned.
         // This predicts only the specified inputs. Child Knee/weight/ground and child native
         // drag remain outside it; changing point levers are separately observed, not guessed.
         internal void CompleteInputs(PhysicsStepContext step, int localFixed, HipAnchorPairReport peer, PelvisHipAttitudeCommand attitude)
@@ -103,7 +109,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     peer == null || !peer.CurrentApplied || !peer.Finite || !peer.Current.Step.Matches(step) ||
                     peer.Current.Fixed != localFixed || peer.Current.ChildId == c.ChildId || peer.Current.ParentId != c.ParentId ||
                     !c.ParentInput.SameAs(peer.Current.ParentInput) || !attitude.Matches(c.ParentInput) || attitude.MotionScale != c.MotionScale ||
-                    !PelvisChestPointResponse.Same(attitude.CommonAcceleration, c.CommonAcceleration))
+                    !PelvisChestPointResponse.Same(attitude.CommonAcceleration, c.CommonAcceleration) ||
+                    !PelvisChestPointResponse.Same(attitude.HipForce, -c.Force - peer.Current.Force) ||
+                    !PelvisChestPointResponse.Same(attitude.AngularReaction, c.ParentAngularReaction + peer.Current.ParentAngularReaction))
                 { Fault("COUPLED_INPUT_JOIN_INVALID"); return; }
                 f.PeerForce = peer.Current.Force; f.PeerParentTorque = peer.Current.ParentTorque;
                 PelvisHipCommandFrame input = c.ParentInput;
@@ -121,13 +129,17 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             catch { Fault("COUPLED_INPUT_JOIN_EXCEPTION"); }
         }
         // Optional provenance is attached only after the real Hip torque call returned.
-        internal void CaptureGoalPath(HipGoalPathEvidence path)
+        internal void CaptureGoalPath(HipGoalPathEvidence path, HipNormalReferenceState normal)
         {
             if (_hasPending && path.Valid && path.Step.Matches(_pending.Command.Step) && path.Fixed == _pending.Command.Fixed)
+            {
                 _pending.GoalPath = path;
+                if (normal.Matches(path.Step)) _pending.NormalReference = normal;
+            }
         }
         internal void CompleteAttitudeBudget(PhysicsStepContext step, int localFixed, PelvisReceiverReport receiver)
         {
+            CaptureRotationTracking(step, localFixed, receiver);
             if (!_hasPending) return;
             try
             {
@@ -138,11 +150,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 f.Budget = HipAttitudeBudgetSample.Evaluate(f.Command.ParentInput, receiver.AngularActuation, f.Attitude,
                     -f.Command.Force - f.PeerForce, f.Command.ParentTorque + f.PeerParentTorque);
                 _pending = f;
+                RetainRotationFrame(f);
             }
             catch { } // Missing/invalid evidence is counted at resolution; never changes run eligibility.
         }
-        // Called only AFTER both actual Upper AddTorque calls returned. Torque is their
-        // final actuator sum; baseline and correction remain separately available in Command.
+        // Called only AFTER this Upper's single full-actuator AddTorque returned.
+        // The unissued original request and point correction remain available in Command.
         internal void CaptureHipTorque(PhysicsStepContext step, int localFixed, Vector3 torque, Vector3 desiredAlpha)
         {
             try
@@ -213,9 +226,28 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 PeakResidual = Mathf.Max(PeakResidual, f.PointResidualA.magnitude);
                 PeakPostGap = Mathf.Max(PeakPostGap, f.PostGap); PeakPointClosure = Mathf.Max(PeakPointClosure, f.PointClosureError);
                 RecordBudgetResolution(f);
+                RecordMinimumMotion(f);
                 Store(f);
             }
             catch { ClosePending("NEXT_NATIVE_READ_EXCEPTION", false, true); }
+        }
+        private void RecordMinimumMotion(ResponseFrame f)
+        {
+            float q = f.Command.MotionScale;
+            bool adjacent = _lastMotionFrame.Resolved && _lastMotionFrame.Command.Step.Epoch == f.Command.Step.Epoch &&
+                _lastMotionFrame.Command.Step.Sequence + 1 == f.Command.Step.Sequence && _lastMotionFrame.Command.Fixed + 1 == f.Command.Fixed;
+            if (_minimumMotion.Resolved && !_afterMinimumMotion.Resolved &&
+                _minimumMotion.Command.Step.Epoch == f.Command.Step.Epoch &&
+                _minimumMotion.Command.Step.Sequence + 1 == f.Command.Step.Sequence && _minimumMotion.Command.Fixed + 1 == f.Command.Fixed)
+                _afterMinimumMotion = f;
+            if (f.CoupledInputsJoined && F(q) && q >= 0f && q < 1f - 0.000001f &&
+                (!_minimumMotion.Resolved || q < _minimumMotion.Command.MotionScale))
+            {
+                _minimumMotion = f;
+                _beforeMinimumMotion = adjacent ? _lastMotionFrame : new ResponseFrame();
+                _afterMinimumMotion = new ResponseFrame();
+            }
+            _lastMotionFrame = f;
         }
         private void RecordBudgetResolution(ResponseFrame f)
         {
@@ -249,7 +281,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             ResponseFrame f = _pending; _hasPending = false; f.Censored = true; f.Cancelled = cancelled; f.Issue = issue;
             Censored++; if (cancelled) Cancelled++; if (invalid) Fault(issue); Store(f);
         }
-        private void Store(ResponseFrame f) { _ring[_next] = f; _next = (_next + 1) % _ring.Length; _count = Math.Min(_count + 1, _ring.Length); }
+        private void Store(ResponseFrame f)
+        {
+            _ring[_next] = f; _next = (_next + 1) % _ring.Length; _count = Math.Min(_count + 1, _ring.Length);
+            RetainRotationFrame(f);
+        }
         private void Fault(string issue) { Invalid++; LastIssue = issue; }
         private static bool BodiesMatch(HipAnchorPairReport.Command c, Rigidbody child, Rigidbody parent) => c.Step.Valid && c.Fixed > 0 &&
             child != null && parent != null && !child.isKinematic && !parent.isKinematic &&
@@ -259,9 +295,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private static string N(float v) => v.ToString("G9", CultureInfo.InvariantCulture);
         private static string S(Vector3 v) => "(" + N(v.x) + "," + N(v.y) + "," + N(v.z) + ")";
         private static string Q(Quaternion q) => "(" + N(q.x) + "," + N(q.y) + "," + N(q.z) + "," + N(q.w) + ")";
-        internal string GetDetails()
+        internal string GetDetails(PelvisReceiverReport receiver = null)
         {
-            var sb = new StringBuilder("hipPointResponse=V041000_MOTION_FEASIBILITY_READ_ONLY/physicalArm=B_V041000_HIP_MOTION_FEASIBILITY_ALLOCATION/captured-resolved-censored-cancelled-invalid-missingTorque=" +
+            // A safety exit may publish a new torso peak before either Hip command exists.
+            // Reconcile the authoritative peak at readout; absent commands remain explicit holes.
+            SyncRotationPeak(receiver);
+            var sb = new StringBuilder("hipPointResponse=V041020_SYSTEM_COM_RESPONSE_READ_ONLY/armSource=PELVIS_RUN_TEST_ARM/captured-resolved-censored-cancelled-invalid-missingTorque=" +
                 Captured + "-" + Resolved + "-" + Censored + "-" + Cancelled + "-" + Invalid + "-" + MissingHipTorque +
                 "/pending=" + _hasPending + "/lastIssue=" + (LastIssue ?? "<none>") + "/peak(plannedKnownResidualA-postGapMm-pointClosureA)=" +
                 N(PeakResidual) + "|" + N(PeakPostGap * 1000f) + "|" + N(PeakPointClosure) +
@@ -273,12 +312,17 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 .Append('-').Append(GoalPathMissing).Append('-').Append(PreserveRawOverSteps).Append('-').Append(PreserveAppliedOverSteps)
                 .Append("/requiredTorquePeak(preserveRaw-preserveApplied)=").Append(N(PeakPreserveRawTorque)).Append('|').Append(N(PeakPreserveAppliedTorque))
                 .Append("/budgetMeaning=SAME_STATE_BASELINE_RAW_AND_TORQUE2_RESPONSE/overThresholdNm=2/notAFutureTrajectory=True");
+            sb.Append("\nhipOwnershipSchema=V041070_READ_ONLY/rows=RETAINED_COMMAND_RECEIPTS_NOT_RUN_HISTOGRAM/pointPair=INTERNAL_TRANSLATION_AT_SEPARATE_ANCHORS/pointMomentOrigin=PARENT_COM/upperActuator=RELATIVE_CONTROL_PLUS_EXTERNAL_TRANSPORT_GYRO_POINT_CANCEL/receiver=EXTERNAL_POINT_COMPENSATION_PLUS_SELECTED_RELATIVE_REACTION/commonForce=EXTERNAL_P_PLUS_C_ONLY/sharedReceiverFields=REPEATED_PER_SIDE_DO_NOT_SUM/fullUpperActuatorMirror=False/jointRelativeReaction=PER_COMMAND/budgetEffectiveHip=POINT_PLUS_RELATIVE_REACTION/budgetPreserve=EXTERNAL_COUNTERFACTUAL_CANCELS_POINT_AND_RELATIVE_REACTION/receiverQ1Ratio=MIN_EXTERNAL_TOTAL/power=PRE_SOLVE_SELECTED_INPUT_POWER_NO_COMMON_LINEAR_OR_CHEST_SPIN_NOT_TOTAL_ENERGY/wholeBodyConservation=NOT_CERTIFIED");
             Append(sb, "BEFORE_FIRST_RECEIVER_TORQUE_CAP", _beforeFirstTorqueCap);
             Append(sb, "FIRST_RECEIVER_TORQUE_CAP", _firstTorqueCap);
             Append(sb, "FIRST_PRESERVE_APPLIED_OVER_BUDGET", _firstCompensatedOver);
+            sb.Append("\nhipMinimumMotionEvidence(before-min-after)=").Append(_beforeMinimumMotion.Resolved).Append('|')
+                .Append(_minimumMotion.Resolved).Append('|').Append(_afterMinimumMotion.Resolved);
+            Append(sb, "BEFORE_MIN_Q", _beforeMinimumMotion); Append(sb, "MIN_Q", _minimumMotion); Append(sb, "AFTER_MIN_Q", _afterMinimumMotion);
             Append(sb, "PEAK_RESIDUAL", _peakResidual); Append(sb, "PEAK_POST_GAP", _peakGap);
             for (int i = 0; i < _count; i++) Append(sb, "TAIL", _ring[(_next - _count + i + _ring.Length) % _ring.Length]);
             if (_hasPending) Append(sb, "PENDING", _pending);
+            AppendRotationWindow(sb, receiver);
             return sb.ToString();
         }
         private static void Append(StringBuilder sb, string tag, ResponseFrame f)
@@ -301,6 +345,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 .Append("/hipActuatorTorque-desiredAlpha=").Append(f.HipTorqueCaptured ? S(f.HipTorque) + "|" + S(f.HipDesiredAlpha) : "NA_NOT_CAPTURED")
                 .Append("/upperTorque(originalRequest-pointCorrection-actuator-netResidual)=").Append(S(c.PureHipTorque)).Append('|').Append(S(c.UpperCorrectionTorque))
                 .Append('|').Append(S(c.UpperActuatorTorque)).Append('|').Append(S(c.UpperActuatorTorque + c.ChildTorque - c.NetHipTorque))
+                .Append("/systemA(target-planned)=").Append(S(c.ParentInput.Acceleration * c.MotionScale)).Append('|')
+                .Append(S(c.CommonAcceleration - (c.Force + c.PeerForce) / c.ParentInput.Response.TotalMass))
+                .Append("/q1CommonBudgetRatio=").Append(N(c.CommonBudgetRatio))
                 .Append("/upperActuatorLimitNm=").Append(N(c.UpperActuatorLimitNm))
                 .Append("/allocation(motionScale-fullFeedbackFeasible-forceScale)=").Append(N(c.MotionScale)).Append('|').Append(c.FullFeedbackFeasible).Append('|').Append(N(c.Scale))
                 .Append("/allocatedCommonA-netHipTorque-alpha=").Append(S(c.CommonAcceleration)).Append('|').Append(S(c.NetHipTorque)).Append('|').Append(S(c.AllocatedHipAlpha))
@@ -315,7 +362,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     .Append("/predictedParent(comA-alpha)=").Append(S(f.PredictedParentComA)).Append('|').Append(S(f.PredictedParentAlpha))
                     .Append("/predictedKnownFixedLeverA=").Append(S(f.PredictedKnownFixedLeverA));
             sb.Append("/jointSolve=").Append(c.JointSolved)
-                .Append("/fullRequestForceOnlyScales(point-upperCorrection-upperActuator-receiver)=").Append(N(c.PointScale)).Append('|').Append(N(c.UpperCorrectionScale)).Append('|').Append(N(c.UpperActuatorScale)).Append('|').Append(N(c.ReceiverScale))
+                .Append("/q1BudgetRatios(point-upperCorrection-upperActuator-receiver)=").Append(N(c.PointBudgetRatio)).Append('|').Append(N(c.UpperCorrectionBudgetRatio)).Append('|').Append(N(c.UpperActuatorBudgetRatio)).Append('|').Append(N(c.ReceiverBudgetRatio))
                 .Append("/jointUnboundedForce=").Append(S(c.UnboundedForce))
                 .Append("/jointA(bias-planned-feedbackResidual)=").Append(S(c.KnownBiasA)).Append('|').Append(S(c.PredictedNetA)).Append('|').Append(S(c.FeedbackResidualA))
                 .Append("/jointPlanVsJoinedA=").Append(f.CoupledInputsJoined ? S(c.PredictedNetA - f.PredictedKnownFixedLeverA) : "NA");
@@ -326,6 +373,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     .Append("/budgetAlpha(hipResponse-rawResponseDeficit)=").Append(S(f.Budget.HipResponseAlpha)).Append('|').Append(S(f.Budget.RawResponseDeficitAlpha))
                     .Append("/budgetFlags(receiverCap-rawOver-appliedOver)=").Append(f.Budget.ReceiverClamped).Append('|').Append(f.Budget.PreserveRawExceeds).Append('|').Append(f.Budget.PreserveAppliedExceeds);
             else sb.Append("/attitudeBudget=NA_INPUTS_NOT_JOINED");
+            AppendOwnership(sb, f);
+            AppendNormalReference(sb, f);
             if (!f.Resolved) { sb.Append("/response=NA_CENSORED_OR_PENDING"); return; }
             sb.Append("/postCOM=").Append(S(f.NextChildCom)).Append('|').Append(S(f.NextParentCom))
                 .Append("/postPoint=").Append(S(f.NextChildPoint)).Append('|').Append(S(f.NextParentPoint)).Append("/postV=").Append(S(f.NextChildV)).Append('|').Append(S(f.NextParentV)).Append("/postW=").Append(S(f.NextChildW)).Append('|').Append(S(f.NextParentW))
@@ -336,6 +385,33 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 .Append("/observedAlpha=").Append(S(f.ChildObservedAlpha)).Append('|').Append(S(f.ParentObservedAlpha)).Append("/childTorqueResidualAlpha=").Append(f.HipTorqueCaptured ? S(f.ChildTorqueResidualAlpha) : "NA_NOT_CAPTURED");
             sb.Append("/coupledResidual(parentComA-parentAlpha-knownFixedLeverA)=").Append(f.CoupledInputsJoined ?
                 S(f.ParentComResidualA) + "|" + S(f.ParentAlphaResidual) + "|" + S(f.KnownFixedLeverResidualA) : "NA_INPUTS_NOT_JOINED");
+        }
+        private static void AppendNormalReference(StringBuilder sb, ResponseFrame f)
+        {
+            var n = f.NormalReference;
+            sb.Append("/hipNormalInputV041080(applied-receiverParent-alphaLimited)=");
+            if (!n.Matches(f.Command.Step) || !PelvisParentFrame.Q(n.InputR) || !V(n.InputW) || !V(n.A))
+            { sb.Append("NA_UNJOINED_OR_INVALID"); return; }
+            sb.Append(n.Applied).Append('|').Append(n.ReceiverParentReference).Append('|').Append(n.AlphaLimited)
+                .Append("/hipNormalInputR-W-plannedA=").Append(Q(n.InputR)).Append('|').Append(S(n.InputW)).Append('|').Append(S(n.A));
+            if (f.Command.ParentInput.JointTorqueReaction)
+                sb.Append("/receiverTargetR-W=").Append(Q(f.Command.ParentInput.ReferenceRotation)).Append('|').Append(S(f.Command.ParentInput.ReferenceW));
+        }
+        private static void AppendOwnership(StringBuilder sb, ResponseFrame f)
+        {
+            if (!f.CoupledInputsJoined || !f.HipTorqueCaptured ||
+                !HipActuationOwnership.TryMeasure(f.Command, f.HipTorque, f.ChildW, f.ParentW, f.Attitude, out var o))
+            { sb.Append("/hipOwnership=NA_UNJOINED_OR_INVALID"); return; }
+            sb.Append('/').Append(f.Command.Angular.Details(f.Command.MotionScale, f.Command.ParentInput.JointTorqueReaction, f.Command.ParentAngularReaction));
+            sb.Append("/hipOwnership=COMMITTED_INPUTS")
+                .Append("/pointPairMomentNm(parentOrigin-closureResidual)=").Append(S(o.PointPairMoment)).Append('|').Append(S(o.PointMomentClosure))
+                .Append("/upperAngularNm(actualCorrection-netResidual)=").Append(S(o.UpperCorrection)).Append('|').Append(S(o.UpperNetResidual))
+                .Append("/externalCommonN(final-delta-systemResidual)=").Append(S(o.CommonForce)).Append('|').Append(S(o.CommonDeltaForce)).Append('|').Append(S(o.SystemForceResidual))
+                .Append("/relativePairClosureNm=").Append(S(o.JointPairResidual))
+                .Append("/receiverNm(reaction-external-total-compensationResidual)=").Append(S(f.Attitude.AngularReaction)).Append('|')
+                .Append(S(f.Attitude.ExternalRequestedTorque)).Append('|').Append(S(f.Attitude.AppliedTorque)).Append('|').Append(N(o.CompensationResidual))
+                .Append("/jointRelativePowerW_nonAdditiveView=").Append(N(o.JointPairPower))
+                .Append("/commandPowerW(pointPair-upperTorque-sharedPelvisTorque)=").Append(N(o.PointPairPower)).Append('|').Append(N(o.UpperPower)).Append('|').Append(N(o.ReceiverPower));
         }
     }
 }

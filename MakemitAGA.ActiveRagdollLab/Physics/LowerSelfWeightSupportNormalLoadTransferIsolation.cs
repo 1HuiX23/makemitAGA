@@ -59,7 +59,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal string Arm => _arm;
         internal bool Enabled => string.Equals(_arm, ArmB, StringComparison.Ordinal);
         internal bool Finite => _finite;
-        internal string InvalidReason => _invalidReason;
 
         internal bool SetArm(string arm, SingleLegChainReport report, out string error)
         {
@@ -206,7 +205,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             if (report == null) return;
             float denom = Mathf.Max(1, _eligibleSamples);
-            report.StanceLowerSelfWeightTransferMode = Mode;
             report.StanceLowerSelfWeightTransferArm = _arm;
             report.StanceLowerSelfWeightTransferFinite = _finite;
             report.StanceLowerSelfWeightTransferInvalidReason = _invalidReason;
@@ -227,13 +225,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             report.StanceLowerSelfWeightTransferCurrentFixed = _currentFixed;
             report.StanceLowerSelfWeightTransferCurrentLowerMass = _currentLowerMass;
             report.StanceLowerSelfWeightTransferCurrentFootMass = _currentFootMass;
-            report.StanceLowerSelfWeightTransferCurrentExpectedForce = _currentExpectedForce;
-            report.StanceLowerSelfWeightTransferCurrentExpectedImpulse = _currentExpectedImpulse;
-            report.StanceLowerSelfWeightTransferCurrentLowerSupportAcceleration = _currentLowerSupportAcceleration;
             report.StanceLowerSelfWeightTransferCurrentFootLoadAcceleration = _currentFootLoadAcceleration;
             report.StanceLowerSelfWeightTransferCurrentForceWorld = _currentTransferForceWorld;
-            report.StanceLowerSelfWeightTransferFirstAppliedFixed = _firstAppliedFixed;
-            report.StanceLowerSelfWeightTransferLastAppliedFixed = _lastAppliedFixed;
             report.StanceLowerSelfWeightTransferSummary =
                 "mode=" + Mode +
                 "/arm=" + _arm +

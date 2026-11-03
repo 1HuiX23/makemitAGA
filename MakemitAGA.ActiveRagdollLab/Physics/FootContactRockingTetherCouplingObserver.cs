@@ -584,12 +584,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             report.RockingTetherCouplingMode = Mode;
             report.RockingTetherCouplingFinite = _finite;
             report.RockingTetherCouplingInvalidReason = _invalidReason;
-            report.RockingTetherCouplingResolvedSolves = _resolved;
             report.RockingTetherCouplingEvidenceReady = _finite && _resolved >= MinimumResolvedSolves;
             report.DynamicNormalLoadMode = NormalLoadMode;
             report.DynamicNormalLoadFinite = _normalFinite;
             report.DynamicNormalLoadInvalidReason = _normalInvalidReason;
-            report.DynamicNormalLoadResolvedSolves = _normalAll.Count;
             report.DynamicNormalLoadEvidenceReady = NormalLoadReady;
             if (!format) return;
             report.DynamicNormalLoadTraceSummary = "captured-resolved-censored-skipped-unknownSource=" + _normalCaptured + "-" + _normalAll.Count + "-" + _normalCensored + "-" + _normalSkipped + "-" + _normalUnknownPhase +

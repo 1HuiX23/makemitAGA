@@ -45,8 +45,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         internal bool Enabled => _enabled;
         internal string Arm => _enabled ? ArmB : ArmA;
-        internal bool Finite => _finite;
-        internal string InvalidReason => _invalidReason;
 
         internal void FreezeProductionArm()
         {

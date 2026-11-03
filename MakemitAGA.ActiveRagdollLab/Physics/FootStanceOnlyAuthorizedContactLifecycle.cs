@@ -15,13 +15,15 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     ///
     /// Important timing rule: the first strong swing sample changes the gait state to TRANSITION_TO_SWING;
     /// this lifecycle sees that state in the same FixedUpdate and disables the Foot Collider before the
-    /// remaining Foot controller / Unity physics step.  Landing is deliberately slower: contact is enabled
-    /// only after confirmed STANCE plus a short same-Collider qualification hold.
+    /// remaining Foot controller / Unity physics step. Both current Hip arms qualify Box geometry
+    /// concurrently with the stance debounce. v111 A retains v110 B strict missed-entry locking;
+    /// B may requalify the same confirmed candidate after a quiet shallow hold. Unrecovered misses
+    /// continue to invalidate entry evidence. Legacy scopes retain serial qualification.
     ///
     /// This class does not apply force/torque, does not raycast, does not alter gait thresholds and does not
     /// relax any existing Foot/Knee hard gate.  It only orchestrates the already-qualified contact shadow.
     /// </summary>
-    internal sealed class FootStanceOnlyAuthorizedContactLifecycle
+    internal sealed partial class FootStanceOnlyAuthorizedContactLifecycle
     {
         internal const string Mode = "STANCE_ONLY_AUTHORIZED_FOOT_CONTACT_LIFECYCLE_V0470_HOTFIX_V04161_ACTIVATION_READINESS";
         internal const float MinQualifiedStanceHoldSeconds = 0.08f;
@@ -48,9 +50,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private string _lastReason = "<none>";
         private float _qualifiedStanceSeconds;
         private int _qualifiedStanceColliderId;
-        private string _qualifiedStanceColliderPath;
         private int _preparedColliderId;
-        private string _preparedColliderPath;
 
         private int _fixedSamples;
         private int _activeSamples;
@@ -79,16 +79,16 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal void SetEnabled(bool enabled, FootQualifiedContactShadow shadow, BoxCollider footCollider, FootAnkleFoundationReport report)
         {
             _enabled = enabled;
+            if (!enabled) _continuousEntry = _entryRecovery = false;
+            ResetEntryRecoveryHold();
             _finite = true;
             _invalidReason = null;
             _state = enabled ? StateWaiting : StateDisabled;
             _lastReason = enabled ? "WAITING_FOR_CONFIRMED_STANCE" : "DISABLED";
             _qualifiedStanceSeconds = 0f;
             _qualifiedStanceColliderId = 0;
-            _qualifiedStanceColliderPath = null;
             _activationGeometryReadySamples = 0;
             _preparedColliderId = 0;
-            _preparedColliderPath = null;
 
             if (!enabled && shadow != null)
                 shadow.SetArmA(footCollider, report);
@@ -97,6 +97,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         internal void ResetTrace(FootAnkleFoundationReport report)
         {
+            ResetEntryTrace();
             _fixedSamples = 0;
             _activeSamples = 0;
             _contactActivations = 0;
@@ -119,7 +120,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _lastReleaseFixed = 0;
             _qualifiedStanceSeconds = 0f;
             _qualifiedStanceColliderId = 0;
-            _qualifiedStanceColliderPath = null;
             if (_enabled && _finite)
             {
                 _state = StateWaiting;
@@ -141,7 +141,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             FootQualifiedContactShadow shadow,
             BoxCollider footCollider,
             Transform sourceRoot,
-            FootAnkleFoundationReport report)
+            FootAnkleFoundationReport report,
+            FootSupportSurfaceIsolation supportSurface = null,
+            EntryContext entryContext = default)
         {
             if (!_enabled)
             {
@@ -155,7 +157,25 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             }
 
             if (traceEnabled) _fixedSamples++;
-            float dt = IsFinite(fixedDeltaTime) && fixedDeltaTime > 0f ? fixedDeltaTime : 0.02f;
+            if (!IsFinite(fixedDeltaTime) || fixedDeltaTime <= 0f)
+            {
+                Invalidate("STANCE_CONTACT_INVALID_FIXED_DT", report);
+                return false;
+            }
+            float dt = fixedDeltaTime;
+            if (_continuousEntry && !shadow.Active)
+            {
+                // Observe the approach before the strong-STANCE filter, using the already-selected Box only.
+                // Invalid pre-candidate evidence is diagnostic; actual admission still fails closed below.
+                if (entryContext.FixedSequence != fixedSequence) entryContext = default;
+                bool captureHistory = traceEnabled && _entryHistoryLogs < MaxEntryHistoryLogs;
+                entryContext.DecompositionValid &= captureHistory;
+                _entryGeometry = CaptureEntryGeometry(footCollider, supportSurface,
+                    currentGroundCollider != null ? currentGroundCollider.GetInstanceID() : 0, entryContext, dt);
+                _entryGeometryFixed = fixedSequence;
+                _entryGeometryAtEnable = false;
+                if (captureHistory) RecordEntryHistory(fixedSequence, dt, gaitState, strongStanceSample, identityCurrentQualified, _entryGeometry);
+            }
             bool confirmedStance = string.Equals(gaitState, FootGameNativeLocomotionPhaseObserver.StateStance, StringComparison.Ordinal);
             bool transitionToSwing = string.Equals(gaitState, FootGameNativeLocomotionPhaseObserver.StateToSwing, StringComparison.Ordinal);
             bool swing = string.Equals(gaitState, FootGameNativeLocomotionPhaseObserver.StateSwing, StringComparison.Ordinal);
@@ -181,7 +201,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     if (swing) _swingReleaseCount++;
                     _state = StatePrepared;
                     _lastReason = transitionToSwing ? "RELEASE_ON_TRANSITION_TO_SWING" : (swing ? "RELEASE_ON_SWING" : (!strongStanceSample ? "RELEASE_ON_STRONG_STANCE_EXIT" : "RELEASE_ON_NON_STANCE"));
-                    Plugin.Logger?.LogInfo("[ARL][STANCE_CONTACT_V0470] side=" + Clean(report != null ? report.Side : null) +
+                    LogEvent("[ARL][STANCE_CONTACT_V0470] side=" + Clean(report != null ? report.Side : null) +
                                            " | action=RELEASE | fixed=" + fixedSequence + " | gait=" + Clean(gaitState) +
                                            " | reason=" + _lastReason + " | authId=" + _preparedColliderId);
                     ResetStanceHold();
@@ -222,8 +242,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 return true;
             }
 
-            // Contact is OFF. Any transition/swing state immediately resets the landing hold.
-            if (!confirmedStance || !strongStanceSample)
+            // Both current Hip arms accumulate identity/geometry during strong landing evidence;
+            // only confirmed STANCE can enable contact. Other scopes retain the serial historical hold.
+            bool landingCandidate = confirmedStance || (_continuousEntry &&
+                string.Equals(gaitState, FootGameNativeLocomotionPhaseObserver.StateToStance, StringComparison.Ordinal));
+            if (!landingCandidate || !strongStanceSample)
             {
                 ResetStanceHold();
                 _state = shadow.Prepared ? StatePrepared : StateWaiting;
@@ -246,9 +269,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (_qualifiedStanceColliderId != identityColliderId)
             {
                 _qualifiedStanceColliderId = identityColliderId;
-                _qualifiedStanceColliderPath = identityColliderPath;
                 _qualifiedStanceSeconds = 0f;
                 _activationGeometryReadySamples = 0;
+                _entryWindowMissed = _entryMissCounted = false;
+                ResetEntryRecoveryHold();
             }
             else
             {
@@ -256,38 +280,57 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             }
 
             _state = StateQualifying;
-            _lastReason = "STANCE_IDENTITY_HOLD";
-            if (_qualifiedStanceSeconds < MinQualifiedStanceHoldSeconds)
+            if (!_continuousEntry)
             {
-                _activationGeometryReadySamples = 0;
-                CopyToReport(report);
-                return true;
+                _entryGeometry = CaptureEntryGeometry(footCollider, supportSurface, identityColliderId);
+                _entryGeometryFixed = fixedSequence;
+                _entryGeometryAtEnable = false;
             }
+            if (_continuousEntry)
+            {
+                if (!ContinuousEntryReady(confirmedStance, ActivationGeometryReady(report, identityColliderId, currentGroundCollider),
+                    fixedSequence, dt, gaitState, report))
+                {
+                    CopyToReport(report);
+                    return _finite;
+                }
+            }
+            else
+            {
+                _lastReason = "STANCE_IDENTITY_HOLD";
+                if (_qualifiedStanceSeconds < MinQualifiedStanceHoldSeconds)
+                {
+                    _activationGeometryReadySamples = 0;
+                    CopyToReport(report);
+                    return true;
+                }
 
-            // v0.4.16.1 activation-readiness hotfix.  Contact identity is intentionally not sufficient here:
-            // v0.4.16 exposed a landing where the same floor identity was valid but the physical Foot sole was
-            // still ~0.11 m away from its target and the five-point support geometry stayed invalid for three
-            // collision callbacks.  Gate only the OFF->ON transition on the current physical sole witness.
-            // Once contact is active, the existing lifecycle/reaction observers retain their original semantics.
-            bool activationGeometryReady = ActivationGeometryReady(report, identityColliderId, currentGroundCollider);
-            if (!activationGeometryReady)
-            {
-                if (traceEnabled) _activationGeometryRejectSamples++;
-                _activationGeometryReadySamples = 0;
-                _state = StateQualifying;
-                _lastReason = "STANCE_ACTIVATION_GEOMETRY_NOT_READY";
-                CopyToReport(report);
-                return true;
-            }
+                // v0.4.16.1 activation-readiness hotfix.  Contact identity is intentionally not sufficient here:
+                // v0.4.16 exposed a landing where the same floor identity was valid but the physical Foot sole was
+                // still ~0.11 m away from its target and the five-point support geometry stayed invalid for three
+                // collision callbacks.  Gate only the OFF->ON transition on the current physical sole witness.
+                // Once contact is active, the existing lifecycle/reaction observers retain their original semantics.
+                bool activationGeometryReady = ActivationGeometryReady(report, identityColliderId, currentGroundCollider);
+                if (!activationGeometryReady)
+                {
+                    if (traceEnabled) _activationGeometryRejectSamples++;
+                    _activationGeometryReadySamples = 0;
+                    _state = StateQualifying;
+                    _lastReason = "STANCE_ACTIVATION_GEOMETRY_NOT_READY";
+                    CopyToReport(report);
+                    return true;
+                }
 
-            _activationGeometryReadySamples++;
-            if (_activationGeometryReadySamples < MinActivationGeometryReadySamples)
-            {
-                _state = StateQualifying;
-                _lastReason = "STANCE_ACTIVATION_GEOMETRY_READY_HOLD";
-                CopyToReport(report);
-                return true;
-            }
+                _activationGeometryReadySamples++;
+                if (_activationGeometryReadySamples < MinActivationGeometryReadySamples)
+                {
+                    _state = StateQualifying;
+                    _lastReason = "STANCE_ACTIVATION_GEOMETRY_READY_HOLD";
+                    CopyToReport(report);
+                    return true;
+                }
+
+            } // legacy serial qualification
 
             // Reuse a prepared exact support whenever the foot returns to the same floor. Reprepare only when the
             // authorized support identity changes. This avoids a full scene-isolation rebuild every stride.
@@ -303,13 +346,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 }
                 _prepareCount++;
                 _preparedColliderId = identityColliderId;
-                _preparedColliderPath = identityColliderPath;
             }
             else
             {
                 _preparedReuseCount++;
                 _preparedColliderId = identityColliderId;
-                _preparedColliderPath = identityColliderPath;
             }
 
             if (!shadow.EnablePreparedArmB(report, out string enableError))
@@ -320,15 +361,25 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             }
 
             _contactActivations++;
+            _entryGeometryAtEnable = true;
+            CommitEntryActivation();
+            if (_entryGeometry.Valid)
+            {
+                _entryEvaluatedActivations++;
+                _entryEnabledPenetrationPeak = Mathf.Max(_entryEnabledPenetrationPeak, -_entryGeometry.MinClearance);
+            }
             if (_firstContactFixed == 0) _firstContactFixed = fixedSequence;
             _lastContactFixed = fixedSequence;
             _state = StateActive;
             _lastReason = "STANCE_CONTACT_ENABLED";
-            Plugin.Logger?.LogInfo("[ARL][STANCE_CONTACT_V0470] side=" + Clean(report != null ? report.Side : null) +
+            LogEvent("[ARL][STANCE_CONTACT_V0470] side=" + Clean(report != null ? report.Side : null) +
                                    " | action=ENABLE | fixed=" + fixedSequence + " | gait=" + Clean(gaitState) +
                                    " | authId=" + identityColliderId + " | holdSec=" + F(_qualifiedStanceSeconds) +
                                    " | geometryReadyHold=" + _activationGeometryReadySamples + "/" + MinActivationGeometryReadySamples +
-                                   " | surface=" + Clean(identityColliderPath));
+                                   " | surface=" + Clean(identityColliderPath) + " | entryPolicy=" + EntryPolicy +
+                                   " | boxMinMm=" + (_entryGeometry.Valid ? F(_entryGeometry.MinClearance * 1000f) : "NA") +
+                                   " | recovered=" + _entryRecoveryPending +
+                                   " | entryGeometry=" + EntryGeometryText(_entryGeometry));
             CopyToReport(report);
             return true;
         }
@@ -347,6 +398,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     return false;
             }
             _enabled = false;
+            _continuousEntry = _entryRecovery = false;
+            ResetEntryRecoveryHold();
             _state = shadow != null && shadow.Prepared ? StatePrepared : StateDisabled;
             _lastReason = "STOP_QUIESCE_CONTACT_OFF_TRACE_PRESERVED";
             CopyToReport(report);
@@ -358,11 +411,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (shadow != null)
                 shadow.SetArmA(footCollider, report);
             _enabled = false;
+            _continuousEntry = _entryRecovery = false;
             _state = StateDisabled;
             _lastReason = "DISABLED";
-            _qualifiedStanceSeconds = 0f;
-            _qualifiedStanceColliderId = 0;
-            _qualifiedStanceColliderPath = null;
+            ResetStanceHold();
             // Preserve the last authorized support identity in the trace summary after stop. A subsequent
             // SetEnabled() starts a fresh run and clears it.
             CopyToReport(report);
@@ -398,7 +450,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     F(FootGroundContactIdentityQualificationObserver.MinNormalDot) + "-" +
                     F(FootGroundContactIdentityQualificationObserver.MaxAbsClearanceMeters * 1000f) + "-" +
                     F(FootGroundContactIdentityQualificationObserver.MaxSpreadMeters * 1000f);
-                Plugin.Logger?.LogInfo("[ARL][STANCE_CONTACT_V0470] side=" + Clean(report != null ? report.Side : null) +
+                LogEvent("[ARL][STANCE_CONTACT_V0470] side=" + Clean(report != null ? report.Side : null) +
                     " | action=RELEASE | fixed=" + fixedSequence + " | gait=" + Clean(gaitState) + " | reason=" + _lastReason +
                     " | authId=" + _preparedColliderId + "/identityId=" + identityColliderId +
                     "/currentGroundId=" + (currentGroundCollider != null ? currentGroundCollider.GetInstanceID() : 0) +
@@ -410,9 +462,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         private void ResetStanceHold()
         {
+            ResetEntryRecoveryHold();
+            _entryWindowMissed = _entryMissCounted = false;
+            _entryGeometry = new EntryGeometry();
+            _entryGeometryFixed = 0;
+            _entryGeometryAtEnable = false;
             _qualifiedStanceSeconds = 0f;
             _qualifiedStanceColliderId = 0;
-            _qualifiedStanceColliderPath = null;
             _activationGeometryReadySamples = 0;
         }
 
@@ -440,7 +496,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal void CopyToReport(FootAnkleFoundationReport report)
         {
             if (report == null) return;
-            bool traceQualified = _finite &&
+            CopyEntryToReport(report);
+            bool traceQualified = _finite && report.ContactEntryEvidenceReady &&
                                   _contactActivations >= MinContactActivations &&
                                   _releaseCount >= MinContactReleases &&
                                   _activeSamples >= MinActiveSamples &&
@@ -455,9 +512,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             report.StanceContactLifecycleLastReason = _lastReason;
             report.StanceContactLifecycleQualifiedStanceSeconds = _qualifiedStanceSeconds;
             report.StanceContactLifecycleQualifiedColliderInstanceId = _qualifiedStanceColliderId;
-            report.StanceContactLifecycleQualifiedColliderPath = _qualifiedStanceColliderPath;
             report.StanceContactLifecycleAuthorizedColliderInstanceId = _preparedColliderId;
-            report.StanceContactLifecycleAuthorizedColliderPath = _preparedColliderPath;
             report.StanceContactLifecycleFixedSamples = _fixedSamples;
             report.StanceContactLifecycleActiveSamples = _activeSamples;
             report.StanceContactLifecycleContactActivations = _contactActivations;
@@ -479,28 +534,14 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             report.StanceContactLifecycleLastContactFixed = _lastContactFixed;
             report.StanceContactLifecycleLastReleaseFixed = _lastReleaseFixed;
             report.StanceContactLifecycleTraceQualified = traceQualified;
-            report.StanceContactLifecycleCurrentSummary =
-                "enabled=" + _enabled + "/finite=" + _finite + "/state=" + _state +
-                "/gait=" + Clean(report.GameNativeGaitPhaseState) +
-                "/shadowPreparedActive=" + report.ContactShadowPrepared + "-" + report.ContactShadowActive +
-                "/qualifiedHoldSec=" + F(_qualifiedStanceSeconds) +
-                "/candidateId=" + _qualifiedStanceColliderId +
-                "/activationReadyHold=" + _activationGeometryReadySamples + "/" + MinActivationGeometryReadySamples +
-                "/authorizedId=" + _preparedColliderId +
-                "/last=" + Clean(_lastReason);
-            report.StanceContactLifecycleTraceSummary =
-                "fixed=" + _fixedSamples + "/active=" + _activeSamples +
-                "/activation=" + _contactActivations +
-                "/prepare-reuse-reprepare=" + _prepareCount + "-" + _preparedReuseCount + "-" + _surfaceReprepareCount +
-                "/release(total-transition-swing-idLoss-surfaceChange)=" + _releaseCount + "-" + _transitionReleaseCount + "-" + _swingReleaseCount + "-" + _identityLossReleaseCount + "-" + _surfaceChangeReleaseCount +
-                "/identityReject=" + _identityRejectSamples +
-                "/activationGeometryReject=" + _activationGeometryRejectSamples +
-                "/activationReadyHold=" + _activationGeometryReadySamples + "/" + MinActivationGeometryReadySamples +
-                "/nonStanceActive=" + _nonStanceActiveSamples +
-                "/fail(enable-disable)=" + _enableFailures + "-" + _disableFailures +
-                "/firstContact-lastContact-lastRelease=" + _firstContactFixed + "-" + _lastContactFixed + "-" + _lastReleaseFixed +
-                "/TRACE_STANCE_CONTACT_LIFECYCLE_QUALIFIED=" + traceQualified +
-                "/thresholds(identityHoldSec-geometryReadySamples-activation-release-activeSamples)=" + F(MinQualifiedStanceHoldSeconds) + "-" + MinActivationGeometryReadySamples + "-" + MinContactActivations + "-" + MinContactReleases + "-" + MinActiveSamples;
+            report.StanceContactLifecycleTraceIdentityHoldSeconds = _entryTraceContinuous ? ContinuousIdentityHoldSeconds : MinQualifiedStanceHoldSeconds;
+            report.StanceContactLifecycleMinGeometryReadySamples = MinActivationGeometryReadySamples;
+            report.StanceContactLifecycleMinActivations = MinContactActivations;
+            report.StanceContactLifecycleMinReleases = MinContactReleases;
+            report.StanceContactLifecycleMinActiveSamples = MinActiveSamples;
+            report.StanceContactLifecycleSummaryGait = report.GameNativeGaitPhaseState;
+            report.StanceContactLifecycleSummaryShadowPrepared = report.ContactShadowPrepared;
+            report.StanceContactLifecycleSummaryShadowActive = report.ContactShadowActive;
         }
 
         private static bool IsFinite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);

@@ -172,7 +172,7 @@ namespace MakemitAGA.ActiveRagdollLab.Acquisition
         /// <summary>
         /// MiSide 当前 MitaPerson Mita 已实机确认的标准骨链：
         /// Armature/Hips/Left leg/Left knee/Left ankle/Left toe（右侧对称）。
-        /// v0.2.0 动力学只使用 leg/knee 两个段，ankle 作为 LowerLeg 末端参考，toe 暂不建刚体。
+        /// ankle 同时是 LowerLeg 末端与 Foot 起点，toe 是 Foot 几何末端；不单独创建 Toe 刚体。
         /// </summary>
         private static bool TryResolveMiSideCanonical(Transform targetRoot, SingleLegTargetReport report)
         {
@@ -240,7 +240,7 @@ namespace MakemitAGA.ActiveRagdollLab.Acquisition
                 // MiSide 的 "Left leg" 是 UpperLeg 根骨，不再作为 LowerLeg 候选。
                 upperNames = new[] { "leftleg", "leftupperleg", "leftthigh", "upperlegl", "thighl", "lupperleg", "lthigh" };
                 lowerNames = new[] { "leftknee", "leftlowerleg", "leftcalf", "lowerlegl", "calfl", "llowerleg", "lcalf" };
-                // MiSide 的 ankle 是本阶段 Foot reference；真正 toe 留给未来 Foot Rigidbody。
+                // MiSide 的 ankle 是 Foot 起点；Toe 在 ResolveFootEndpoint 中独立验证。
                 footNames = new[] { "leftankle", "leftfoot", "footl", "lfoot" };
             }
             else
@@ -357,8 +357,7 @@ namespace MakemitAGA.ActiveRagdollLab.Acquisition
             ResolveFootEndpoint(report);
 
             Vector3 characterRight = targetRoot != null ? targetRoot.right : Vector3.right;
-            // Human knee 的主要屈伸轴通常接近角色左右轴。v0.2.0 只把它当作 Hinge 初始轴，
-            // 并把实际值完整报告出来；后续版本会基于实机数据决定是否需要自动轴校准。
+            // 角色左右轴只提供预览初值；正式 stack 必须完成 source-only PCA 并显式 apply。
             if (characterRight.sqrMagnitude < 0.0001f)
                 characterRight = Vector3.right;
             report.KneeFlexionAxisWorld = characterRight.normalized;
@@ -457,21 +456,7 @@ namespace MakemitAGA.ActiveRagdollLab.Acquisition
             List<Transform> all = new List<Transform>();
             if (!TryCollectComplete(root, all, 0))
                 return null;
-            int start = includeRoot ? 0 : 1;
-            for (int c = 0; c < candidates.Length; c++)
-            {
-                string wanted = candidates[c];
-                for (int i = start; i < all.Count; i++)
-                {
-                    Transform t = all[i];
-                    if (t == null || IsForbiddenHelperName(t.name))
-                        continue;
-                    string normalized = NormalizeName(t.name);
-                    if (normalized == wanted || normalized.EndsWith(wanted, StringComparison.Ordinal))
-                        return t;
-                }
-            }
-            return null;
+            return FindFirstByNormalizedName(all, candidates, includeRoot ? 0 : 1);
         }
 
         private static string NormalizeSide(string side)
@@ -505,12 +490,12 @@ namespace MakemitAGA.ActiveRagdollLab.Acquisition
             return true;
         }
 
-        private static Transform FindFirstByNormalizedName(List<Transform> all, string[] candidates)
+        private static Transform FindFirstByNormalizedName(List<Transform> all, string[] candidates, int start = 0)
         {
             for (int c = 0; c < candidates.Length; c++)
             {
                 string wanted = candidates[c];
-                for (int i = 0; i < all.Count; i++)
+                for (int i = start; i < all.Count; i++)
                 {
                     Transform t = all[i];
                     if (t == null || IsForbiddenHelperName(t.name))

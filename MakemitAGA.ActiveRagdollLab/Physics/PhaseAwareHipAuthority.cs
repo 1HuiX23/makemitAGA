@@ -40,14 +40,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private int _baselineClamps;
         private int _sourceClamps;
         private int _recoveryClamps;
-        private float _sourceRawSum;
-        private float _sourceRawMax;
-        private float _sourceAppliedSum;
-        private float _sourceAppliedMax;
-        private float _recoveryRawSum;
-        private float _recoveryRawMax;
-        private float _recoveryAppliedSum;
-        private float _recoveryAppliedMax;
         private int _recoveryStarted;
         private int _recoveryCompleted;
         private int _recoveryBoostTimedOut;
@@ -56,14 +48,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private int _continuousHealthImmediateReentered;
         private float _continuousHealthPeakEntryErrorDegrees;
 
-        public bool RecoveryActive => _physicalRecoveryPending;
         public bool PhysicalRecoveryPending => _physicalRecoveryPending;
         public bool RecoveryBoostActive => _recoveryBoostActive;
         public bool TrackingHealthUnhealthy => _physicalRecoveryPending && _recoveryOrigin == "CONTINUOUS_HEALTH";
-        public float HealthEnterCandidateSeconds => _healthEnterCandidateSeconds;
-        public string RecoveryOrigin => _recoveryOrigin;
         public float CurrentMaxAngularAcceleration => _currentMaxA;
-        public string Phase => _phase;
 
         public void Reset(ActiveRagdollLabProfile profile, SingleLegChainReport report)
         {
@@ -79,22 +67,20 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _currentRecoveryErrorDegrees = 0f;
             _baselineSteps = _sourceSteps = _recoveryBoostSteps = _pendingBaselineSteps = _trackingUnhealthyBaselineSteps = 0;
             _baselineClamps = _sourceClamps = _recoveryClamps = 0;
-            _sourceRawSum = _sourceRawMax = _sourceAppliedSum = _sourceAppliedMax = 0f;
-            _recoveryRawSum = _recoveryRawMax = _recoveryAppliedSum = _recoveryAppliedMax = 0f;
             _recoveryStarted = _recoveryCompleted = _recoveryBoostTimedOut = _recoveryCensoredByNewSource = 0;
             _continuousHealthReentered = _continuousHealthImmediateReentered = 0;
             _continuousHealthPeakEntryErrorDegrees = 0f;
             CopyToReport(profile, report, false);
         }
 
-        public float Step(ActiveRagdollLabProfile profile, TwoBodyProxyReport torso, float rawPhysicalHipErrorDegrees, float now, float dt, SingleLegChainReport report)
+        public float Step(ActiveRagdollLabProfile profile, TorsoControlPhase? torso, bool controlRecoveryActive, float rawPhysicalHipErrorDegrees, float now, float dt, SingleLegChainReport report)
         {
             _currentRecoveryErrorDegrees = Mathf.Max(0f, rawPhysicalHipErrorDegrees);
             float safeDt = Mathf.Max(0f, dt);
             float baseline = profile.LegHipMaxAngularAcceleration;
             float sourceMax = Mathf.Max(baseline, profile.LegHipSourceTurnMaxAngularAcceleration);
             float recoveryMax = Mathf.Max(baseline, profile.LegHipRecoveryMaxAngularAcceleration);
-            bool sourceActive = torso != null && torso.SourceTurnEventActive;
+            bool sourceActive = torso != null && torso.Value.SourceTurnEventActive;
 
             if (sourceActive)
             {
@@ -121,7 +107,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
             if (!_physicalRecoveryPending)
             {
-                UpdateContinuousHealthReentry(profile, torso, rawPhysicalHipErrorDegrees, safeDt);
+                UpdateContinuousHealthReentry(profile, torso, controlRecoveryActive, rawPhysicalHipErrorDegrees, safeDt);
             }
 
             if (_physicalRecoveryPending)
@@ -183,9 +169,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _recoveryStarted++;
         }
 
-        private void UpdateContinuousHealthReentry(ActiveRagdollLabProfile profile, TwoBodyProxyReport torso, float errorDegrees, float dt)
+        private void UpdateContinuousHealthReentry(ActiveRagdollLabProfile profile, TorsoControlPhase? torso, bool controlRecoveryActive, float errorDegrees, float dt)
         {
-            bool stableMotionWindow = IsStableMotionWindow(torso);
+            bool stableMotionWindow = IsStableMotionWindow(torso, controlRecoveryActive);
             bool immediate = errorDegrees >= profile.LegHipTrackingHealthImmediateErrorDegrees;
             bool candidate = stableMotionWindow && errorDegrees >= profile.LegHipTrackingHealthEnterErrorDegrees;
 
@@ -220,34 +206,26 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _continuousHealthPeakEntryErrorDegrees = Mathf.Max(_continuousHealthPeakEntryErrorDegrees, errorDegrees);
         }
 
-        private static bool IsStableMotionWindow(TwoBodyProxyReport torso)
+        private static bool IsStableMotionWindow(TorsoControlPhase? torso, bool controlRecoveryActive)
         {
-            if (torso == null || torso.ControlRecoveryActive || torso.MotionTransition)
+            if (torso == null || controlRecoveryActive || torso.Value.MotionTransition)
                 return false;
-            string phase = torso.MotionPhase ?? string.Empty;
+            string phase = torso.Value.MotionPhase ?? string.Empty;
             return phase.Equals("STEADY", System.StringComparison.OrdinalIgnoreCase) ||
                    phase.Equals("IDLE", System.StringComparison.OrdinalIgnoreCase);
         }
 
-        public void RecordResult(ActiveRagdollLabProfile profile, float rawMagnitude, float appliedMagnitude, bool clamped, SingleLegChainReport report)
+        public void RecordResult(ActiveRagdollLabProfile profile, bool clamped, SingleLegChainReport report)
         {
             if (_phase == "SOURCE_TURN_BOOST")
             {
                 _sourceSteps++;
                 if (clamped) _sourceClamps++;
-                _sourceRawSum += rawMagnitude;
-                _sourceRawMax = Mathf.Max(_sourceRawMax, rawMagnitude);
-                _sourceAppliedSum += appliedMagnitude;
-                _sourceAppliedMax = Mathf.Max(_sourceAppliedMax, appliedMagnitude);
             }
             else if (_phase == "HIP_RECOVERY_BOOST")
             {
                 _recoveryBoostSteps++;
                 if (clamped) _recoveryClamps++;
-                _recoveryRawSum += rawMagnitude;
-                _recoveryRawMax = Mathf.Max(_recoveryRawMax, rawMagnitude);
-                _recoveryAppliedSum += appliedMagnitude;
-                _recoveryAppliedMax = Mathf.Max(_recoveryAppliedMax, appliedMagnitude);
             }
             else
             {
@@ -257,31 +235,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 if (clamped) _baselineClamps++;
             }
             CopyToReport(profile, report, _phase == "SOURCE_TURN_BOOST" || _recoveryBoostActive);
-        }
-
-        public string GetKey(ActiveRagdollLabProfile profile, SingleLegChainReport report)
-        {
-            float baseline = profile != null ? profile.LegHipMaxAngularAcceleration : 0f;
-            float source = profile != null ? profile.LegHipSourceTurnMaxAngularAcceleration : 0f;
-            float recovery = profile != null ? profile.LegHipRecoveryMaxAngularAcceleration : 0f;
-            return
-                "mode=" + ModeName +
-                " | maxA(base/source/recoveryBoost)=" + F(baseline) + "/" + F(source) + "/" + F(recovery) +
-                " | recoveryExit=" + F(profile != null ? profile.LegHipRecoveryExitErrorDegrees : 0f) + "deg/" + F(profile != null ? profile.LegHipRecoveryStableHoldSeconds : 0f) + "s" +
-                " | healthReentry(enter/hold/immediate)=" + F(profile != null ? profile.LegHipTrackingHealthEnterErrorDegrees : 0f) + "deg/" + F(profile != null ? profile.LegHipTrackingHealthEnterHoldSeconds : 0f) + "s/" + F(profile != null ? profile.LegHipTrackingHealthImmediateErrorDegrees : 0f) + "deg" +
-                " | boostMax=" + F(profile != null ? profile.LegHipRecoveryMaxSeconds : 0f) + "s" +
-                " | current=" + _phase + "/" + F(_currentMaxA) + "/rawHipErr=" + F(_currentRecoveryErrorDegrees) +
-                "/physicalPending=" + _physicalRecoveryPending + "/origin=" + _recoveryOrigin + "/recoveryBoost=" + _recoveryBoostActive + "/healthCandidate=" + F(_healthEnterCandidateSeconds) + "s" +
-                " | steps(base/source/recoveryBoost/pendingBaseline/healthBaseline)=" + _baselineSteps + "/" + _sourceSteps + "/" + _recoveryBoostSteps + "/" + _pendingBaselineSteps + "/" + _trackingUnhealthyBaselineSteps +
-                " | clamps(base/source/recoveryBoost)=" + _baselineClamps + "/" + _sourceClamps + "/" + _recoveryClamps +
-                " | clampRate(source/recoveryBoost)=" + F(Rate(_sourceClamps, _sourceSteps)) + "/" + F(Rate(_recoveryClamps, _recoveryBoostSteps)) +
-                " | sourceRaw(mean/max)=" + F(Mean(_sourceRawSum, _sourceSteps)) + "/" + F(_sourceRawMax) +
-                " | sourceApplied(mean/max)=" + F(Mean(_sourceAppliedSum, _sourceSteps)) + "/" + F(_sourceAppliedMax) +
-                " | recoveryRaw(mean/max)=" + F(Mean(_recoveryRawSum, _recoveryBoostSteps)) + "/" + F(_recoveryRawMax) +
-                " | recoveryApplied(mean/max)=" + F(Mean(_recoveryAppliedSum, _recoveryBoostSteps)) + "/" + F(_recoveryAppliedMax) +
-                " | physicalRecovery(start/completed/boostTimedOut/censoredByNewSource)=" + _recoveryStarted + "/" + _recoveryCompleted + "/" + _recoveryBoostTimedOut + "/" + _recoveryCensoredByNewSource +
-                " | continuousHealth(reentered/immediate/peakEntryDeg)=" + _continuousHealthReentered + "/" + _continuousHealthImmediateReentered + "/" + F(_continuousHealthPeakEntryErrorDegrees) +
-                " | traceHip(mean/max/clampSamples)=" + F(report != null ? report.TraceHipRotationMeanDegrees : 0f) + "/" + F(report != null ? report.TraceHipRotationMaxDegrees : 0f) + "/" + (report != null ? report.TraceHipClampSamples : 0);
         }
 
         private void CopyToReport(ActiveRagdollLabProfile profile, SingleLegChainReport report, bool boostActive)
@@ -316,9 +269,5 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             report.HipAuthorityRecoveryTimedOut = _recoveryBoostTimedOut;
             report.HipAuthorityRecoveryCensoredByNewSource = _recoveryCensoredByNewSource;
         }
-
-        private static float Mean(float sum, int n) => n > 0 ? sum / n : 0f;
-        private static float Rate(int n, int d) => d > 0 ? (float)n / d : 0f;
-        private static string F(float value) => value.ToString("G6", System.Globalization.CultureInfo.InvariantCulture);
     }
 }

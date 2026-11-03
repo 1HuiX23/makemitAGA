@@ -1,4 +1,4 @@
-﻿using MakemitAGA.ActiveRagdollLab.Configuration;
+using MakemitAGA.ActiveRagdollLab.Configuration;
 using MakemitAGA.ActiveRagdollLab.Model;
 using UnityEngine;
 
@@ -116,26 +116,40 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _symmetricRadialEnabled = false;
                 _highErrorAwayBrakeFloorEnabled = false;
             }
-            ResetDiagnostics(report);
+            ResetForDrive(report);
         }
 
         internal void SetSymmetricRadialEnabled(bool enabled, SingleLegChainReport report)
         {
             _symmetricRadialEnabled = enabled;
             if (!enabled) _highErrorAwayBrakeFloorEnabled = false;
-            ResetDiagnostics(report);
+            ResetForDrive(report);
         }
 
         internal void SetHighErrorAwayBrakeFloorEnabled(bool enabled, SingleLegChainReport report)
         {
             _highErrorAwayBrakeFloorEnabled = enabled;
+            ResetForDrive(report);
+        }
+
+        // Drive/mode changes reset control state; a trace boundary only resets diagnostics.
+        internal void ResetForDrive(SingleLegChainReport report)
+        {
+            _captureActive = false;
+            _sourceCarryActive = false;
+            _currentPreFloorRadialCommandA = _currentPostFloorRadialCommandA = _currentHighErrorAwayFloorDeltaA = 0f;
+            _currentHighErrorAwayFloorGate = _currentHighErrorAwayFloorSatisfied = false;
+            _currentErrorAxisWorld = Vector3.right;
+            _currentErrorDeg = _currentRadialWSignedDegPerSec = _currentTangentialWDegPerSec = _currentTotalWDegPerSec = 0f;
+            _currentStoppingAngleDeg = _currentStoppingRatio = 0f;
+            _currentRadialSupplementalA = _currentTangentialSupplementalA = _currentSupplementalA = 0f;
+            _currentProductionMaxA = _currentEffectiveMaxA = 0f;
+            _currentOrigin = "NONE";
             ResetDiagnostics(report);
         }
 
         internal void ResetDiagnostics(SingleLegChainReport report)
         {
-            _captureActive = false;
-            _sourceCarryActive = false;
             _steps = _eligibleSteps = _activeSteps = _entries = _physicalExitCount = 0;
             _sourceCarryEntries = _sourceCarrySteps = 0;
             _radialAwayBrakeSteps = _radialTowardCaptureBrakeSteps = _tangentialDampingSteps = 0;
@@ -144,18 +158,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _highErrorAwayFloorSatisfiedSteps = _highErrorAwayFloorUnsatisfiedSteps = 0;
             _highErrorAwayFloorTangentialTrimSteps = 0;
             _sumHighErrorAwayFloorDeltaA = _peakHighErrorAwayFloorDeltaA = 0f;
-            _currentPreFloorRadialCommandA = _currentPostFloorRadialCommandA = _currentHighErrorAwayFloorDeltaA = 0f;
-            _currentHighErrorAwayFloorGate = _currentHighErrorAwayFloorSatisfied = false;
-            _currentErrorAxisWorld = Vector3.right;
             _sumSupplementalA = _sumRadialSupplementalA = _sumTangentialSupplementalA = 0f;
             _peakSupplementalA = _peakRadialSupplementalA = _peakTangentialSupplementalA = 0f;
             _peakAbsRadialWDegPerSec = _peakTangentialWDegPerSec = 0f;
             _peakStoppingAngleDeg = _peakStoppingRatio = 0f;
-            _currentErrorDeg = _currentRadialWSignedDegPerSec = _currentTangentialWDegPerSec = _currentTotalWDegPerSec = 0f;
-            _currentStoppingAngleDeg = _currentStoppingRatio = 0f;
-            _currentRadialSupplementalA = _currentTangentialSupplementalA = _currentSupplementalA = 0f;
-            _currentProductionMaxA = _currentEffectiveMaxA = 0f;
-            _currentOrigin = "NONE";
             _lastEntry = _lastExit = _lastSourceCarry = "<none>";
             _abortEvidence = "<none>";
             CopyToReport(report);
@@ -168,6 +174,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal Vector3 ComposeSupplementalCapture(
             ActiveRagdollLabProfile profile,
             SingleLegChainReport report,
+            bool physicalRecoveryPending,
             bool sourceActive,
             int sourceId,
             Vector3 errorWorld,
@@ -209,11 +216,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 return Vector3.zero;
             }
 
-            bool recoveryPending = report != null && report.HipPhysicalRecoveryPending;
             float recoveryExitDeg = profile != null ? Mathf.Max(0f, profile.LegHipRecoveryExitErrorDegrees) : 10f;
 
             // Entry is authorized only by the existing physical-recovery state. Once entered, phase labels cannot clear it.
-            if (!_captureActive && recoveryPending &&
+            if (!_captureActive && physicalRecoveryPending &&
                 _currentErrorDeg >= Mathf.Max(EnterErrorDegrees, recoveryExitDeg) &&
                 _currentTotalWDegPerSec >= EnterMotionDegPerSec)
             {

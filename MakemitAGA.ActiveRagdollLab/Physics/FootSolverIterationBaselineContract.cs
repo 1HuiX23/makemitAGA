@@ -219,7 +219,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal void CopyToReport(FootAnkleFoundationReport report, bool format = true)
         {
             if (report == null) return;
-            report.FootVelocitySolverMode = Mode;
             report.FootVelocitySolverArm = ArmA;
             report.FootVelocitySolverInitialized = _initialized;
             report.FootVelocitySolverFinite = Finite;
@@ -234,7 +233,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             report.FootVelocitySolverBaselineRestored = BaselineRestored;
             report.FootVelocitySolverEligibleSolves = _eligibleSolves;
             report.FootVelocitySolverReadbackFailures = _readbackFailures;
-            report.FootPositionSolverMode = PositionMode;
             report.FootPositionSolverArm = _positionArm;
             report.FootPositionSolverSelectedPosition = SelectedPosition;
             report.FootPositionSolverEnabled = PositionEnabled;

@@ -97,7 +97,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public string GetFullText()
         {
             StringBuilder sb = new StringBuilder();
-            sb.AppendLine("MakemitAGA Active Ragdoll Lab 0.4.2.1 - Bilateral Frozen Foundation Report");
+            sb.AppendLine("MakemitAGA Active Ragdoll Lab " + Plugin.PluginVersion + " - Bilateral Frozen Foundation Report");
             sb.AppendLine(GetConsoleSummary());
             sb.AppendLine("key=" + (Key ?? "<none>"));
             sb.AppendLine("primaryAbortReason=" + (PrimaryDriveAbortReason ?? "<none>"));

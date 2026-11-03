@@ -55,6 +55,19 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal int SelectedId => _selectedId;
         internal bool ExposureReady => _finite && _pairLeft >= MinPairSamples && _pairRight >= MinPairSamples &&
             _probeMatches > 0 && (_arm != ArmB || (_boxLeftCallbacks > 0 && _boxRightCallbacks > 0));
+        internal bool TryGetEntryBox(int identity, out Vector3 center, out Vector3 half)
+        {
+            center = Vector3.zero; half = Vector3.zero;
+            if (!_active || !_finite || _arm != ArmB || _box == null || identity == 0 || identity != _selectedId ||
+                _box.GetInstanceID() != identity || !_box.enabled || !_boxObject.activeInHierarchy ||
+                _box.isTrigger || _box.attachedRigidbody != null || !Near(_box.transform.position, _boxPosition) ||
+                !SameRotation(_box.transform.rotation, Quaternion.identity) || !Near(_box.transform.lossyScale, Vector3.one) ||
+                !Near(_box.center, Vector3.zero) || !Near(_box.size, _boxSize)) return false;
+            center = _box.transform.TransformPoint(_box.center);
+            half = _box.size * 0.5f;
+            return FiniteVector(center) && FiniteVector(half) && half.x > 0f && half.y > 0f && half.z > 0f;
+        }
+
         internal static bool IsExperimentArm(string arm) => arm == ArmA || arm == ArmB;
 
         internal bool Configure(string arm, Collider original, Collider otherGround, Collider left, Collider right,

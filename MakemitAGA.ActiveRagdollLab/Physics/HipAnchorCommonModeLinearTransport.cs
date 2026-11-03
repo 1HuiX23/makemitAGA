@@ -176,21 +176,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             report.HipAnchorLinearTransportPeakAppliedAcceleration = _peakApplied;
             report.HipAnchorLinearTransportPeakRawToBoundRatio = _peakRawToBound;
             report.HipAnchorLinearTransportLastEvidence = _lastEvidence;
-            report.HipAnchorLinearTransportKey = GetKey();
-        }
-
-        internal string GetKey()
-        {
-            return
-                "mode=" + ModeName +
-                " | enabled=" + _enabled +
-                " | boundSource=" + BoundSourceName +
-                " | current(active/reason/raw/applied/maxA/clamp)=" + _activeThisStep + "/" + (_suppressionReason ?? "<none>") + "/" + F(_rawWorld.magnitude) + "/" + F(_appliedWorld.magnitude) + "/" + F(_maxA) + "/" + _clamped +
-                " | steps(total/active/disabled/real/inactiveFrame/invalid/clamp)=" + _steps + "/" + _activeSteps + "/" + _disabledSteps + "/" + _realParentSteps + "/" + _inactiveFrameSteps + "/" + _invalidSteps + "/" + _clampSteps +
-                " | peak(raw/applied/rawToBound)=" + F(_peakRaw) + "/" + F(_peakApplied) + "/" + F(_peakRawToBound) +
-                " | application=UPPER_AND_LOWER_COM_SAME_ACCELERATION_FORCEMODE_ACCELERATION_NO_DIRECT_TORQUE" +
-                " | rawPelvisLinearA=NEVER_USED_DIRECTLY" +
-                " | last=" + (_lastEvidence ?? "<none>");
         }
 
         private static Vector3 ClampMagnitude(Vector3 value, float max)

@@ -54,7 +54,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         public Vector3 CandidateAxisLowerLocal => _candidateAxisLowerLocal;
         public float PrincipalEnergyRatio => _principalEnergyRatio;
         public float AngleFromInitialDegrees => _angleFromInitialDegrees;
-        public string Reason => _reason;
 
         public void MarkApplied()
         {
@@ -88,7 +87,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         public void Observe(
             Vector3 kneeRelativeAngularVelocityLowerLocal,
-            TwoBodyProxyReport torso,
+            TorsoControlPhase? torso,
+            bool controlRecoveryActive,
             bool sourceTurnLikeTrigger,
             float sourceTurnPostSeconds)
         {
@@ -100,13 +100,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _sourceRejectUntilTime = Mathf.Max(_sourceRejectUntilTime, now + Mathf.Max(0.05f, sourceTurnPostSeconds));
 
             // Works both with and without arl_trace: use the torso event when available, plus a local raw-trigger quiet window.
-            if (torso.SourceTurnEventActive || torso.ControlRecoveryActive || now <= _sourceRejectUntilTime)
+            if (torso.Value.SourceTurnEventActive || controlRecoveryActive || now <= _sourceRejectUntilTime)
             {
                 _rejectedSourceWindow++;
                 return;
             }
 
-            if (torso.MotionTransition || !string.Equals(torso.MotionPhase, "STEADY", StringComparison.OrdinalIgnoreCase))
+            if (torso.Value.MotionTransition || !string.Equals(torso.Value.MotionPhase, "STEADY", StringComparison.OrdinalIgnoreCase))
             {
                 _rejectedNonSteady++;
                 return;

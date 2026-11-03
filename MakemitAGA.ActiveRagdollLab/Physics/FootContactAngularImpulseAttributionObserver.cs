@@ -162,8 +162,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private float _peakPreProbeMaxAbsClearance;
         private float _peakPreProbeSpread;
 
-        internal bool Finite => _finite;
-        internal string InvalidReason => _invalidReason;
         internal bool EvidenceReady => _finite && _resolvedSamples >= MinimumReadyResolvedSamples && _matchedProjectedCallbackSamples >= MinimumReadyProjectedCallbacks;
 
         internal void ResetTrace(FootAnkleFoundationReport report)

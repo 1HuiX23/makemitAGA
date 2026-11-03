@@ -4,18 +4,14 @@ using MakemitAGA.ActiveRagdollLab.Configuration;
 using MakemitAGA.ActiveRagdollLab.Model;
 using MakemitAGA.ActiveRagdollLab.Runtime;
 using UnityEngine;
-using Object = UnityEngine.Object;
 
 namespace MakemitAGA.ActiveRagdollLab.Physics
 {
     /// <summary>
-    /// v0.3.78 frozen Foot/Ankle free-space production foundation.
-    ///
-    /// v0.3.68 promoted persistence-conditioned target-A after a complete causal A/B showed bilateral NORMAL_TRANSITION
-    /// improvement without safety failure. v0.3.69 froze Dynamic Foot + no-CharacterJoint translation tether +
-    /// v0.3.64 linear transport + v0.3.65 angular transport + v0.3.68 conditioned target-A as one production configuration.
-    /// v0.3.70 then proved the rare tail is COM-velocity/capture-authority limited while parent transport is correctly closing.
-    /// v0.3.71 qualified a narrowly eligible MaxA60->80 capture reserve and v0.3.72 confirmed it again while translation stayed below ~15 mm. v0.3.73 promotes that unchanged law into production and adds only a read-only axial hard-envelope temporal-debt observer; the 30 mm translation gate and 45/40/30/total60 angular gate remain unchanged.
+    /// Foot/Ankle orchestration: held Render source, ordered Fixed control, authorized contact and evidence.
+    /// The frozen baseline uses the no-Joint tether, measured Lower transport and bounded relative ankle PD.
+    /// Current run scopes own contact/load selection; physical thresholds and controller authority stay fixed.
+    /// Native creation and shutdown live in Lifecycle; contact/reference/admission extensions keep their partials.
     /// </summary>
     internal sealed partial class FootAnkleProxyFoundation
     {
@@ -31,6 +27,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private readonly int _layer;
         private readonly Material _previewMaterial;
         private readonly FootAnkleFoundationReport _report = new FootAnkleFoundationReport();
+        private readonly FootControlEvidenceState _controlEvidence = new FootControlEvidenceState();
         private readonly FootAnkleSoleRequalificationObserver _soleRequalification = new FootAnkleSoleRequalificationObserver();
         private readonly FootGroundContactIdentityQualificationObserver _contactIdentity = new FootGroundContactIdentityQualificationObserver();
         private readonly FootQualifiedContactShadow _contactShadow = new FootQualifiedContactShadow();
@@ -61,10 +58,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal bool RelativeReferenceSelected => _relativeReference.Selected;
         internal bool RelativeReferenceActive => _relativeReference.Active;
         internal bool RelativeReferenceFinite => _relativeReference.Finite;
-        internal string RelativeReferenceStatus => _relativeReference.GetDetails();
+        internal string RelativeReferenceStatus => _relativeReference.GetDetails() + "\n" + _groundReference.GetDetails();
         internal bool SelectRelativeReference(bool enabled)
         {
             if (!IsBuilt || _ankleDrive.DynamicActive || _traceEnabled) return false;
+            if (!enabled) { _groundReference.DisablePreserveTrace(); _loadAdmission.DisablePreserveTrace(); }
             _relativeReference.Select(enabled);
             return _relativeReference.Selected == enabled;
         }
@@ -103,10 +101,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private float _previousSampleTime;
         private bool _hasPreviousSourceSample;
         private bool _traceEnabled;
-        private float _traceErrorSum;
-        private float _traceAnchorSum;
-        private float _traceSourceAngularSpeedSum;
-        private float _traceSourceFromBindAngleSum;
         private bool _destroyed;
         private FootSupportSurfaceIsolation _supportSurface;
 
@@ -129,249 +123,39 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         }
 
         public FootAnkleFoundationReport Report => _report;
+        internal int LastCompletedControlFixedSequence => _controlEvidence.LastCompletedControlFixedSequence;
         public bool IsBuilt => !_destroyed && _footObject != null && _body != null && _collider != null;
-
-        public string Build()
-        {
-            if (IsBuilt)
-                return _report.GetConsoleSummary();
-            if (!_profile.FootAnkleFoundationEnabled)
-                return "ARL foot/ankle foundation | enabled=False | action=SKIPPED_BY_PROFILE";
-            if (_target.Foot == null || _target.Toe == null || !_target.FootFoundationReady)
-                return "ARL foot/ankle build 失败：Toe/foot geometry 未解析完成。 | toeResolve=" + (_target.ToeResolution ?? "<none>");
-
-            try
-            {
-                _report.Stage = "CREATE_FOOT_OBJECT";
-                _footObject = new GameObject("ARL_Foot_" + _target.RequestedSide);
-                _footObject.hideFlags = HideFlags.DontSave;
-                _footObject.layer = _layer;
-                _footObject.transform.SetParent(_ownerRoot, true);
-
-                Vector3 ankleWorld = _target.Foot.position;
-                Vector3 toeWorld = _target.Toe.position;
-                Vector3 ankleToToe = toeWorld - ankleWorld;
-                float boneFootLength = ankleToToe.magnitude;
-                if (!IsFinite(ankleToToe) || !IsFinite(boneFootLength) || boneFootLength < 0.03f)
-                    throw new InvalidOperationException("FOOT_INVALID_ANKLE_TO_TOE_GEOMETRY");
-
-                Vector3 referenceUp = _targetRoot != null ? _targetRoot.up : Vector3.up;
-                if (!IsFinite(referenceUp) || referenceUp.sqrMagnitude < 0.0001f)
-                    referenceUp = Vector3.up;
-                referenceUp.Normalize();
-
-                Vector3 soleForward = Vector3.ProjectOnPlane(ankleToToe, referenceUp);
-                float projectedAnkleToeLength = soleForward.magnitude;
-                if (!IsFinite(soleForward) || soleForward.sqrMagnitude < 0.0001f)
-                    soleForward = Vector3.ProjectOnPlane(_target.Foot.forward, referenceUp);
-                if (!IsFinite(soleForward) || soleForward.sqrMagnitude < 0.0001f)
-                    soleForward = ankleToToe;
-                soleForward.Normalize();
-
-                Vector3 soleRight = Vector3.Cross(referenceUp, soleForward);
-                if (!IsFinite(soleRight) || soleRight.sqrMagnitude < 0.0001f)
-                    soleRight = _target.Foot.right;
-                soleRight.Normalize();
-                Vector3 soleUp = Vector3.Cross(soleForward, soleRight);
-                if (!IsFinite(soleUp) || soleUp.sqrMagnitude < 0.0001f)
-                    soleUp = referenceUp;
-                soleUp.Normalize();
-                if (Vector3.Dot(soleUp, referenceUp) < 0f)
-                {
-                    soleRight = -soleRight;
-                    soleUp = -soleUp;
-                }
-
-                Quaternion soleRotation = Quaternion.LookRotation(soleForward, soleUp);
-                if (!IsFinite(soleRotation))
-                    throw new InvalidOperationException("FOOT_INVALID_SOLE_FRAME");
-                _boneToSoleBindRotation = Quaternion.Inverse(_target.Foot.rotation) * soleRotation;
-                if (!IsFinite(_boneToSoleBindRotation))
-                    throw new InvalidOperationException("FOOT_INVALID_BONE_TO_SOLE_BIND");
-
-                _footObject.transform.position = ankleWorld;
-                _footObject.transform.rotation = soleRotation;
-
-                // The hierarchy only gives ankle->toe centerline; it cannot provide real shoe width/heel/sole height.
-                // v0.3.56.1 keeps the same conservative L/W/T estimate, but replaces the guessed vertical ankle->sole
-                // offset with a one-shot support-plane calibration when five filtered probes agree on one flat
-                // scene surface.  This is NOT footwear detection and never ground-snaps during runtime.
-                // Collider/contact remains hard-OFF until a later mesh/GSP/contact calibration stage.
-                float thickness = Mathf.Clamp(Mathf.Max(_profile.LegSegmentThickness * 0.55f, 0.05f), 0.05f, 0.08f);
-                float forwardLength = Mathf.Clamp(Mathf.Max(boneFootLength * 1.10f, 0.14f), 0.14f, 0.26f);
-                float heelLength = Mathf.Clamp(Mathf.Max(boneFootLength * 0.45f, 0.055f), 0.055f, 0.12f);
-                float totalLength = forwardLength + heelLength;
-                float width = Mathf.Clamp(Mathf.Max(boneFootLength * 0.58f, _profile.LegSegmentThickness * 0.95f), 0.085f, 0.14f);
-                float estimatedAnkleHeight = Mathf.Clamp(Mathf.Max(boneFootLength * 0.40f, thickness * 1.05f), 0.055f, 0.10f);
-                float ankleHeight = estimatedAnkleHeight;
-                Vector3 size = new Vector3(width, thickness, totalLength);
-                Vector3 center = new Vector3(0f, -ankleHeight + thickness * 0.5f, (forwardLength - heelLength) * 0.5f);
-                if (!IsFinite(size) || !IsFinite(center) || size.x <= 0f || size.y <= 0f || size.z <= 0f)
-                    throw new InvalidOperationException("FOOT_INVALID_SOLE_PROXY_GEOMETRY");
-
-                // One-shot support-plane calibration.  The initial v0.3.56 run showed a bilateral ~48.4 mm
-                // positive clearance while all five probes agreed on one horizontal room floor.  Instead of
-                // hard-coding that shoe-specific number, infer the correction from the current support plane once
-                // at build time.  After this point the calibrated offset is frozen; walking/lifting the foot can
-                // never re-snap the proxy to the floor.
-                _report.SupportPlaneCalibrationAttempted = true;
-                _report.SupportPlaneCalibrationInitialAnkleHeightMeters = estimatedAnkleHeight;
-                FootAnkleSoleRequalificationObserver.SupportPlaneCalibrationCandidate supportCandidate =
-                    _soleRequalification.GetSupportPlaneCalibrationCandidate(
-                        _footObject.transform,
-                        center,
-                        size,
-                        _target.Foot,
-                        _targetRoot,
-                        _ownerRoot);
-                _report.SupportPlaneCalibrationHitCount = supportCandidate.HitCount;
-                _report.SupportPlaneCalibrationSpreadMeters = supportCandidate.SpreadMeters;
-                _report.SupportPlaneCalibrationNormalDot = supportCandidate.NormalDotUp;
-                _report.SupportPlaneCalibrationSurfacePath = supportCandidate.SurfacePath;
-                _report.SupportPlaneCalibrationReason = supportCandidate.Reason;
-
-                if (supportCandidate.Valid)
-                {
-                    float calibratedAnkleHeight = estimatedAnkleHeight + supportCandidate.CenterClearanceMeters;
-                    // Keep a broad but explicit sanity envelope.  This is support-plane geometry, not a final
-                    // anatomical/shoe dimension, so future footwear-aware calibration can replace it cleanly.
-                    if (IsFinite(calibratedAnkleHeight) && calibratedAnkleHeight >= 0.045f && calibratedAnkleHeight <= 0.14f)
-                    {
-                        ankleHeight = calibratedAnkleHeight;
-                        _report.SupportPlaneCalibrationApplied = true;
-                        _report.SupportPlaneCalibrationCorrectionMeters = supportCandidate.CenterClearanceMeters;
-                        _report.SupportPlaneCalibrationReason = "PASS_APPLIED";
-                        center = new Vector3(0f, -ankleHeight + thickness * 0.5f, (forwardLength - heelLength) * 0.5f);
-                    }
-                    else
-                    {
-                        _report.SupportPlaneCalibrationReason = "FINAL_ANKLE_HEIGHT_OUT_OF_RANGE";
-                    }
-                }
-                _report.SupportPlaneCalibrationFinalAnkleHeightMeters = ankleHeight;
-                _report.FootwearStateResolved = false;
-                _report.FootwearGeometryPolicy = "SUPPORT_PLANE_CALIBRATED_CURRENT_POSE;FOOTWEAR_STATE_UNRESOLVED";
-
-                _report.Stage = "ADD_FOOT_BOX_COLLIDER";
-                _collider = Il2CppComponentFactory.Add<BoxCollider>(_footObject, "FOOT_ADD_BOX_COLLIDER");
-                _collider.center = center;
-                _collider.size = size;
-                _collider.enabled = false;
-                if (!_footContactOffset.Initialize(_collider, _report, out string offsetInitError))
-                    throw new InvalidOperationException("FOOT_CONTACT_OFFSET_INIT_FAILED:" + offsetInitError);
-                if (!_stanceContactFrictionIsolation.SetArm(FootStanceContactFrictionIsolation.ArmA, _collider, _report, out string frictionInitError))
-                    throw new InvalidOperationException("FOOT_FRICTION_ISOLATION_INIT_FAILED:" + (frictionInitError ?? "<none>"));
-
-                _report.Stage = "ADD_FOOT_CONTACT_SHADOW_TRACKER";
-                FootContactShadowTracker contactTracker = Il2CppComponentFactory.Add<FootContactShadowTracker>(_footObject, "FOOT_ADD_CONTACT_SHADOW_TRACKER");
-                contactTracker.Initialize(_target.RequestedSide);
-                _contactShadow.SetArmA(_collider, _report);
-
-                _report.Stage = "ADD_FOOT_RIGIDBODY";
-                _body = Il2CppComponentFactory.Add<Rigidbody>(_footObject, "FOOT_ADD_RIGIDBODY");
-                if (!_footVelocitySolver.Initialize(_body, _report, out string solverInitError))
-                    throw new InvalidOperationException("FOOT_VELOCITY_SOLVER_INIT_FAILED:" + solverInitError);
-                _body.mass = _profile.FootMass;
-                _body.isKinematic = true;
-                _body.useGravity = false;
-                _body.drag = 0.25f;
-                _body.angularDrag = _profile.AngularDrag;
-                _body.maxAngularVelocity = _profile.MaxAngularVelocity;
-                _body.interpolation = RigidbodyInterpolation.None;
-                _body.collisionDetectionMode = CollisionDetectionMode.Discrete;
-                if (!_footCollisionDetectionMode.SetArm(FootCollisionDetectionModeIsolation.IdleArm, _body, _report, out string footCollisionInitError))
-                    throw new InvalidOperationException("FOOT_COLLISION_MODE_INIT_FAILED:" + (footCollisionInitError ?? "<none>"));
-                if (!_stanceLowerGroundAuthority.SetArm(FootStanceLowerGroundAnchorAuthority.ArmA, _report, out string lowerGroundInitError))
-                    throw new InvalidOperationException("FOOT_LOWER_GROUND_AUTHORITY_INIT_FAILED:" + (lowerGroundInitError ?? "<none>"));
-
-                _lowerAnkleAnchorLocal = _lowerBody.transform.InverseTransformPoint(_target.Foot.position);
-                if (!IsFinite(_lowerAnkleAnchorLocal))
-                    throw new InvalidOperationException("FOOT_INVALID_LOWER_ANKLE_ANCHOR");
-
-                _report.Stage = "APPLY_FOOT_EXPLICIT_BOX_MASS_PROPERTIES";
-                if (!ApplyAndValidateMassProperties())
-                    throw new InvalidOperationException("FOOT_EXPLICIT_BOX_MASS_PROPERTY_VALIDATION_FAILED");
-
-                _report.Stage = "CREATE_FOOT_VISUAL";
-                CreateVisual(center, size);
-                CreateReferenceMarkers(center, size);
-
-                _lowerAnkleAnchorLocal = _lowerBody.transform.InverseTransformPoint(_target.Foot.position);
-                _bindSourceRelative = Quaternion.Inverse(_target.LowerLeg.rotation) * soleRotation;
-                if (!IsFinite(_bindSourceRelative))
-                    throw new InvalidOperationException("FOOT_BIND_RELATIVE_ROTATION_INVALID");
-
-                // v0.3.70 retains the v0.3.69 production freeze: these historical A/B selectors are no longer runtime experiment knobs.
-                // Build locks the already-qualified B configuration while the Foot remains kinematic; SetDriveState(true)
-                // is the only transition that makes the Foot dynamic.
-                _ankleDrive.FreezeProductionArm();
-                _ankleConstraint.FreezeProductionArm();
-                _ankleTransport.FreezeProductionArm();
-                _ankleAngularTransport.RefreshFootAngularDragReadback(_body.angularDrag, _report);
-
-                _report.Built = true;
-                _report.Side = _target.RequestedSide;
-                _report.AnklePath = _target.FootPath;
-                _report.ToePath = _target.ToePath;
-                _report.ToeResolution = _target.ToeResolution;
-                _report.FootLength = _target.FootLength;
-                _report.GeometryMode = "SOLE_ALIGNED_SUPPORT_PLANE_CALIBRATED_V03561_REUSED_BY_V0378";
-                _report.GeometryMeshCalibrated = false;
-                _report.ContactGeometryAuthorized = false;
-                _report.ProxyForwardLength = forwardLength;
-                _report.ProxyHeelLength = heelLength;
-                _report.ProxyTotalLength = totalLength;
-                _report.ProxyWidth = width;
-                _report.ProxyThickness = thickness;
-                _report.ProxyAnkleHeight = ankleHeight;
-                _report.ProjectedAnkleToeLength = projectedAnkleToeLength;
-                _report.BoneToSoleCorrectionDegrees = Quaternion.Angle(_target.Foot.rotation, soleRotation);
-                _report.BoneToSoleBindRotation = _boneToSoleBindRotation;
-                _report.Mass = _body.mass;
-                _report.ColliderCenterLocal = _collider.center;
-                _report.ColliderSizeLocal = _collider.size;
-                _report.BindAnkleRelativeRotation = _bindSourceRelative;
-                _report.ColliderFrozenOff = true;
-                _report.VisualEnabled = true;
-                ClearAnkleJointReadback();
-                _soleRequalification.CopyToReport(_report);
-                _ankleDrive.CopyToReport(_report);
-                _ankleConstraint.CopyToReport(_report);
-                _ankleTransport.CopyToReport(_report);
-                _report.Stage = "BUILD_COMPLETE";
-                _report.Detail = "V0378_FREE_SPACE_PRODUCTION;FOOT_DRIVE_SOURCE_RELATIVE_ANKLE_PD_FROZEN;CONSTRAINT_NO_CHARACTERJOINT+FOOT_COM_TRANSLATION_TETHER_FROZEN;LINEAR_TRANSPORT_MEASURED_LOWER_ANKLE_POINT_ACCELERATION_FF_FROZEN;ANGULAR_TRANSPORT_MEASURED_LOWER_A_PLUS_BOUNDED_COMMON_MODE_DRAG_COMPENSATION_PRODUCTION;FOOT_ANGULAR_DRAG_PROFILE_FROZEN;TARGET_A_FF_V0368_PERSISTENCE_CONDITIONED_FROZEN;V0373_CONDITIONAL_CAPTURE_AUTHORITY_PRODUCTION;V0377_CONFIRMATION_OBSERVER_RETIRED;HISTORICAL_FOOT_OBSERVERS_RETIRED;ONE_SHOT_SUPPORT_PLANE_HEIGHT_CALIBRATION;FOOTWEAR_STATE_UNRESOLVED;CONTACT_SCOPE_SELECTED_BY_SESSION";
-
-                SampleSourcePose(new SourceStepContext(), 0, Time.unscaledTime, false);
-                FollowSourceKinematic();
-                UpdateStaticState();
-                return _report.GetConsoleSummary();
-            }
-            catch (Exception e)
-            {
-                _report.Stage = "BUILD_FAILED";
-                _report.Detail = e.GetType().Name + "/" + e.Message;
-                Plugin.Logger?.LogError("[ARL][FOOT_ANKLE][BUILD_FAILED] side=" + (_target.RequestedSide ?? "<none>") + " | " + e);
-                int failures = RollbackInternal();
-                return "ARL foot/ankle build 失败：" + e.GetType().Name + " / " + e.Message +
-                       (failures > 0 ? " | cleanupFailures=" + failures : string.Empty);
-            }
-        }
 
         public void SampleSourcePose(SourceStepContext source, int renderSequence, float sampleTime, bool advance)
         {
             if (advance)
             {
                 if (!source.Valid || source.Time != sampleTime) throw new InvalidOperationException("FOOT_SOURCE_CONTEXT_INVALID");
-                _report.RuntimeSourceContext = source;
             }
-            if (!IsBuilt || _target.LowerLeg == null || _target.Foot == null)
+            if (!IsBuilt) return;
+            if (_target.LowerLeg == null || _target.Foot == null)
+            {
+                if (advance) throw new InvalidOperationException("FOOT_REQUIRED_SOURCE_TARGET_MISSING");
                 return;
+            }
 
             Quaternion sampledSoleRotation = _target.Foot.rotation * _boneToSoleBindRotation;
-            if (!IsFinite(sampledSoleRotation))
-                return;
-            Quaternion relative = Quaternion.Inverse(_target.LowerLeg.rotation) * sampledSoleRotation;
+            Quaternion lowerRotation = _target.LowerLeg.rotation;
             Vector3 footPosition = _target.Foot.position;
+            if (!ValidSourceRotation(sampledSoleRotation) || !ValidSourceRotation(lowerRotation) || !IsFinite(footPosition))
+            {
+                if (advance) throw new InvalidOperationException("FOOT_REQUIRED_SOURCE_POSE_INVALID");
+                return;
+            }
+            Quaternion relative = Quaternion.Inverse(lowerRotation) * sampledSoleRotation;
+            if (!ValidSourceRotation(relative))
+            {
+                if (advance) throw new InvalidOperationException("FOOT_REQUIRED_RELATIVE_SOURCE_POSE_INVALID");
+                return;
+            }
+            // Publish the new identity only after its required payload is valid. A bad
+            // source frame must not relabel the previous held Foot pose as a fresh sample.
+            if (advance) _report.RuntimeSourceContext = source;
             if (!advance)
             {
                 // Preview/reset snapshots are not new Render packets. Preserve all W/A,
@@ -447,8 +231,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _report.SourceAnkleRenderStepDegrees = angularVelocityValid ? renderStepRadians * Mathf.Rad2Deg : Vector3.zero;
             if (_traceEnabled && angularVelocityValid)
             {
-                _report.TraceSourceRenderStepSamples++;
-                _report.TraceSourceRenderStepAngleMaxDegrees = Mathf.Max(_report.TraceSourceRenderStepAngleMaxDegrees, _report.SourceAnkleRenderStepDegrees.magnitude);
+                _controlEvidence.ObserveSource(_report.SourceAnkleRenderStepDegrees);
+                _controlEvidence.Publish(_report);
             }
 
             Quaternion sourceDeltaFromBind = relative * Quaternion.Inverse(_bindSourceRelative);
@@ -460,7 +244,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _report.SourceAnkleFromBindAngleDegrees = deltaDegrees.magnitude;
             _sampledSourceRelativeAngularVelocityLocal = angularVelocity;
             _sampledSourceRelativeAngularAccelerationLocal = angularAcceleration;
-            _relativeReference.ObserveRender(_traceEnabled, source, relative, angularVelocity, sourceDt);
+            PrepareGroundReferenceInput(source, relative, angularVelocity, sourceDt, out Quaternion referenceGoal, out Vector3 referenceGoalW);
+            _relativeReference.ObserveRender(_traceEnabled, source, referenceGoal, referenceGoalW, sourceDt);
             _report.SourceAnkleRelativeAngularVelocityLocal = angularVelocity;
             _report.SourceAnkleRelativeAngularAccelerationLocal = angularAcceleration;
             _report.SourceAnkleRelativeAngularSpeed = angularVelocity.magnitude;
@@ -528,7 +313,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _report.TargetRenderSampleSequence = renderSequence;
             _report.TargetRenderSampleFreshAtFixedStep = fresh;
             _report.FixedStepsSinceTargetRenderSample = heldDepth;
-            _report.TargetRenderSampleAgeSeconds = Mathf.Max(0f, sampleAge);
+            float targetSampleAgeSeconds = Mathf.Max(0f, sampleAge);
+            _report.TargetRenderSampleAgeSeconds = targetSampleAgeSeconds;
 
             if (traceEnabled && !_traceEnabled)
                 BeginTrace();
@@ -552,9 +338,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     ? (dynamicConstraintContract && (expectedDynamic ? !_body.isKinematic : _body.isKinematic))
                     : (_ankleJoint == null && _body.isKinematic));
             bool solverContract = _footVelocitySolver.ValidateReadback(_body, _report);
-            bool referenceContract = !_relativeReference.Selected || (_relativeReference.Finite &&
+            bool referenceContract = (!_groundReference.Enabled || _groundReference.Finite) && (!_relativeReference.Selected || (_relativeReference.Finite &&
                 (expectedDynamic ? (_relativeReference.Active && _relativeReference.Current.Source.Matches(_report.RuntimeSourceContext))
-                    : !_relativeReference.Active));
+                    : !_relativeReference.Active)));
             bool finite = structuralContract && solverContract && referenceContract && _report.FootContactOffsetFinite &&
                           IsFinite(currentRelative) && IsFinite(relativeError) && IsFinite(anchorError) &&
                           IsFinite(_body.position) && IsFinite(_body.rotation) && IsFinite(_sampledSourceRelative);
@@ -575,7 +361,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
             _report.Finite = finite;
             if (!referenceContract)
-                _report.Detail = "FOOT_REFERENCE_V04730_CONTRACT_FAILED:" + (_relativeReference.Issue ?? "SOURCE_IDENTITY_OR_ACTIVE_STATE");
+                _report.Detail = "FOOT_REFERENCE_CONTRACT_FAILED:" +
+                    ((_groundReference.Enabled && !_groundReference.Finite ? _groundReference.Issue : _relativeReference.Issue) ?? "SOURCE_IDENTITY_OR_ACTIVE_STATE");
             _report.AnkleRelativeTrackingErrorDegrees = finite ? relativeError : float.PositiveInfinity;
             _report.AnkleAnchorErrorMeters = finite ? anchorError : float.PositiveInfinity;
 
@@ -583,8 +370,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             // Keep a predecessor plus the current sample, including any finite sample that aborts below.
             Vector3 lowerPointVelocity = _lowerBody.GetPointVelocity(lowerAnchorWorld);
             Vector3 footPointVelocity = _body.GetPointVelocity(footAnchorWorld);
-            _report.PreviousObservedStep = _report.CurrentObservedStep;
-            _report.CurrentObservedStep = new FootFixedStepEvidence
+            _controlEvidence.BeginObservation();
+            _controlEvidence.Publish(_report);
+            _controlEvidence.Observe(_traceEnabled, new FootFixedStepEvidence
             {
                 FixedSequence = fixedSequence,
                 Valid = finite && IsFinite(lowerPointVelocity) && IsFinite(footPointVelocity) &&
@@ -596,17 +384,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 FootAnkleVelocityWorld = footPointVelocity,
                 LowerAngularVelocityWorld = _lowerBody.angularVelocity,
                 FootAngularVelocityWorld = _body.angularVelocity
-            };
-            if (_traceEnabled && _report.CurrentObservedStep.Valid)
-            {
-                _report.TraceObservedFixedSamples++;
-                _report.TraceObservedAnchorErrorMaxMeters = Mathf.Max(_report.TraceObservedAnchorErrorMaxMeters, anchorError);
-                _report.TraceObservedTrackingErrorMaxDegrees = Mathf.Max(_report.TraceObservedTrackingErrorMaxDegrees, relativeError);
-            }
+            });
+            _controlEvidence.Publish(_report);
 
             // Settle the prior diagnostic command before lifecycle/current controllers, including a finite gate endpoint.
             _turnEvents.ObserveSettled(_traceEnabled, step, _report.CurrentObservedStep, _lowerBody, _body,
                 _report.RuntimeSourceContext, ControlRelativeRotation, sampleAge, legTurnEvidence);
+            _report.PublishTurnResponse(_turnEvents.ResponseReceipt);
 
             // V04230 duplicate continuity statistics retired in v0.4.41. The joined
             // normal-load/angular/four-boundary ledger below retains the pre-lifecycle endpoint.
@@ -697,6 +481,25 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 // remaining Foot controller work / Unity physics advance. Landing is gated by confirmed STANCE,
                 // current v0.4.0 exact static identity, a short same-Collider hold, and (v0.4.16.1) two consecutive
                 // current physical-sole geometry-ready samples before the collider may transition OFF->ON.
+                FootStanceOnlyAuthorizedContactLifecycle.EntryContext entryContext = default;
+                if (_stanceContactLifecycle.ContinuousEntry && !_contactShadow.Active)
+                {
+                    // Both rotations use this physical Lower read and the held Render packet above.
+                    // Reference substitutions are diagnostic only; no live source Transform is sampled here.
+                    Quaternion entryLowerRotation = _lowerBody.rotation;
+                    entryContext = FootStanceOnlyAuthorizedContactLifecycle.CaptureEntryContext(fixedSequence, _body,
+                        lowerAnchorWorld, _footAnkleAnchorLocal, entryLowerRotation * ControlRelativeRotation,
+                        _sampledFootPosition, _sampledFootRotation, anchorError, sampleAge, _sampledSourceRelative, entryLowerRotation);
+                    entryContext.LandingGoal = _groundReference.Current;
+                    // Reuse this Fixed's existing source receipt/classifier. These fields only select/describe a log window.
+                    entryContext.SourcePhase = legTurnEvidence.Matches(step, fixedSequence) &&
+                        legTurnEvidence.Source.Matches(_report.RuntimeSourceContext) ? legTurnEvidence.SourcePhase : null;
+                    entryContext.SourceFresh = fresh;
+                    entryContext.SourceHeldDepth = heldDepth;
+                    entryContext.SourceDt = _report.RuntimeSourceContext.Dt;
+                    if (LandingReferenceCaptureRequested)
+                        entryContext.LandingPath = CaptureLandingReference(step, fixedSequence, legTurnEvidence, entryLowerRotation);
+                }
                 if (!_stanceContactLifecycle.Step(
                     _traceEnabled,
                     fixedSequence,
@@ -710,7 +513,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     _contactShadow,
                     _collider,
                     _targetRoot,
-                    _report))
+                    _report,
+                    _supportSurface,
+                    entryContext))
                 {
                     _report.Finite = false;
                     return false;
@@ -732,6 +537,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     return false;
                 }
                 _report.PhysicalGroundContactPossible = _contactShadow.Active && _collider != null && _collider.enabled;
+                if (!UpdateStanceLoadAdmission(step, fixedSequence, anchorError, sampleAge)) return false;
 
                 // V04110/V04130 research statistics retired after Lower ground ownership closed.
                 // Foot world-ground anti-slip stays retired; the Foot-Lower tether owns local closure.
@@ -760,7 +566,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 // same relative PD correction before the v0.3.73 production selected clamp (normally 60, conditionally 80).
                 // v0.4.18 freezes the v0.4.17.1 predictive B guard: it may only de-clamp that already-computed command above 80 when the
                 // one-step radial model forecasts crossing the unchanged 30 mm gate; it never changes command direction.
-                _report.AnkleConstraintLastEvaluatedFixedSequence = fixedSequence;
+                _controlEvidence.EvaluateConstraint(fixedSequence);
+                _controlEvidence.Publish(_report);
                 if (!_ankleConstraint.Step(
                     _traceEnabled,
                     _ankleDrive.DynamicActive,
@@ -815,12 +622,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     return false;
                 }
 
-                _report.AnkleDriveLastEvaluatedFixedSequence = fixedSequence;
+                _controlEvidence.EvaluateDrive(fixedSequence);
+                _controlEvidence.Publish(_report);
                 if (!_ankleDrive.Step(
                     _traceEnabled,
                     _body,
                     _ankleJoint,
-                    _ankleConstraint.CharacterJointArm,
                     _lowerBody,
                     _footAnkleAnchorLocal,
                     _lowerAnkleAnchorLocal,
@@ -829,7 +636,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     ControlRelativeW,
                     ControlRelativeA,
                     ControlRelativeFF,
-                    _report.TargetRenderSampleAgeSeconds,
+                    targetSampleAgeSeconds,
                     _report))
                 {
                     _report.Finite = false;
@@ -886,7 +693,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 if (!_stanceFootNativeGravity.SchedulePhysicsStep(
                     _traceEnabled,
                     fixedSequence,
-                    _contactShadow.Active && _report.ContactShadowCurrentContactActive,
+                    ExactAuthorizedStanceSupportLoadEligible,
                     CurrentAuthorizedSupportNormalValid(),
                     _stanceContactFrictionIsolation.ZeroFriction,
                     _body,
@@ -899,41 +706,17 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     return false;
                 }
 
-                _report.FootControllerLastCompletedFixedSequence = fixedSequence;
+                _controlEvidence.CompleteController(fixedSequence);
+                _controlEvidence.Publish(_report);
 
             }
 
             if (_traceEnabled && finite)
             {
-                _report.TraceSamples++;
-                _traceErrorSum += relativeError;
-                _traceAnchorSum += anchorError;
-                _traceSourceAngularSpeedSum += _report.SourceAnkleRelativeAngularSpeed;
-                _traceSourceFromBindAngleSum += _report.SourceAnkleFromBindAngleDegrees;
-                _report.TraceAnkleRelativeErrorMeanDegrees = _traceErrorSum / _report.TraceSamples;
-                _report.TraceAnkleRelativeErrorMaxDegrees = Mathf.Max(_report.TraceAnkleRelativeErrorMaxDegrees, relativeError);
-                _report.TraceAnkleAnchorErrorMeanMeters = _traceAnchorSum / _report.TraceSamples;
-                _report.TraceAnkleAnchorErrorMaxMeters = Mathf.Max(_report.TraceAnkleAnchorErrorMaxMeters, anchorError);
-                _report.TraceSourceFromBindAngleMeanDegrees = _traceSourceFromBindAngleSum / _report.TraceSamples;
-                _report.TraceSourceFromBindAngleMaxDegrees = Mathf.Max(_report.TraceSourceFromBindAngleMaxDegrees, _report.SourceAnkleFromBindAngleDegrees);
-                _report.TraceSourceAngularSpeedMean = _traceSourceAngularSpeedSum / _report.TraceSamples;
-                _report.TraceSourceAngularSpeedMax = Mathf.Max(_report.TraceSourceAngularSpeedMax, _report.SourceAnkleRelativeAngularSpeed);
-                if (_report.TraceSamples == 1)
-                {
-                    _report.TraceSourceFromBindAxisMinDegrees = _report.SourceAnkleFromBindRotationVectorDegrees;
-                    _report.TraceSourceFromBindAxisMaxDegrees = _report.SourceAnkleFromBindRotationVectorDegrees;
-                    _report.TraceSourceAngularVelocityAxisMin = _report.SourceAnkleRelativeAngularVelocityLocal;
-                    _report.TraceSourceAngularVelocityAxisMax = _report.SourceAnkleRelativeAngularVelocityLocal;
-                }
-                else
-                {
-                    _report.TraceSourceFromBindAxisMinDegrees = ComponentMin(_report.TraceSourceFromBindAxisMinDegrees, _report.SourceAnkleFromBindRotationVectorDegrees);
-                    _report.TraceSourceFromBindAxisMaxDegrees = ComponentMax(_report.TraceSourceFromBindAxisMaxDegrees, _report.SourceAnkleFromBindRotationVectorDegrees);
-                    _report.TraceSourceAngularVelocityAxisMin = ComponentMin(_report.TraceSourceAngularVelocityAxisMin, _report.SourceAnkleRelativeAngularVelocityLocal);
-                    _report.TraceSourceAngularVelocityAxisMax = ComponentMax(_report.TraceSourceAngularVelocityAxisMax, _report.SourceAnkleRelativeAngularVelocityLocal);
-                }
-                _report.TraceSourceFromBindAxisAbsMaxDegrees = ComponentMaxAbs(_report.TraceSourceFromBindAxisAbsMaxDegrees, _report.SourceAnkleFromBindRotationVectorDegrees);
-                _report.TraceSourceAngularVelocityAxisAbsMax = ComponentMaxAbs(_report.TraceSourceAngularVelocityAxisAbsMax, _report.SourceAnkleRelativeAngularVelocityLocal);
+                _controlEvidence.CompleteObservation(relativeError, anchorError,
+                    _report.SourceAnkleRelativeAngularSpeed, _report.SourceAnkleFromBindAngleDegrees,
+                    _report.SourceAnkleFromBindRotationVectorDegrees, _report.SourceAnkleRelativeAngularVelocityLocal);
+                _controlEvidence.Publish(_report);
             }
 
             return finite;
@@ -944,41 +727,18 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _traceEnabled = true;
             _turnEvents.Reset(scope);
             _relativeReference.ResetTrace();
+            _groundReference.ResetTrace();
+            _loadAdmission.ResetTrace();
+            _report.StanceLoadAdmissionSummary = null;
             _report.TurnEventDetails = null;
             _footContactOffset.ResetTrace(_report);
 
             // Trace is diagnostic-only. Do NOT reset source pose/W/A or foot-velocity derivative history here:
             // those states feed the physical controller/parent-transport paths, so arl_trace(on) must not create
             // an artificial one/two-sample warm-up. Arm/drive/rollback transitions own physical-history resets.
-            _traceErrorSum = 0f;
-            _traceAnchorSum = 0f;
-            _traceSourceAngularSpeedSum = 0f;
-            _traceSourceFromBindAngleSum = 0f;
-            _report.TraceSamples = 0;
-            _report.PreviousObservedStep = default;
-            _report.CurrentObservedStep = default;
-            _report.AnkleConstraintLastEvaluatedFixedSequence = 0;
-            _report.AnkleDriveLastEvaluatedFixedSequence = 0;
-            _report.FootControllerLastCompletedFixedSequence = 0;
-            _report.TraceObservedFixedSamples = 0;
-            _report.TraceObservedAnchorErrorMaxMeters = 0f;
-            _report.TraceObservedTrackingErrorMaxDegrees = 0f;
-            _report.TraceSourceRenderStepSamples = 0;
-            _report.TraceSourceRenderStepAngleMaxDegrees = 0f;
-            _report.TraceAnkleRelativeErrorMeanDegrees = 0f;
-            _report.TraceAnkleRelativeErrorMaxDegrees = 0f;
-            _report.TraceAnkleAnchorErrorMeanMeters = 0f;
-            _report.TraceAnkleAnchorErrorMaxMeters = 0f;
-            _report.TraceSourceFromBindAngleMeanDegrees = 0f;
-            _report.TraceSourceFromBindAngleMaxDegrees = 0f;
-            _report.TraceSourceAngularSpeedMean = 0f;
-            _report.TraceSourceAngularSpeedMax = 0f;
-            _report.TraceSourceFromBindAxisMinDegrees = Vector3.zero;
-            _report.TraceSourceFromBindAxisMaxDegrees = Vector3.zero;
-            _report.TraceSourceFromBindAxisAbsMaxDegrees = Vector3.zero;
-            _report.TraceSourceAngularVelocityAxisMin = Vector3.zero;
-            _report.TraceSourceAngularVelocityAxisMax = Vector3.zero;
-            _report.TraceSourceAngularVelocityAxisAbsMax = Vector3.zero;
+            _controlEvidence.Reset();
+            _controlEvidence.Publish(_report);
+            _report.PublishTurnResponse(_turnEvents.ResponseReceipt);
             _soleRequalification.ResetTrace(_report);
             _contactIdentity.ResetTrace(_report);
             _contactShadow.ResetTrace(_report);
@@ -1004,8 +764,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         public void EndTrace()
         {
             _turnEvents.Seal();
-            _report.TurnEventDetails = _turnEvents.GetDetails() + "\n" + _relativeReference.GetDetails();
+            _report.TurnEventDetails = _turnEvents.GetDetails() + "\n" + _relativeReference.GetDetails() + "\n" + _groundReference.GetDetails();
 
+            _report.StanceLoadAdmissionSummary = _loadAdmission.Summary();
             _contactIdentity.EndTrace(_report);
             _traceEnabled = false;
             _mechanicalReaction.EndTrace(_report);
@@ -1021,72 +782,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _stanceLowerGroundAuthority.EndTrace(_report);
             _stanceFootNativeGravity.EndTrace(_report);
             _targetAccelerationPersistenceConditioner.CopyToReport(_report);
-        }
-
-        public void SetVisual(bool enabled)
-        {
-            SetRendererEnabled(_visual, enabled);
-            SetRendererEnabled(_toeMarker, enabled);
-            SetRendererEnabled(_ankleMarker, enabled);
-            _report.VisualEnabled = enabled;
-        }
-
-        public int ForceSafeState()
-        {
-            // Never join a pending command to teleported/zeroed cleanup state. Formatting remains stop-time only.
-            _turnEvents.Seal();
-            _ankleConstraint.QuiesceStancePlanarDamping(_report);
-            _rockingTetherCoupling.ClearPendingPreserveTrace(_report);
-            _supportEntityBoundary.ClearPendingPreserveTrace(_report);
-            _rockingTetherCoupling.CopyToReport(_report, false);
-            _supportEntityBoundary.CopyToReport(_report, false);
-            _ankleConstraint.GetStancePlanarDampingSummary(_report);
-            int failures = 0;
-            if (!_footVelocitySolver.QuiescePreserveTrace(_body, _report, out string solverSafeError))
-            {
-                failures++;
-                Plugin.Logger?.LogWarning("[ARL][FOOT_SAFE_STATE_ERROR] side=" + (_report.Side ?? "<none>") + " | velocitySolver | " + solverSafeError);
-            }
-            if (!_stanceFootNativeGravity.QuiescePreserveTrace(_body, _report, out string gravitySafeError))
-            {
-                failures++;
-                Plugin.Logger?.LogWarning("[ARL][FOOT_SAFE_STATE_ERROR] side=" + (_report.Side ?? "<none>") + " | nativeGravity | " + (gravitySafeError ?? "UNKNOWN"));
-            }
-            _stanceSupportAngular.ClearCurrentState(_report);
-
-            _relativeReference.DisablePreserveTrace();
-            _ankleDrive.SetDriveActive(false);
-            _ankleConstraint.ClearCurrentState(_report);
-            _ankleTransport.ClearCurrentState(_report);
-            _ankleAngularTransport.ClearCurrentState(_report);
-            _stanceContactLifecycle.DisableAndReset(_contactShadow, _collider, _report);
-            failures += _contactShadow.DisablePreserveTrace(_report);
-            try
-            {
-                if (_collider != null) _collider.enabled = false;
-            }
-            catch (Exception e)
-            {
-                failures++;
-                Plugin.Logger?.LogWarning("[ARL][FOOT_SAFE_STATE_ERROR] side=" + (_report.Side ?? "<none>") + " | collider | " + e.GetType().Name + " / " + e.Message);
-            }
-            try
-            {
-                if (_body != null)
-                {
-                    _body.useGravity = false;
-                    _body.velocity = Vector3.zero;
-                    _body.angularVelocity = Vector3.zero;
-                    _body.isKinematic = true;
-                }
-            }
-            catch (Exception e)
-            {
-                failures++;
-                Plugin.Logger?.LogWarning("[ARL][FOOT_SAFE_STATE_ERROR] side=" + (_report.Side ?? "<none>") + " | rigidbody | " + e.GetType().Name + " / " + e.Message);
-            }
-            UpdateStaticState();
-            return failures;
+            // Publish the owner state before trace consumers read the cached v058Now projection.
+            RefreshAnkleDriveReport();
+            _report.PublishTurnResponse(_turnEvents.ResponseReceipt);
+            _controlEvidence.Seal(_report.RuntimeContext, _report.RuntimeSourceContext, _turnEvents.ResponseReceipt,
+                _ankleDrive.DynamicActive, _report.Kinematic, _report.GravityEnabled, _report.ColliderEnabled,
+                _report.AnkleDriveCurrentSummary);
+            _controlEvidence.Publish(_report);
         }
 
         public void FollowSourceKinematic()
@@ -1130,8 +832,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             CopyAnkleJointReadback();
             return _report.GetConsoleSummary();
         }
-
-
 
         public string GetSoleRequalificationStatus()
         {
@@ -1185,9 +885,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _contactIdentity.CopyToReport(_report);
             return _contactIdentity.GetStatus(_report);
         }
-
-
-
 
         public string GetAnkleDrivePhysicalStatus()
         {
@@ -1255,7 +952,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         public string AnkleDriveArm => _ankleDrive.Arm;
         public bool AnkleDriveProductionArm => _ankleDrive.IsProductionArm;
-        public string AnkleConstraintArm => _ankleConstraint.Arm;
         public bool AnkleConstraintProductionArm => _ankleConstraint.IsProductionSelectorArm;
         public bool AnkleConstraintCharacterJointArm => _ankleConstraint.CharacterJointArm;
         public string AnkleTransportArm => _ankleTransport.Arm;
@@ -1265,14 +961,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         public bool AnkleAngularTransportProductionReady => _ankleAngularTransport.Enabled &&
                                                      _body != null &&
                                                      Mathf.Abs(_body.angularDrag - _profile.AngularDrag) <= 0.0001f;
-        public float FootAngularDrag => _body != null ? _body.angularDrag : _profile.AngularDrag;
         internal Rigidbody DynamicBody => _body;
         internal FreeSpaceBoundaryIssue FreeSpaceSelectorIssue
         {
             get
             {
                 if (!IsBuilt) return FreeSpaceBoundaryIssue.MissingFoundation;
-                if (_stanceContactLifecycle.Enabled || !_stanceContactLifecycle.Finite ||
+                if (_loadAdmission.Selected || _groundReference.Enabled || _stanceContactLifecycle.Enabled || _stanceContactLifecycle.ContinuousEntry || _stanceContactLifecycle.EntryRecovery || !_stanceContactLifecycle.Finite ||
                     _contactShadow.Arm != FootQualifiedContactShadow.ArmA || _contactShadow.Active || !_contactShadow.Finite)
                     return FreeSpaceBoundaryIssue.ContactAuthorization;
                 if (_stanceContactFrictionIsolation.Arm != FootStanceContactFrictionIsolation.ArmA || !_stanceContactFrictionIsolation.Finite)
@@ -1351,8 +1046,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         // v0.4.1.1: bilateral coordinator needs the exact proxy Collider object so Foot↔Foot self-collision
         // can be isolated as an explicit structural pair before either Foot collider is enabled.
         internal Collider ContactShadowFootCollider => _collider;
-        internal string ContactShadowArm => _contactShadow.Arm;
-        internal bool ContactShadowActive => _contactShadow.Active;
         internal bool ContactShadowFinite => _contactShadow.Finite;
         internal bool StanceContactLifecycleEnabled => _stanceContactLifecycle.Enabled;
         internal bool StanceContactLifecycleFinite => _stanceContactLifecycle.Finite;
@@ -1361,8 +1054,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal bool StanceContactZeroFriction => _stanceContactFrictionIsolation.ZeroFriction;
         // v0.4.19: narrow read-only bridge for the SingleLeg-owned Lower gravity selector.
         // It reuses the exact same current Foot contact/support-normal witness as V04170; no new raycast or authority.
-        internal bool ExactAuthorizedStanceSupportLoadEligible =>
-            _contactShadow.Active && _report.ContactShadowCurrentContactActive && CurrentAuthorizedSupportNormalValid() && _stanceContactFrictionIsolation.ZeroFriction;
+        internal bool ExactAuthorizedStanceSupportLoadEligible => BaseAuthorizedStanceLoadEligible &&
+            (!_loadAdmission.Selected || (_loadAdmission.Matches(_report.RuntimeContext, _report.FixedUpdateSequence) && _loadAdmission.Eligible));
         internal Vector3 CurrentAuthorizedSupportNormalWorld => _soleRequalification.CurrentGroundAverageNormalWorld;
         internal string StanceLowerGroundAuthorityArm => _stanceLowerGroundAuthority.Arm;
         internal bool StanceLowerGroundAuthorityEnabled => _stanceLowerGroundAuthority.Enabled;
@@ -1446,8 +1139,22 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             return ready;
         }
 
+        internal bool ContactEntryContinuous => _stanceContactLifecycle.ContinuousEntry;
+        internal bool ContactEntryRecovery => _stanceContactLifecycle.EntryRecovery;
+        internal void SelectContactEntryContinuous(bool enabled, bool recovery = false, bool groundReference = false, bool partialGround = false, bool loadAdmission = false)
+        {
+            if (_traceEnabled || _collider == null || _collider.enabled || _contactShadow.Active)
+                throw new InvalidOperationException("CONTACT_ENTRY_SELECTION_REQUIRES_QUIESCED_TRACE_OFF");
+            if (loadAdmission && !enabled) throw new InvalidOperationException("LOAD_ADMISSION_REQUIRES_CONTINUOUS_CONTACT");
+            _stanceContactLifecycle.SelectContinuousEntry(enabled, _report, recovery);
+            _loadAdmission.Select(loadAdmission);
+            _groundReference.Select(enabled, groundReference, partialGround);
+            if (enabled) _groundReference.SeedInput(_report.RuntimeSourceContext, _sampledSourceRelative, _sampledSourceRelativeAngularVelocityLocal);
+        }
+
         internal void SetStanceContactLifecycleEnabled(bool enabled)
         {
+            if (!enabled) { _groundReference.DisablePreserveTrace(); _loadAdmission.DisablePreserveTrace(); }
             if (!enabled)
                 _stanceFootNativeGravity.QuiescePreserveTrace(_body, _report, out _);
             _stanceContactLifecycle.SetEnabled(enabled, _contactShadow, _collider, _report);
@@ -1456,6 +1163,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         internal void DisableStanceContactLifecycle()
         {
+            _groundReference.DisablePreserveTrace();
+            _loadAdmission.DisablePreserveTrace();
             _stanceFootNativeGravity.QuiescePreserveTrace(_body, _report, out _);
             _stanceContactLifecycle.DisableAndReset(_contactShadow, _collider, _report);
             UpdateStaticState();
@@ -1463,6 +1172,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         internal bool QuiesceStanceContactLifecyclePreserveTrace(out string error)
         {
+            _groundReference.DisablePreserveTrace();
+            _loadAdmission.DisablePreserveTrace();
             _ankleConstraint.QuiesceStancePlanarDamping(_report);
             _stanceSupportAngular.ClearCurrentState(_report);
             _stanceSupportAngular.CopyToReport(_report);
@@ -1484,13 +1195,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             _contactShadow.SetArmA(_collider, _report);
             UpdateStaticState();
-        }
-
-        internal bool EnablePreparedContactShadowArmB(out string error)
-        {
-            bool ok = _contactShadow.EnablePreparedArmB(_report, out error);
-            UpdateStaticState();
-            return ok;
         }
 
         internal int DisableContactShadowPreserveTrace()
@@ -1596,6 +1300,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _sampledFootRotation, ControlRelativeRotation, ControlRelativeW,
                 ControlRelativeA, _ankleDrive, _ankleAngularTransport, legTurnEvidence, _targetAccelerationPersistenceConditioner,
                 _relativeReference, _sampledSourceRelative, _sampledSourceRelativeAngularVelocityLocal, _sampledSourceRelativeAngularAccelerationLocal);
+            _report.PublishTurnResponse(_turnEvents.ResponseReceipt);
 
             _rockingTetherCoupling.CapturePreSolve(_traceEnabled, fixedSequence, step.Dt,
                 exactAuthorizedStance && CurrentAuthorizedSupportNormalValid(),
@@ -1621,389 +1326,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                    authorizedId != 0 &&
                    _report.GroundColliderInstanceId == authorizedId &&
                    IsFinite(normal) && normal.sqrMagnitude > 0.00000001f;
-        }
-
-        public bool SetDriveState(bool enabled, bool physicalParent = false)
-        {
-            if (!IsBuilt) return false;
-            try
-            {
-                if (!enabled)
-                {
-                    _relativeReference.DisablePreserveTrace();
-                    _ankleConstraint.QuiesceStancePlanarDamping(_report);
-                    _rockingTetherCoupling.ClearPendingPreserveTrace(_report);
-                    _supportEntityBoundary.ClearPendingPreserveTrace(_report);
-                    _rockingTetherCoupling.CopyToReport(_report, false);
-                    _supportEntityBoundary.CopyToReport(_report, false);
-                    _ankleConstraint.GetStancePlanarDampingSummary(_report);
-                    bool solverRestored = _footVelocitySolver.QuiescePreserveTrace(_body, _report, out string solverStopError);
-                    if (!solverRestored)
-                        Plugin.Logger?.LogWarning("[ARL][FOOT_DRIVE_STOP_SOLVER_RESTORE_FAILED] side=" + _report.Side + " | " + solverStopError);
-                    _stanceSupportAngular.ClearCurrentState(_report);
-                    _ankleDrive.SetDriveActive(false);
-                    _ankleConstraint.ClearCurrentState(_report);
-                    _ankleTransport.ClearCurrentState(_report);
-                    _ankleAngularTransport.ClearCurrentState(_report);
-                            FollowSourceKinematic();
-                    return solverRestored;
-                }
-
-                if (!_ankleDrive.SelectedDynamicArm)
-                {
-                    if (_relativeReference.Selected) return false;
-                    _ankleDrive.SetDriveActive(true);
-                    _ankleConstraint.ClearCurrentState(_report);
-                    _ankleTransport.ClearCurrentState(_report);
-                    _ankleAngularTransport.ClearCurrentState(_report);
-                            FollowSourceKinematic();
-                    return true;
-                }
-
-                if (!_report.SupportPlaneCalibrationApplied)
-                {
-                    Plugin.Logger?.LogError("[ARL][FOOT_ANKLE_DRIVE_ACTIVATION_REJECTED] side=" + (_report.Side ?? "<none>") + " | reason=SUPPORT_PLANE_CALIBRATION_NOT_APPLIED");
-                    return false;
-                }
-                Vector3 activationSourceDeltaDegrees = QuaternionToAngularVector(Quaternion.Inverse(_bindSourceRelative) * _sampledSourceRelative) * Mathf.Rad2Deg;
-                if (!IsFinite(activationSourceDeltaDegrees) ||
-                    Mathf.Abs(activationSourceDeltaDegrees.x) > FootAnkleSourceDrivenRelativePdIsolation.FlexionLimitDegrees ||
-                    Mathf.Abs(activationSourceDeltaDegrees.y) > FootAnkleSourceDrivenRelativePdIsolation.AxialLimitDegrees ||
-                    Mathf.Abs(activationSourceDeltaDegrees.z) > FootAnkleSourceDrivenRelativePdIsolation.InversionLimitDegrees)
-                {
-                    Plugin.Logger?.LogError("[ARL][FOOT_ANKLE_DRIVE_ACTIVATION_REJECTED] side=" + (_report.Side ?? "<none>") +
-                                            " | reason=SOURCE_POSE_OUTSIDE_REFERENCE_ENVELOPE" +
-                                            " | sourceDeg(F-A-I)=" + V(activationSourceDeltaDegrees));
-                    return false;
-                }
-
-                if (_ankleConstraint.CharacterJointArm)
-                    EnsureAnkleJoint();
-                else
-                {
-                    DestroyAnkleJoint();
-                    if (RefreshPendingAnkleJointDestroy())
-                    {
-                        Plugin.Logger?.LogWarning("[ARL][FOOT_ANKLE_DRIVE_ACTIVATION_REJECTED] side=" + (_report.Side ?? "<none>") +
-                                                  " | reason=ANKLE_JOINT_DESTROY_PENDING; retry after one frame");
-                        return false;
-                    }
-                }
-
-                // Enter Dynamic Foot with zero positional ankle debt. Source orientation initializes the sole pose, but the
-                // Foot origin is placed at the physical Lower ankle endpoint; otherwise the pre-existing source-vs-
-                // physical distal gap would be converted into an artificial first-frame Joint impulse.
-                Vector3 ankleWorld = physicalParent ? _lowerBody.position + _lowerBody.rotation * _lowerAnkleAnchorLocal :
-                    _lowerBody.transform.TransformPoint(_lowerAnkleAnchorLocal);
-                _body.position = ankleWorld;
-                _body.rotation = physicalParent ? _lowerBody.rotation * _sampledSourceRelative : _sampledFootRotation;
-                _body.useGravity = false;
-                _contactShadow.DisablePreserveTrace(_report);
-                if (_collider != null) _collider.enabled = false;
-                Vector3 ankleVelocity = _lowerBody.velocity + Vector3.Cross(_lowerBody.angularVelocity, ankleWorld - _lowerBody.worldCenterOfMass);
-                _body.isKinematic = false;
-                _body.velocity = IsFinite(ankleVelocity) ? ankleVelocity : Vector3.zero;
-                Vector3 sourceRelativeAngularVelocityWorld = _lowerBody.rotation * _sampledSourceRelativeAngularVelocityLocal;
-                Vector3 initialFootAngularVelocity = _lowerBody.angularVelocity + sourceRelativeAngularVelocityWorld;
-                _body.angularVelocity = IsFinite(initialFootAngularVelocity)
-                    ? initialFootAngularVelocity
-                    : (IsFinite(_lowerBody.angularVelocity) ? _lowerBody.angularVelocity : Vector3.zero);
-                if (physicalParent)
-                {
-                    // The ankle point and the Foot COM have different velocities when rotating.
-                    _body.velocity = ankleVelocity + Vector3.Cross(_body.angularVelocity, _body.rotation * _body.centerOfMass);
-                    Vector3 readback = _body.velocity + Vector3.Cross(_body.angularVelocity, ankleWorld - _body.worldCenterOfMass);
-                    if (!IsFinite(_body.velocity) || !IsFinite(_body.angularVelocity) ||
-                        !IsFinite(readback) || (readback - ankleVelocity).magnitude > 0.001f ||
-                        Quaternion.Angle(_body.rotation, _lowerBody.rotation * _sampledSourceRelative) > 0.01f)
-                        throw new InvalidOperationException("FOOT_INITIAL_POINT_CONTINUITY_FAILED");
-                }
-                _ankleDrive.SetDriveActive(true);
-                if (_relativeReference.Selected && (!physicalParent ||
-                    !_relativeReference.Seed(_report.RuntimeSourceContext, _sampledSourceRelative, _sampledSourceRelativeAngularVelocityLocal)))
-                    throw new InvalidOperationException("FOOT_REFERENCE_V04730_ACTIVATION_FAILED");
-                UpdateStaticState();
-                bool constraintReady = _ankleConstraint.CharacterJointArm
-                    ? (_ankleJoint != null && _ankleJoint.connectedBody == _lowerBody)
-                    : _ankleJoint == null;
-                return constraintReady && !_body.isKinematic && !_body.useGravity && (_collider == null || !_collider.enabled);
-            }
-            catch (Exception e)
-            {
-                Plugin.Logger?.LogError("[ARL][FOOT_ANKLE_DRIVE_ACTIVATION_FAILED] side=" + (_report.Side ?? "<none>") + " | " + e);
-                ForceSafeState();
-                return false;
-            }
-        }
-
-        public int Rollback()
-        {
-            int failures = RollbackInternal();
-            _destroyed = true;
-            _report.Built = false;
-            _report.Stage = failures == 0 ? "ROLLED_BACK" : "ROLLBACK_WITH_ERRORS";
-            return failures;
-        }
-
-        private int RollbackInternal()
-        {
-            int failures = ForceSafeState();
-            try { _stanceContactFrictionIsolation.RestoreAndDispose(_collider, _report); }
-            catch { failures++; }
-            try { if (_footObject != null) Object.Destroy(_footObject); }
-            catch (Exception e)
-            {
-                failures++;
-                Plugin.Logger?.LogWarning("[ARL][FOOT_ROLLBACK_STEP_FAILED] side=" + (_report.Side ?? "<none>") + " | DESTROY_ROOT | " + e.GetType().Name + " / " + e.Message);
-            }
-            _footObject = null;
-            _visual = null;
-            _toeMarker = null;
-            _ankleMarker = null;
-            _body = null;
-            _collider = null;
-            _ankleJoint = null;
-            _ankleJointDestroyPending = null;
-            _report.Built = false;
-            return failures;
-        }
-
-        private bool RefreshPendingAnkleJointDestroy()
-        {
-            if (_ankleJointDestroyPending == null)
-            {
-                _ankleJointDestroyPending = null;
-                return false;
-            }
-            return true;
-        }
-
-        private void EnsureAnkleJoint()
-        {
-            if (RefreshPendingAnkleJointDestroy())
-                throw new InvalidOperationException("ANKLE_JOINT_DESTROY_PENDING");
-            if (_ankleJoint != null)
-            {
-                if (_ankleJoint.connectedBody != _lowerBody)
-                    throw new InvalidOperationException("ANKLE_JOINT_CONNECTED_BODY_MISMATCH");
-                ConfigureAnkleJoint();
-                return;
-            }
-            if (_footObject == null || _body == null || _lowerBody == null)
-                throw new InvalidOperationException("ANKLE_JOINT_BUILD_PREREQUISITE_MISSING");
-            _ankleJoint = Il2CppComponentFactory.Add<CharacterJoint>(_footObject, "FOOT_ADD_ANKLE_CHARACTER_JOINT_V0363_BASELINE_A");
-            ConfigureAnkleJoint();
-            if (_ankleJoint.connectedBody != _lowerBody ||
-                Vector3.Distance(_ankleJoint.anchor, _footAnkleAnchorLocal) > 0.0001f ||
-                Vector3.Distance(_ankleJoint.connectedAnchor, _lowerAnkleAnchorLocal) > 0.0001f)
-                throw new InvalidOperationException("ANKLE_JOINT_READBACK_VALIDATION_FAILED");
-        }
-
-        private void DestroyAnkleJoint()
-        {
-            if (_ankleJoint == null)
-            {
-                CopyAnkleJointReadback();
-                return;
-            }
-            // Object.Destroy is deferred to end-of-frame. Do not set connectedBody=null first: a live Joint with
-            // connectedBody=null is a world-connected constraint in Unity, which can create a transient world anchor.
-            // Arm switches are allowed only while the leg/Foot are kinematic, so keeping the old connection until the
-            // deferred destruction completes is the safer zero-impulse transition.
-            CharacterJoint oldJoint = _ankleJoint;
-            try
-            {
-                Object.Destroy(oldJoint);
-                _ankleJointDestroyPending = oldJoint;
-            }
-            finally { _ankleJoint = null; }
-            CopyAnkleJointReadback();
-        }
-
-        private void ConfigureAnkleJoint()
-        {
-            if (_ankleJoint == null) return;
-            _ankleJoint.connectedBody = _lowerBody;
-            _ankleJoint.autoConfigureConnectedAnchor = false;
-            _ankleJoint.anchor = _footAnkleAnchorLocal;
-            _ankleJoint.connectedAnchor = _lowerAnkleAnchorLocal;
-            _ankleJoint.enableCollision = false;
-            _ankleJoint.enablePreprocessing = true;
-
-            // v0.3.63 A baseline retains the exact v0.3.57-v0.3.62 CharacterJoint mapping. The B topology destroys
-            // this component completely; no native angular or anchor solver authority is retained in the tether arm.
-            _ankleJoint.axis = Vector3.right;
-            _ankleJoint.swingAxis = Vector3.up;
-            SoftJointLimit low = _ankleJoint.lowTwistLimit;
-            low.limit = -FootAnkleSourceDrivenRelativePdIsolation.FlexionLimitDegrees;
-            _ankleJoint.lowTwistLimit = low;
-            SoftJointLimit high = _ankleJoint.highTwistLimit;
-            high.limit = FootAnkleSourceDrivenRelativePdIsolation.FlexionLimitDegrees;
-            _ankleJoint.highTwistLimit = high;
-            SoftJointLimit swing1 = _ankleJoint.swing1Limit;
-            swing1.limit = FootAnkleSourceDrivenRelativePdIsolation.AxialLimitDegrees;
-            _ankleJoint.swing1Limit = swing1;
-            SoftJointLimit swing2 = _ankleJoint.swing2Limit;
-            swing2.limit = FootAnkleSourceDrivenRelativePdIsolation.InversionLimitDegrees;
-            _ankleJoint.swing2Limit = swing2;
-            CopyAnkleJointReadback();
-        }
-
-        private void CopyAnkleJointReadback()
-        {
-            _report.AnkleJointExists = _ankleJoint != null;
-            _report.AnkleConnectedBodyMatch = _ankleJoint != null && _ankleJoint.connectedBody == _lowerBody;
-            if (_ankleJoint == null)
-            {
-                _report.AnkleJointAnchorLocal = Vector3.zero;
-                _report.AnkleConnectedAnchorLocal = Vector3.zero;
-                _report.AnkleAxisLocal = Vector3.zero;
-                _report.AnkleSwingAxisLocal = Vector3.zero;
-                _report.AnkleLowTwistLimit = 0f;
-                _report.AnkleHighTwistLimit = 0f;
-                _report.AnkleSwing1Limit = 0f;
-                _report.AnkleSwing2Limit = 0f;
-                return;
-            }
-            _report.AnkleJointAnchorLocal = _ankleJoint.anchor;
-            _report.AnkleConnectedAnchorLocal = _ankleJoint.connectedAnchor;
-            _report.AnkleAxisLocal = _ankleJoint.axis;
-            _report.AnkleSwingAxisLocal = _ankleJoint.swingAxis;
-            _report.AnkleLowTwistLimit = _ankleJoint.lowTwistLimit.limit;
-            _report.AnkleHighTwistLimit = _ankleJoint.highTwistLimit.limit;
-            _report.AnkleSwing1Limit = _ankleJoint.swing1Limit.limit;
-            _report.AnkleSwing2Limit = _ankleJoint.swing2Limit.limit;
-        }
-
-        private void ClearAnkleJointReadback()
-        {
-            _report.AnkleJointExists = false;
-            _report.AnkleConnectedBodyMatch = false;
-            _report.AnkleJointAnchorLocal = Vector3.zero;
-            _report.AnkleConnectedAnchorLocal = Vector3.zero;
-            _report.AnkleAxisLocal = Vector3.zero;
-            _report.AnkleSwingAxisLocal = Vector3.zero;
-            _report.AnkleLowTwistLimit = 0f;
-            _report.AnkleHighTwistLimit = 0f;
-            _report.AnkleSwing1Limit = 0f;
-            _report.AnkleSwing2Limit = 0f;
-        }
-
-        private bool ApplyAndValidateMassProperties()
-        {
-            Vector3 scale = _collider.transform.lossyScale;
-            Vector3 size = new Vector3(
-                Mathf.Abs(_collider.size.x * scale.x),
-                Mathf.Abs(_collider.size.y * scale.y),
-                Mathf.Abs(_collider.size.z * scale.z));
-            if (!IsFinite(size) || size.x <= 0f || size.y <= 0f || size.z <= 0f || !IsFinite(_body.mass) || _body.mass <= 0f)
-                return false;
-
-            float k = _body.mass / 12f;
-            Vector3 tensor = new Vector3(
-                k * (size.y * size.y + size.z * size.z),
-                k * (size.x * size.x + size.z * size.z),
-                k * (size.x * size.x + size.y * size.y));
-            if (!IsFinite(tensor) || tensor.x <= TensorEpsilon || tensor.y <= TensorEpsilon || tensor.z <= TensorEpsilon)
-                return false;
-
-            _body.centerOfMass = _collider.center;
-            _body.inertiaTensorRotation = Quaternion.identity;
-            _body.inertiaTensor = tensor;
-
-            Vector3 runtimeCom = _body.centerOfMass;
-            Vector3 runtimeTensor = _body.inertiaTensor;
-            bool valid =
-                ApproximatelyMassProperty(runtimeCom, _collider.center) &&
-                ApproximatelyMassProperty(runtimeTensor, tensor) &&
-                Quaternion.Angle(_body.inertiaTensorRotation, Quaternion.identity) <= 0.05f;
-            _report.RuntimeCenterOfMassLocal = runtimeCom;
-            _report.RuntimeInertiaTensor = runtimeTensor;
-            _report.MassPropertiesValidated = valid;
-            return valid;
-        }
-
-        private void CreateVisual(Vector3 center, Vector3 size)
-        {
-            _visual = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            _visual.name = "ARL_Foot_" + _target.RequestedSide + "_Visual";
-            _visual.hideFlags = HideFlags.DontSave;
-            _visual.layer = _layer;
-            _visual.transform.SetParent(_footObject.transform, false);
-            _visual.transform.localPosition = center;
-            _visual.transform.localRotation = Quaternion.identity;
-            // V04450: avoid coplanar display flashing against the floor; physics geometry is unchanged.
-            _visual.transform.localScale = size * 0.98f;
-            try
-            {
-                Collider primitiveCollider = _visual.GetComponent<Collider>();
-                if (primitiveCollider == null)
-                    throw new InvalidOperationException("FOOT_PREVIEW_COLLIDER_MISSING");
-                primitiveCollider.enabled = false;
-                Object.Destroy(primitiveCollider);
-            }
-            catch (Exception e)
-            {
-                throw new InvalidOperationException("FOOT_PREVIEW_COLLIDER_DISABLE_FAILED", e);
-            }
-            try
-            {
-                Renderer renderer = _visual.GetComponent<Renderer>();
-                if (renderer != null && _previewMaterial != null)
-                    renderer.sharedMaterial = _previewMaterial;
-            }
-            catch { }
-        }
-
-        private void CreateReferenceMarkers(Vector3 center, Vector3 size)
-        {
-            // Geometry-only visual witnesses.  The small forward cap makes sole +Z (toe direction) visible in-game;
-            // the ankle cube marks the Rigidbody/ankle pivot.  Both have their primitive colliders removed.
-            _toeMarker = CreateMarker(
-                "ARL_Foot_" + _target.RequestedSide + "_ToeDirectionMarker",
-                new Vector3(0f, center.y, center.z + size.z * 0.5f + 0.0125f),
-                new Vector3(Mathf.Max(0.03f, size.x * 0.55f), Mathf.Max(0.012f, size.y * 0.45f), 0.025f));
-            _ankleMarker = CreateMarker(
-                "ARL_Foot_" + _target.RequestedSide + "_AnklePivotMarker",
-                Vector3.zero,
-                new Vector3(0.025f, 0.025f, 0.025f));
-        }
-
-        private GameObject CreateMarker(string name, Vector3 localPosition, Vector3 localScale)
-        {
-            GameObject marker = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            marker.name = name;
-            marker.hideFlags = HideFlags.DontSave;
-            marker.layer = _layer;
-            marker.transform.SetParent(_footObject.transform, false);
-            marker.transform.localPosition = localPosition;
-            marker.transform.localRotation = Quaternion.identity;
-            marker.transform.localScale = localScale;
-            Collider markerCollider = marker.GetComponent<Collider>();
-            if (markerCollider != null)
-            {
-                markerCollider.enabled = false;
-                Object.Destroy(markerCollider);
-            }
-            try
-            {
-                Renderer renderer = marker.GetComponent<Renderer>();
-                if (renderer != null && _previewMaterial != null)
-                    renderer.sharedMaterial = _previewMaterial;
-            }
-            catch { }
-            return marker;
-        }
-
-        private static void SetRendererEnabled(GameObject obj, bool enabled)
-        {
-            if (obj == null) return;
-            try
-            {
-                Renderer renderer = obj.GetComponent<Renderer>();
-                if (renderer != null) renderer.enabled = enabled;
-            }
-            catch { }
         }
 
         private void UpdateStaticState()
@@ -2056,24 +1378,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private static string F(float value) => value.ToString("G9", CultureInfo.InvariantCulture);
         private static string V(Vector3 value) => "(" + F(value.x) + "," + F(value.y) + "," + F(value.z) + ")";
 
-        private static Vector3 ComponentMin(Vector3 a, Vector3 b)
-        {
-            return new Vector3(Mathf.Min(a.x, b.x), Mathf.Min(a.y, b.y), Mathf.Min(a.z, b.z));
-        }
-
-        private static Vector3 ComponentMax(Vector3 a, Vector3 b)
-        {
-            return new Vector3(Mathf.Max(a.x, b.x), Mathf.Max(a.y, b.y), Mathf.Max(a.z, b.z));
-        }
-
-        private static Vector3 ComponentMaxAbs(Vector3 current, Vector3 value)
-        {
-            return new Vector3(
-                Mathf.Max(current.x, Mathf.Abs(value.x)),
-                Mathf.Max(current.y, Mathf.Abs(value.y)),
-                Mathf.Max(current.z, Mathf.Abs(value.z)));
-        }
-
         private static Vector3 QuaternionToAngularVector(Quaternion q)
         {
             if (q.w < 0f)
@@ -2089,21 +1393,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             return new Vector3(q.x / sinHalf, q.y / sinHalf, q.z / sinHalf) * angle;
         }
 
-        private static bool ApproximatelyMassProperty(Vector3 a, Vector3 b)
-        {
-            return ApproximatelyComponent(a.x, b.x) && ApproximatelyComponent(a.y, b.y) && ApproximatelyComponent(a.z, b.z);
-        }
-
-        private static bool ApproximatelyComponent(float a, float b)
-        {
-            float tolerance = Mathf.Max(
-                MassReadbackAbsoluteTolerance,
-                Mathf.Max(Mathf.Abs(a), Mathf.Abs(b)) * MassReadbackRelativeTolerance);
-            return Mathf.Abs(a - b) <= tolerance;
-        }
-
         private static bool IsFinite(float value) => !(float.IsNaN(value) || float.IsInfinity(value));
         private static bool IsFinite(Vector3 value) => IsFinite(value.x) && IsFinite(value.y) && IsFinite(value.z);
         private static bool IsFinite(Quaternion value) => IsFinite(value.x) && IsFinite(value.y) && IsFinite(value.z) && IsFinite(value.w);
+        private static bool ValidSourceRotation(Quaternion value)
+        {
+            float lengthSquared = value.x * value.x + value.y * value.y + value.z * value.z + value.w * value.w;
+            return IsFinite(value) && IsFinite(lengthSquared) && lengthSquared > 0.00000001f;
+        }
     }
 }

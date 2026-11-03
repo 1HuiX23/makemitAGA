@@ -186,23 +186,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             report.ContactIdentityFinite = effectiveFinite;
             report.ContactIdentityInvalidReason = _traceInvalidLatched ? _traceInvalidReason : _invalidReason;
             report.ContactIdentityCurrentQualified = _currentQualified;
-            report.ContactIdentityCurrentStaticCollider = _currentStaticCollider;
             report.ContactIdentityCurrentColliderInstanceId = _currentColliderId;
             report.ContactIdentityCurrentColliderPath = _currentColliderPath;
-            report.ContactIdentityCurrentStableSeconds = _currentStableSeconds;
-            report.ContactIdentityTraceQuietEligibleSamples = _quietEligible;
-            report.ContactIdentityTraceQuietQualifiedSamples = _quietQualified;
             report.ContactIdentityTraceQuietQualifiedRatio = ratio;
-            report.ContactIdentityTraceNoHitSamples = _quietNoHit;
-            report.ContactIdentityTraceDynamicRejectedSamples = _quietDynamicRejected;
-            report.ContactIdentityTraceSwitches = _identitySwitches;
-            report.ContactIdentityTraceStableSegments = _stableSegments;
-            report.ContactIdentityTraceLongestStableSeconds = _longestStableSeconds;
-            report.ContactIdentityLastStableColliderInstanceId = _lastStableColliderId;
-            report.ContactIdentityLastStableColliderPath = _lastStableColliderPath;
-            report.ContactIdentityTraceEndedStable = _traceEndedStable;
-            report.ContactIdentityEndingStableColliderInstanceId = _endingStableColliderId;
-            report.ContactIdentityEndingStableColliderPath = _endingStableColliderPath;
             report.ContactIdentityTraceQualified = traceQualified;
         }
 

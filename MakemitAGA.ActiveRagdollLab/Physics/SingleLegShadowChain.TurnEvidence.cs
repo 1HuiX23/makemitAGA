@@ -72,6 +72,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (!_traceEnabled || !_dynamicParentActive) return;
             _legTurnCurrent.Step = _runtimeStep; _legTurnCurrent.Fixed = _fixedUpdateSequence;
             _legTurnCurrent.Source = _runtimeSource;
+            _legTurnCurrent.SourcePhase = _torso.Report != null ? _torso.Report.MotionPhase : null;
             _legTurnCurrent.RawWorldWValid = _legTurnRawSourceValid && _legTurnRawSource.Matches(_runtimeSource);
             _legTurnCurrent.RawSourceDt = _legTurnRawSourceDt;
             _legTurnCurrent.RawUpperW = _legTurnRawUpperW; _legTurnCurrent.RawLowerW = _legTurnRawLowerW;
@@ -171,6 +172,95 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             path.Committed = true; _legTurnCurrent.HipGoalPath = path;
         }
 
+        private void CaptureLandingReferenceInput()
+        {
+            if (!_traceEnabled || !_dynamicParentActive || _footFoundation == null ||
+                !_footFoundation.LandingReferenceCaptureRequested) return;
+            // Capture only a committed dynamic, joint-free chain. No diagnostic state can
+            // become a dependency of native writes. Zero is the actual Hip child anchor here.
+            try
+            {
+                if (!_legTurnCurrent.HipCommitted || !_legTurnCurrent.KneeCommitted ||
+                    _hipJoint != null || _kneeJoint != null || !_physicalParent.Matches(_runtimeStep)) return;
+                Vector3 upperScale = _upperBody.transform.lossyScale, lowerScale = _lowerBody.transform.lossyScale;
+                if (!IsFinite(upperScale) || !IsFinite(lowerScale) ||
+                    upperScale.x <= 0f || upperScale.y <= 0f || upperScale.z <= 0f ||
+                    lowerScale.x <= 0f || lowerScale.y <= 0f || lowerScale.z <= 0f) return;
+                _legTurnCurrent.LandingInput = new LegLandingReferenceInput
+                {
+                    Prepared = true, Step = _runtimeStep, Source = _runtimeSource, Fixed = _fixedUpdateSequence,
+                    UpperGoal = _legTurnCurrent.HipTargetR, KneeRelativeGoal = _controlTargetKneeRelative,
+                    Upper = _legTurnCurrent.UpperR, ParentHip = _physicalParent.SettledPoint(_rawHipConnectedAnchorLocal),
+                    UpperHip = _upperBody.position,
+                    UpperHipToKnee = Vector3.Scale(_kneeParentAnchorUpperLocal, upperScale),
+                    LowerKneeAnchor = Vector3.Scale(_kneeChildAnchorLowerLocal, lowerScale),
+                    RawHip = _sampledUpperPosition, RawLower = _sampledLowerRotation,
+                    RawKneeRelative = _sampledTargetKneeRelative,
+                    HipPath = _legTurnCurrent.HipGoalPath, Normal = _hipNormalReference.Current,
+                    Parent = CaptureLandingParentInput(), Knee = CaptureLandingKneeInput()
+                };
+            }
+            catch { _legTurnCurrent.LandingInput = default; }
+        }
+
+        private LandingParentPlacementInput CaptureLandingParentInput()
+        {
+            // Called only inside the existing inactive-entry window quota. Failure
+            // leaves the original ankle path and the independent Knee receipt intact.
+            try
+            {
+                if (_torso == null || !_physicalParent.Matches(_runtimeStep) ||
+                    !_torso.TryGetHeldPelvisTargetPose(_runtimeSource, out Vector3 rawP, out Quaternion rawR)) return default;
+                return new LandingParentPlacementInput
+                {
+                    Prepared = true, Step = _physicalParent.Step, Source = _runtimeSource,
+                    RawP = rawP, RawR = rawR, LocalAnchor = _rawHipConnectedAnchorLocal,
+                    ReferenceP = _physicalParent.CommandPosition, ReferenceR = _physicalParent.CommandRotation,
+                    ActualP = _physicalParent.Position, ActualR = _physicalParent.Rotation
+                };
+            }
+            catch { return default; }
+        }
+
+        private LandingKneeControlInput CaptureLandingKneeInput()
+        {
+            try
+            {
+                if (!_legTurnCurrent.KneeCommitted || !_legTurnCurrent.Step.Matches(_runtimeStep) ||
+                    !_legTurnCurrent.Source.Matches(_runtimeSource) || _report == null) return default;
+                return new LandingKneeControlInput
+                {
+                    Prepared = true, Step = _legTurnCurrent.Step, Source = _legTurnCurrent.Source, Fixed = _fixedUpdateSequence,
+                    ErrorAbsDegrees = _report.KneeControlAxisErrorDegrees,
+                    TargetW = _report.KneeTargetAxisAngularVelocitySigned, BodyW = _report.KneeBodyAxisAngularVelocitySigned,
+                    VelocityError = _report.KneeAxisAngularVelocityErrorSigned,
+                    P = _report.KneePdPContributionSigned, D = _report.KneePdDContributionSigned,
+                    Feedback = _legTurnCurrent.KneeFeedbackSigned,
+                    FeedforwardValid = _legTurnCurrent.KneeFeedforwardValid,
+                    FeedforwardActive = _legTurnCurrent.KneeFeedforwardActive,
+                    FeedforwardClamped = _legTurnCurrent.KneeFeedforwardClamped,
+                    FeedforwardReason = _legTurnCurrent.KneeFeedforwardReason,
+                    IndependentGate = _legTurnCurrent.HipGoalGateKneeIndependent,
+                    InputFF = _legTurnCurrent.KneeFeedforwardInputSigned, SelectedFF = _legTurnCurrent.KneeFeedforwardSelectedSigned,
+                    AllocatedFF = _legTurnCurrent.KneeFeedforwardAllocatedSigned, FinalFlexion = _legTurnCurrent.KneeFlexionFinalSigned,
+                    MaxFlexionA = _profile.LegKneeMaxAngularAcceleration, FlexionClamped = _report.KneeAccelerationClamped,
+                    SoftRawA = _report.KneeSoftOffAxisRawAccelerationMagnitude,
+                    SoftAppliedA = _report.KneeSoftOffAxisAppliedAccelerationMagnitude,
+                    SoftMaxA = _softKneeAuthority.CurrentMaxAngularAcceleration, SoftPhase = _softKneeAuthority.Phase,
+                    SoftClamped = _report.KneeSoftOffAxisAccelerationClamped,
+                    ParentTransportEnabled = _kneeParentAngularTransport.Enabled,
+                    RelativeA = _legTurnCurrent.KneeRelativeA,
+                    ParentA = _kneeParentAngularTransport.Enabled ? _lastHipAppliedAngularAccelerationWorld : Vector3.zero,
+                    TotalA = _legTurnCurrent.KneeTotalA,
+                    ReferenceSelected = _kneeReference.Selected, Reference = _kneeReference.Current,
+                    PlannedSourceRecoverySelected = _kneePlannedFeedforwardSelected,
+                    FeedforwardStateBits = _legTurnCurrent.HipFeedforwardStateBits,
+                    RawSourceA = _sampledTargetKneeRelativeAngularAccelerationLocal
+                };
+            }
+            catch { return default; }
+        }
+
         private void CaptureLegTurnKnee(Vector3 targetRelativeW, Vector3 relativeA, Vector3 totalA,
             float feedbackSigned, float allocatedFeedforwardSigned, float finalFlexionSigned)
         {
@@ -182,6 +272,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _legTurnCurrent.KneeFeedforwardAllocatedSigned = allocatedFeedforwardSigned;
             _legTurnCurrent.KneeFlexionFinalSigned = finalFlexionSigned;
             _legTurnCurrent.KneeCommitted = true;
+            CaptureLandingReferenceInput();
         }
     }
 }

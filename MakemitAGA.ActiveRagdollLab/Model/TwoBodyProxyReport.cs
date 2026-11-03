@@ -7,11 +7,11 @@ namespace MakemitAGA.ActiveRagdollLab.Model
     internal sealed class TwoBodyProxyReport
     {
         internal PelvisReceiverReport PelvisReceiver;
+        // Snapshot projection only. Live controller policy is owned by TwoBodyShadowProxy.
         internal bool UseDynamicTorsoRecovery;
         internal bool HipGoalGateOnlyHip;
-        internal bool UseCoherentHipNormalReference;
-        internal bool HipNormalSampleAgePrediction;
         internal TorsoRecoveryState DynamicTorsoRecovery;
+        // Diagnostic view of the captured policy/state. Control consumers use the owner.
         // Legacy and standalone scopes retain their original qualification. Both V04770 dynamic arms require current state; missing state suppresses FF.
         internal bool ControlRecoveryActive => UseDynamicTorsoRecovery
             ? !DynamicTorsoRecovery.Valid || DynamicTorsoRecovery.Active : FreezeRecoveryActive;
@@ -501,7 +501,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public string GetFullText()
         {
             StringBuilder sb = new StringBuilder(4096);
-            sb.AppendLine("MakemitAGA Active Ragdoll Lab 0.4.2.1 - Frozen Two-Body Foundation Report (validated dynamics baseline retained)");
+            sb.AppendLine("MakemitAGA Active Ragdoll Lab " + Plugin.PluginVersion + " - Frozen Two-Body Foundation Report (validated dynamics baseline retained)");
             sb.AppendLine("built=" + Built);
             sb.AppendLine("driveEnabled=" + DriveEnabled);
             sb.AppendLine("gravityEnabled=" + GravityEnabled);
