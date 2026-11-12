@@ -12,6 +12,9 @@ namespace ARL.Contracts
         {
             Check.Run("pelvis readiness, capture order and idempotence", PelvisLifecycle);
             Check.Run("pelvis fault finalization and timeout", PelvisFaults);
+            Check.Run("pelvis initial geometry rejection is not a running safety abort", PelvisPreparationRejection);
+            Check.Run("pelvis stable join has a separate waiting dependency", PelvisStableJoin);
+            Check.Run("pelvis final result preserves physical cause through cleanup", PelvisFirstCause);
             Check.Run("ankle completed/rejected evidence and idempotence", AnkleLifecycle);
             Check.Run("ankle fault finalization and clock", AnkleFaults);
         }
@@ -63,6 +66,47 @@ namespace ARL.Contracts
             Check.That(c.Session.Phase == RunPhase.Completed && c.Session.CompletedSnapshot != null, "report write failure cannot erase completed in-memory evidence");
         }
 
+        private static void PelvisFirstCause()
+        {
+            foreach (bool started in new[] { false, true }) foreach (bool restoreFails in new[] { false, true })
+            {
+                var p = new PelvisPort { ReadyValue = started, RestoreFails = restoreFails };
+                var c = new PelvisTestCoordinator(p); c.Start("b");
+                c.Session.RecordAutomaticStop("BILATERAL_CONTACT", "HIP_PAIR_RECEIVER_ATTITUDE_COMPLETION_FAILED");
+                p.HealthFailure = "DYNAMIC_CONTACT_CONTRACT_LOST:FootSelfPair";
+                c.OnFixed(RuntimeContracts.Step(1));
+                string snapshot = started ? c.Session.CompletedSnapshot : c.Session.RejectedSnapshot;
+                Check.That(snapshot.Contains("stopReason=AUTO_FIRST_CAUSE:BILATERAL_CONTACT:HIP_PAIR_RECEIVER_ATTITUDE_COMPLETION_FAILED") &&
+                    snapshot.Contains("stopTrigger=AUTO_RECEIVER_OR_SCOPE_ABORT:DYNAMIC_CONTACT_CONTRACT_LOST:FootSelfPair"),
+                    "immutable result distinguishes fault from shutdown readback");
+                Check.That(c.Session.CleanupPending == restoreFails && p.Restores == 1, "first-cause capture does not change restoration");
+            }
+        }
+
+        private static void PelvisStableJoin()
+        {
+            var p = new PelvisPort { PreparationDependency = "STABLE_HIP_JOIN_GEOMETRY" }; var c = new PelvisTestCoordinator(p);
+            c.Start("b");
+            for (int n=1;n<=65;n++) c.OnFixed(RuntimeContracts.Step(n));
+            Check.That(c.Session.Pending && p.TraceStarts==0 && c.Session.WaitingFor=="STABLE_HIP_JOIN_GEOMETRY",
+                "stable join waiting cannot be cut short by the passive-solve timeout");
+            p.PreparationDependency="SETTLED_HIP_CONTACT_PREPARATION";
+            for (int n=66;n<=90;n++) c.OnFixed(RuntimeContracts.Step(n));
+            Check.That(c.Session.Pending && p.TraceStarts==0 && c.Session.WaitingFor=="SETTLED_HIP_CONTACT_PREPARATION",
+                "settled preparation is pending, never a formal run or passive timeout");
+            p.PreparationDependency=null; p.ReadyValue=true; c.OnFixed(RuntimeContracts.Step(91));
+            Check.That(c.Session.Started && p.TraceStarts==1,"qualified join starts once");
+            c.Stop("USER_STOP"); string saved=c.Session.CompletedSnapshot;
+            p.ReadyValue=false; p.PreparationDependency="STABLE_HIP_JOIN_GEOMETRY"; c.Start("b"); c.OnFixed(RuntimeContracts.Step(1)); c.Stop("USER_STOP");
+            Check.That(!c.Session.Started && c.Session.CompletedSnapshot==saved,"cancelled waiting preserves completed evidence");
+            p.PreparationDependency="SETTLED_HIP_CONTACT_PREPARATION"; c.Start("b");
+            c.OnFixed(RuntimeContracts.Step(1)); c.Stop("USER_STOP");
+            Check.That(!c.Session.Started && c.Session.CompletedSnapshot==saved && !c.Session.Active,
+                "cancelled native settling preserves completed evidence and releases session ownership");
+            p.GeometryRejects=true; c.Start("b"); c.OnFixed(RuntimeContracts.Step(1));
+            Check.That(c.Session.Phase==RunPhase.Rejected && p.AutomaticNotices==0,"qualification rejection remains NOT_STARTED");
+        }
+
         private static void AnkleLifecycle()
         {
             var p = new AnklePort(); var c = new AnkleTestCoordinator(p); c.Start("b");
@@ -75,6 +119,19 @@ namespace ARL.Contracts
             Check.That(c.Session.CompletedSnapshot == saved && c.Session.RejectedSnapshot != null && c.CompletedAudit == "audit", "rejected ankle setup preserves the completed audit");
             var blocked = new AnklePort { CleanupPendingValue = true }; c = new AnkleTestCoordinator(blocked); c.Start("b");
             Check.That(c.Session.RunId == 0 && !blocked.Calls.Contains("prepare"), "ankle cleanup debt blocks preparation");
+        }
+
+        private static void PelvisPreparationRejection()
+        {
+            var p = new PelvisPort { ReadyValue = true }; var c = new PelvisTestCoordinator(p);
+            c.Start("b"); c.Stop("USER_STOP"); string saved = c.Session.CompletedSnapshot;
+            p.ReadyValue = false; p.GeometryRejects = true; int traces = p.TraceStarts, restores = p.Restores;
+            c.Start("b"); c.OnFixed(RuntimeContracts.Step(1));
+            Check.That(c.Session.Phase == RunPhase.Rejected && !c.Session.Started, "invalid geometry never enters a formal run");
+            Check.That(p.TraceStarts == traces && p.Restores == restores + 1, "rejection restores once without starting trace");
+            Check.That(p.AutomaticNotices == 0 && p.LastStatus.Contains("NOT_STARTED"), "initial rejection has a distinct console notice");
+            Check.That(c.Session.CompletedSnapshot == saved && c.Session.RejectedSnapshot.Contains("INITIAL_GEOMETRY"), "rejection preserves previous completed evidence and its own cause");
+            c.Stop("USER_STOP"); Check.That(p.Restores == restores + 1, "user cleanup cannot duplicate rejection finalization");
         }
 
         private static void AnkleFaults()
@@ -96,10 +153,14 @@ namespace ARL.Contracts
         private sealed class PelvisPort : IPelvisRunPort
         {
             internal bool ReadyValue { get; set; }
+            public string PreparationDependency { get; set; }
             internal bool PrepareFails { get; set; }
             internal bool CaptureFails { get; set; }
             internal bool RestoreFails { get; set; }
             internal bool WriteFails { get; set; }
+            internal bool GeometryRejects { get; set; }
+            internal string HealthFailure { get; set; }
+            internal string LastStatus;
             internal bool CleanupPendingValue { get; set; }
             internal int TraceStarts, Restores, AutomaticNotices;
             internal readonly List<string> Calls = new List<string>();
@@ -110,9 +171,10 @@ namespace ARL.Contracts
             public string ResolveArm(string arm) => arm == "b" ? "B" : null;
             public string Preflight() => null;
             public void Prepare(string arm) { Calls.Add("prepare"); if (PrepareFails) throw new InvalidOperationException("prepare"); }
-            public void AdvancePreparation(PhysicsStepContext step) { }
-            public bool Healthy => true;
-            public string Issue => null;
+            public void AdvancePreparation(PhysicsStepContext step)
+            { if (GeometryRejects) throw new RunPreparationRejectedException("INITIAL_GEOMETRY"); }
+            public bool Healthy => HealthFailure == null;
+            public string Issue => HealthFailure;
             public bool Ready => ReadyValue;
             public bool Tracing { get; private set; }
             public string ReadinessSummary() => "ready=" + Ready;
@@ -126,7 +188,7 @@ namespace ARL.Contracts
             public void BeginNoticeSession(string stopCommand) { }
             public void AutomaticStop(string reason) { Calls.Add("notice"); AutomaticNotices++; }
             public void Emit(string text, bool warning, bool deferred) { }
-            public void ShowStarted(string text) { }
+            public void ShowStatus(string text) { LastStatus = text; }
             public void WriteReports() { if (WriteFails) throw new IOException("report"); }
         }
 

@@ -8,9 +8,82 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     internal sealed partial class FootAnkleProxyFoundation
     {
         private readonly FootGroundReference _groundReference = new FootGroundReference();
+        internal HipContactPreparationSample CaptureContactPreparation(PhysicsStepContext step, SourceStepContext source,
+            int supportId, Vector3 floorCenter, Vector3 floorHalf, InitialGeometryPreflight geometry)
+        {
+            HipContactPreparationSample result = new HipContactPreparationSample { Geometry = geometry };
+            if (!FreeSpaceNativeState(true) || _traceEnabled || !_report.RuntimeContext.Matches(step) ||
+                !_report.RuntimeSourceContext.Matches(source)) return result;
+            result.NativeOff = true;
+            result.IdentityQualified = supportId != 0 && _report.ContactIdentityCurrentQualified &&
+                _report.GroundColliderInstanceId == supportId && !_report.GroundColliderHasAttachedRigidbody;
+            Vector3 lowerAnchor = _lowerBody.transform.TransformPoint(_lowerAnkleAnchorLocal);
+            Vector3 footAnchor = _body.transform.TransformPoint(_footAnkleAnchorLocal);
+            var context = FootStanceOnlyAuthorizedContactLifecycle.CaptureEntryContext(_report.FixedUpdateSequence,
+                _body, lowerAnchor, _footAnkleAnchorLocal, _lowerBody.rotation * _sampledSourceRelative,
+                _sampledFootPosition, _sampledFootRotation, Vector3.Distance(lowerAnchor, footAnchor), geometry.SourceAge);
+            result.Motion = FootStanceOnlyAuthorizedContactLifecycle.CaptureEntryGeometryAt(
+                _collider, floorCenter, floorHalf, context, step.Dt).Motion;
+            return result;
+        }
         internal bool GroundReferenceEnabled => _groundReference.Enabled;
         internal bool GroundReferenceApplied => _groundReference.Apply;
         internal bool GroundReferencePartial => _groundReference.AllowPartial;
+        // Initial run qualification reads the same held source packet as the joined legs.
+        // It never modifies calibration, body pose, collider dimensions or controller goals.
+        internal InitialGeometryPreflight CaptureInitialGeometry(SourceStepContext source, float now,
+            Vector3 floorCenter, Vector3 floorHalf)
+        {
+            if (!IsBuilt || _lowerBody == null || _body == null) return default;
+            return CaptureInitialGeometryAt(source, now, floorCenter, floorHalf,
+                _lowerBody.position, _lowerBody.rotation, _body.position, _body.rotation);
+        }
+        internal InitialGeometryPreflight ProjectInitialGeometry(SourceStepContext source, float now,
+            Vector3 floorCenter, Vector3 floorHalf, Vector3 lower, Quaternion lowerRotation,
+            out Vector3 ankle, out Quaternion footRotation, out Vector3 rawFoot, out Quaternion rawFootRotation)
+        {
+            // Mirror the existing physical-parent initializer, including its origin placement.
+            // This is an expected initialized pose; the post-join native check remains mandatory.
+            ankle = lower + lowerRotation * _lowerAnkleAnchorLocal;
+            footRotation = lowerRotation * _sampledSourceRelative;
+            rawFoot = _sampledFootPosition; rawFootRotation = _sampledFootRotation;
+            return CaptureInitialGeometryAt(source, now, floorCenter, floorHalf, lower, lowerRotation, ankle, footRotation);
+        }
+        private InitialGeometryPreflight CaptureInitialGeometryAt(SourceStepContext source, float now,
+            Vector3 floorCenter, Vector3 floorHalf, Vector3 lower, Quaternion lowerRotation,
+            Vector3 actual, Quaternion actualRotation)
+        {
+            InitialGeometryPreflight result = default;
+            if (!IsBuilt || !_report.RuntimeSourceContext.Matches(source) || _lowerBody == null) return result;
+            Vector3 scale = _collider.transform.lossyScale, lowerScale = _lowerBody.transform.lossyScale;
+            if (!IsFinite(scale) || !IsFinite(lowerScale) || scale.x <= 0f || scale.y <= 0f || scale.z <= 0f ||
+                lowerScale.x <= 0f || lowerScale.y <= 0f || lowerScale.z <= 0f || !IsFinite(actual) || !IsFinite(lower) ||
+                !IsFinite(_sampledFootPosition) || !ValidSourceRotation(actualRotation) || !ValidSourceRotation(lowerRotation) ||
+                !ValidSourceRotation(_sampledFootRotation) || !ValidSourceRotation(_sampledSourceRelative)) return result;
+            Vector3 center = Vector3.Scale(_collider.center - _footAnkleAnchorLocal, scale);
+            Vector3 half = Vector3.Scale(_collider.size, scale) * .5f;
+            if (!IsFinite(center) || !IsFinite(half) || half.x <= 0f || half.y <= 0f || half.z <= 0f) return result;
+            Vector3 rawAnkle = _sampledFootPosition + _sampledFootRotation * Vector3.Scale(_footAnkleAnchorLocal, scale);
+            Vector3 controlAnkle = lower + lowerRotation * Vector3.Scale(_lowerAnkleAnchorLocal, lowerScale);
+            Vector3 actualAnkle = actual + actualRotation * Vector3.Scale(_footAnkleAnchorLocal, scale);
+            Quaternion controlRotation = lowerRotation * _sampledSourceRelative;
+            float top = floorCenter.y + floorHalf.y;
+            float age = now - source.Time;
+            if (!IsFinite(age)) return result;
+            result.Valid = source.Valid;
+            result.Calibrated = _report.SupportPlaneCalibrationApplied;
+            // Match the existing leg/Foot age convention. FixedUpdate's unscaled
+            // clock is phase-specific; a negative phase offset is not a new sample
+            // or proof of a reversed source stream. Identity is checked separately.
+            result.SourceAge = Mathf.Max(0f, age);
+            result.RawMin = FootBoxGeometry.Minimum(rawAnkle, _sampledFootRotation, center, half) - top;
+            result.ControlMin = FootBoxGeometry.Minimum(controlAnkle, controlRotation, center, half) - top;
+            result.ActualMin = FootBoxGeometry.Minimum(actualAnkle, actualRotation, center, half) - top;
+            result.FootprintsInside = FootBoxGeometry.Inside(rawAnkle, _sampledFootRotation, center, half, floorCenter, floorHalf) &&
+                FootBoxGeometry.Inside(controlAnkle, controlRotation, center, half, floorCenter, floorHalf) &&
+                FootBoxGeometry.Inside(actualAnkle, actualRotation, center, half, floorCenter, floorHalf);
+            return result;
+        }
         internal bool LandingReferenceCaptureRequested => _traceEnabled && _stanceContactLifecycle.ContinuousEntry &&
             !_contactShadow.Active && _stanceContactLifecycle.EntryHistoryAvailable;
 
@@ -32,37 +105,5 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             catch { return default; } // Optional read failure cannot interrupt contact or control.
         }
 
-        // One input per genuine shared Render packet, then the existing planner owns R/W/A.
-        // Read current native Lower pose in this Render sample; no cached Fixed pose is labelled current.
-        private void PrepareGroundReferenceInput(SourceStepContext source, Quaternion raw, Vector3 rawW, float dt,
-            out Quaternion goal, out Vector3 goalW)
-        {
-            goal = raw; goalW = rawW;
-            if (!_groundReference.Enabled || !_ankleDrive.DynamicActive || !_relativeReference.Active) return;
-            if (_groundReference.TryHold(source, raw, rawW, out goal, out goalW)) return;
-            FootGroundReference.GroundSample candidate = new FootGroundReference.GroundSample { Reason = "CONTROLLED_SUPPORT_UNAVAILABLE", Goal = raw };
-            try
-            {
-                if (_supportSurface != null && _supportSurface.TryGetEntryBox(_supportSurface.SelectedId, out Vector3 floorCenter, out Vector3 floorHalf))
-                {
-                    Vector3 scale = _collider.transform.lossyScale;
-                    Vector3 lowerScale = _lowerBody.transform.lossyScale;
-                    if (IsFinite(scale) && scale.x > 0f && scale.y > 0f && scale.z > 0f &&
-                        IsFinite(lowerScale) && lowerScale.x > 0f && lowerScale.y > 0f && lowerScale.z > 0f)
-                    {
-                        Quaternion lower = _lowerBody.rotation;
-                        // Position and rotation from the same Rigidbody pose; do not mix in a render Transform pose.
-                        Vector3 ankle = _lowerBody.position + lower * Vector3.Scale(_lowerAnkleAnchorLocal, lowerScale);
-                        candidate = FootGroundReference.Evaluate(ankle, lower, raw, _bindSourceRelative,
-                            Vector3.Scale(_collider.center - _footAnkleAnchorLocal, scale),
-                            Vector3.Scale(_collider.size, scale) * 0.5f, floorCenter, floorHalf, _groundReference.AllowPartial);
-                    }
-                }
-            }
-            catch (Exception) { candidate.Reason = "NATIVE_GEOMETRY_UNAVAILABLE"; }
-            // Unavailable geometry only removes the optional goal. The existing native support,
-            // body and clock contracts still independently fail-close before physical writes.
-            _groundReference.ObserveRender(_traceEnabled, source, raw, rawW, dt, candidate, out goal, out goalW);
-        }
     }
 }

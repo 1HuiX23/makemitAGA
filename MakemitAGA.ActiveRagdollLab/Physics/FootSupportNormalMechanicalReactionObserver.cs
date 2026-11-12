@@ -1001,6 +1001,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             string message = "[ARL][SUPPORT_NORMAL_INVALID_EPISODE_V0432] side=" + side +
                              " | close=" + Clean(closeReason) +
                              " | episode=" + _activeInvalidEpisode.EpisodeIndex +
+                             " | evidence=PROBE_GEOMETRY_AND_AUTHORIZED_CALLBACK_NOT_CONTACT_ABSENCE" +
+                             " | clearanceMeaning=ABS_PROBE_DISTANCE_TO_SURFACE_NOT_PENETRATION" +
                              " | first={" + FormatProbeSample(_activeInvalidEpisode.First) + "}" +
                              " | peakSpread={" + FormatProbeSample(_activeInvalidEpisode.PeakSpread) + "}" +
                              " | last={" + FormatProbeSample(_activeInvalidEpisode.Last) + "}" +

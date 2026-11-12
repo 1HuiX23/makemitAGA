@@ -25,7 +25,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal const string IdleArm = "IDLE_V04410_NO_SUPPORT_OVERRIDE";
         internal const string CallbackSide = "V04410_SUPPORT_BOX";
         internal const float ThicknessMeters = 0.30f;
-        internal const float PlaneToleranceMeters = 0.0002f;
+        internal const float PlaneToleranceMeters = FootBoxGeometry.SupportPlaneToleranceMeters;
         internal const int MinPairSamples = 50;
 
         private readonly List<Collider> _others = new List<Collider>();
@@ -53,6 +53,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal string InvalidReason => _reason;
         internal Collider SelectedCollider => _arm == ArmB ? _box : _original;
         internal int SelectedId => _selectedId;
+        internal int OriginalId => _originalId;
         internal bool ExposureReady => _finite && _pairLeft >= MinPairSamples && _pairRight >= MinPairSamples &&
             _probeMatches > 0 && (_arm != ArmB || (_boxLeftCallbacks > 0 && _boxRightCallbacks > 0));
         internal bool TryGetEntryBox(int identity, out Vector3 center, out Vector3 half)
@@ -94,22 +95,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     (original.TryCast<MeshCollider>() != null ? "MeshCollider" : original.GetType().Name);
                 _originalPosition = original.transform.position; _originalRotation = original.transform.rotation;
                 _originalScale = original.transform.lossyScale;
-                Bounds bounds = original.bounds;
+                Vector3 midpoint = (left.transform.position + right.transform.position) * .5f;
+                if (!TryReadFloorBox(original, midpoint, out Bounds bounds, out Ray ray,
+                    out float setupDistance, out RaycastHit hit, out error)) return Fail(error, out error);
                 _boundsCenter = bounds.center; _boundsExtents = bounds.extents;
                 _layer = original.gameObject.layer; _material = original.sharedMaterial; _offset = original.contactOffset;
-                if (!FiniteVector(_boundsCenter) || !FiniteVector(_boundsExtents) ||
-                    _boundsExtents.x < 0.5f || _boundsExtents.z < 0.5f || _boundsExtents.x > 20f || _boundsExtents.z > 20f ||
-                    !FiniteFloat(_offset) || _offset <= 0f)
-                    return Fail("ORIGINAL_FLOOR_BOUNDS_OR_OFFSET_INVALID", out error);
-                Vector3 center = (left.transform.position + right.transform.position) * 0.5f;
-                Ray ray = new Ray(new Vector3(center.x, bounds.max.y + 1f, center.z), Vector3.down);
-                float setupDistance = 2f + bounds.size.y;
-                if (!FiniteFloat(setupDistance) || setupDistance <= 0f ||
-                    !original.Raycast(ray, out RaycastHit hit, setupDistance) || InvalidHitPredicate(hit) != null ||
-                    hit.distance > setupDistance || !Horizontal(hit.normal))
-                    return Fail("REQUIRES_HORIZONTAL_ORIGINAL_FLOOR", out error);
                 _height = hit.point.y;
-                if (!FiniteFloat(_height)) return Fail("NONFINITE_SUPPORT_HEIGHT", out error);
                 _boxSize = new Vector3(bounds.size.x, ThicknessMeters, bounds.size.z);
                 _boxPosition = new Vector3(bounds.center.x, _height - ThicknessMeters * 0.5f, bounds.center.z);
                 if (arm == ArmB)
@@ -147,6 +138,44 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 return Validate(out error);
             }
             catch (Exception e) { return Fail("SUPPORT_SETUP_EXCEPTION:" + e.GetType().Name + ":" + e.Message, out error); }
+        }
+
+        // Startup-only preview of the SAME floor/Box construction below. No Box is
+        // created, no collision isolation or contact authority is changed while waiting.
+        internal static bool TryPreviewEntryBox(Collider original, Collider other, Collider left, Collider right,
+            FootAnkleFoundationReport leftReport, FootAnkleFoundationReport rightReport,
+            out int id, out Vector3 center, out Vector3 half, out string reason)
+        {
+            id = 0; center = half = Vector3.zero; reason = "WAIT_QUALIFIED_FLOOR";
+            if (original == null || other != original || left == null || right == null || left == right ||
+                left.enabled || right.enabled || !ProbeReady(leftReport) || !ProbeReady(rightReport)) return false;
+            int identity = original.GetInstanceID();
+            if (leftReport.GroundColliderInstanceId != identity || rightReport.GroundColliderInstanceId != identity) return false;
+            if (!TryReadFloorBox(original, (left.transform.position + right.transform.position) * .5f,
+                out Bounds bounds, out Ray ray, out float distance, out RaycastHit hit, out reason)) return false;
+            id = identity;
+            center = new Vector3(bounds.center.x, hit.point.y - ThicknessMeters*.5f, bounds.center.z);
+            half = new Vector3(bounds.extents.x, ThicknessMeters*.5f, bounds.extents.z);
+            return true;
+        }
+        private static bool TryReadFloorBox(Collider original, Vector3 midpoint, out Bounds bounds,
+            out Ray ray, out float distance, out RaycastHit hit, out string reason)
+        {
+            bounds = default; ray = default; distance = 0f; hit = default; reason = null;
+            if (!original.enabled || !original.gameObject.activeInHierarchy || original.isTrigger || original.attachedRigidbody != null)
+            { reason = "ORIGINAL_SUPPORT_NOT_ACTIVE_STATIC_SOLID"; return false; }
+            bounds = original.bounds; float offset = original.contactOffset;
+            if (!FiniteVector(midpoint) || !FiniteVector(bounds.center) || !FiniteVector(bounds.extents) ||
+                bounds.extents.x < .5f || bounds.extents.z < .5f || bounds.extents.x > 20f || bounds.extents.z > 20f ||
+                !FiniteFloat(offset) || offset <= 0f)
+            { reason = "ORIGINAL_FLOOR_BOUNDS_OR_OFFSET_INVALID"; return false; }
+            ray = new Ray(new Vector3(midpoint.x, bounds.max.y + 1f, midpoint.z), Vector3.down);
+            distance = 2f + bounds.size.y;
+            if (!FiniteFloat(distance) || distance <= 0f || !original.Raycast(ray, out hit, distance) ||
+                InvalidHitPredicate(hit) != null || hit.distance > distance || !Horizontal(hit.normal))
+            { reason = "REQUIRES_HORIZONTAL_ORIGINAL_FLOOR"; return false; }
+            if (!FiniteFloat(hit.point.y)) { reason = "NONFINITE_SUPPORT_HEIGHT"; return false; }
+            return true;
         }
 
         // Reuse the contact stack's existing scene inventory. No new periodic global enumeration.

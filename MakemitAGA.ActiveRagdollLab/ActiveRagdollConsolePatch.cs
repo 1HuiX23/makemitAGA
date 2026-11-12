@@ -340,6 +340,11 @@ namespace MakemitAGA.ActiveRagdollLab
 
         private static void RunTestSetupBundle(bool torsoOnly = false)
         {
+            if (ActiveRagdollLabRuntime.FoundationSetupPending)
+            {
+                PrintGame("ARL [SETUP_PENDING] " + ActiveRagdollLabRuntime.FoundationSetupStatus() + " | 取消等待用arl_test_cleanup。");
+                return;
+            }
             string profile = ActiveRagdollLabRuntime.GetProfileStatus();
             LogTestBundleItem("SETUP", "PROFILE", profile);
             string audit = ActiveRagdollLabRuntime.Audit(null);
@@ -350,6 +355,16 @@ namespace MakemitAGA.ActiveRagdollLab
                 return;
             }
 
+            if (!torsoOnly && ActiveRagdollLabRuntime.UsesStableFoundationSetup)
+            {
+                PrintGame(ActiveRagdollLabRuntime.RequestStableFoundationSetup(() => CompleteTestSetupBundle(false)));
+                return;
+            }
+            CompleteTestSetupBundle(torsoOnly);
+        }
+
+        private static void CompleteTestSetupBundle(bool torsoOnly)
+        {
             string build = torsoOnly ? ActiveRagdollLabRuntime.BuildPelvisTestFoundation() : ActiveRagdollLabRuntime.Build(null);
             LogTestBundleItem("SETUP", "BUILD", build);
             if (!ActiveRagdollLabRuntime.IsBuilt)
@@ -371,12 +386,13 @@ namespace MakemitAGA.ActiveRagdollLab
             }
             PrintGame(torsoOnly
                 ? "<color=#9fe7ff><b>arl_pelvis_test_setup 完成</b></color>：仅创建Pelvis与Chest及两体CharacterJoint，无腿/足刚体或关节。双侧Hip源引用已解析；下一步arl_pelvis_test(b)，无需PCA/drive/Hip stack。"
-                : "<color=#9fe7ff><b>arl_test_setup 完成</b></color>：profile / audit / build / colliders OFF / gravity OFF / trace OFF 已一次执行。" + ActiveRagdollLabRuntime.StartPelvisHipTest());
+                : "<color=#9fe7ff><b>arl_test_setup [SETUP_READY]</b></color>：建模及安全状态完成，可继续drive/PCA。" + ActiveRagdollLabRuntime.StartPelvisHipTest());
         }
 
         private static void RunTestStatusBundle(bool detailed = false)
         {
             Plugin.Logger?.LogInfo((detailed ? "[ARL][TEST_REPORT_SNAPSHOT]\n" : "[ARL][TEST_STATUS_SUMMARY]\n") + ActiveRagdollLabRuntime.GetMaintenanceStatusSnapshot(detailed));
+            PrintGame(ActiveRagdollLabRuntime.FoundationSetupStatus());
             PrintGame(ActiveRagdollLabRuntime.GetAutomaticStopGameStatus());
             if (ActiveRagdollLabRuntime.PelvisStatusIsCurrentScope)
                 PrintGame(ActiveRagdollLabRuntime.GetPelvisTestStatus(false).Split('\n')[0]);
@@ -430,7 +446,7 @@ namespace MakemitAGA.ActiveRagdollLab
 
         private static void PrintHelp()
         {
-            PrintGame("<b>MakemitAGA Active Ragdoll Lab v0.4.119</b>\n" +
+            PrintGame("<b>MakemitAGA Active Ragdoll Lab v0.4.128</b>\n" +
                 "arl_test_setup / arl_pelvis_hip_test(a|b|stop) / arl_test_status / arl_test_cleanup\n" +
                 "arl_test_report（仅需重新展开完整诊断时使用）\n" +
                 ActiveRagdollLabRuntime.StartPelvisHipTest() + "\nUpper只读审计回归arl_pelvis_upper_load_test(b|stop)，膝部法向耦合回归arl_pelvis_knee_test(b|stop)，小腿自重回归arl_pelvis_lower_load_test(b|stop)，Foot自重对照arl_pelvis_foot_load_test(b|stop)，无载荷接触对照arl_pelvis_contact_test(b|stop)，无接触对照arl_pelvis_leg_test(a|b|stop)。\n旧腿足承重回归arl_ankle_test(b|stop)；既有Upper自重OFF对照仍接受a。\n\n" +

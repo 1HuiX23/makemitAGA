@@ -11,15 +11,15 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         // Ordinary entry stays at 2 mm. Recovery's 3 mm / 150 ms are experimental, not a safety certification.
         // No pose correction, force, new raycast or authority outside confirmed strong STANCE.
         internal const float ContinuousIdentityHoldSeconds = FootGameNativeLocomotionPhaseObserver.PhaseConfirmSeconds;
-        internal const float MaxEntryPenetrationMeters = 0.002f;
-        internal const float MaxEntryGapMeters = 0.025f;
-        internal const float RecoveryMaxPenetrationMeters = 0.003f;
-        internal const float RecoveryHoldSeconds = 0.15f;
-        internal const float RecoveryMaxCornerNormalSpeed = 0.03f;
-        internal const float RecoveryMaxPlanarSpeed = 0.05f;
-        internal const float RecoveryMaxAngularSpeed = 0.5f;
-        internal const float RecoveryMaxAnchorGapMeters = 0.005f;
-        internal const float RecoveryMaxSourceAgeSeconds = 0.1f;
+        internal const float MaxEntryPenetrationMeters = FootContactGeometryLimits.OrdinaryPenetrationMeters;
+        internal const float MaxEntryGapMeters = FootContactGeometryLimits.RecoveryMaxGapMeters;
+        internal const float RecoveryMaxPenetrationMeters = FootContactGeometryLimits.RecoveryPenetrationMeters;
+        internal const float RecoveryHoldSeconds = FootContactGeometryLimits.RecoveryHoldSeconds;
+        internal const float RecoveryMaxCornerNormalSpeed = FootContactGeometryLimits.RecoveryMaxCornerNormalSpeed;
+        internal const float RecoveryMaxPlanarSpeed = FootContactGeometryLimits.RecoveryMaxPlanarSpeed;
+        internal const float RecoveryMaxAngularSpeed = FootContactGeometryLimits.RecoveryMaxAngularSpeed;
+        internal const float RecoveryMaxAnchorGapMeters = FootContactGeometryLimits.RecoveryMaxAnchorGapMeters;
+        internal const float RecoveryMaxSourceAgeSeconds = FootContactGeometryLimits.RecoveryMaxSourceAgeSeconds;
         private const int MaxMissedEntryLogs = 8;
         private bool _continuousEntry, _entryRecovery;
         private bool _entryWindowMissed, _entryMissCounted, _entryTraceContinuous, _entryTraceRecovery;
@@ -79,6 +79,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             internal EntryReferenceGeometry ReferencePath;
             internal FootGroundReference.GroundSample LandingGoal;
             internal FootLandingReferenceEvidence.LandingPath LandingPath;
+            internal PelvisNormalResponseEvidence ReceiverNormalResponse;
+            internal FootContactMotion Motion => new FootContactMotion
+            {
+                Valid = Valid && MotionValid, FullFootprint = FullFootprint,
+                Min = MinClearance, PredictedMin = PredictedMinClearance, CornerNormalSpeed = MaxCornerNormalSpeed,
+                PlanarSpeed = PlanarSpeed, AngularSpeed = AngularSpeed, AnchorGap = AnchorGap, SourceAge = SourceAge
+            };
         }
 
         internal struct EntryContext
@@ -97,6 +104,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             internal Quaternion RawAtLowerRotation;
             internal FootGroundReference.GroundSample LandingGoal;
             internal FootLandingReferenceEvidence.LandingPath LandingPath;
+            internal PelvisNormalResponseEvidence ReceiverNormalResponse;
         }
 
         // Read actual COM kinematics once; the same eight corners supply motion and signed clearance.
@@ -136,15 +144,33 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal static EntryGeometry CaptureEntryGeometry(BoxCollider foot, FootSupportSurfaceIsolation support, int identity,
             EntryContext context = default, float dt = 0f)
         {
-            EntryGeometry g = new EntryGeometry
-            {
-                Issue = "CONTROLLED_BOX_REQUIRED", LandingGoal = context.LandingGoal, LandingPath = context.LandingPath,
-                SourcePhase = context.SourcePhase, SourceFresh = context.SourceFresh,
-                SourceHeldDepth = context.SourceHeldDepth, SourceDt = context.SourceDt
-            };
+            EntryGeometry rejected = EntryGeometryContext(context);
             try
             {
-                if (foot == null || support == null || !support.TryGetEntryBox(identity, out Vector3 center, out Vector3 half)) return g;
+                if (foot != null && support != null && support.TryGetEntryBox(identity, out Vector3 center, out Vector3 half))
+                    return CaptureEntryGeometryAt(foot, center, half, context, dt);
+                return rejected;
+            }
+            catch (Exception e) { rejected.Issue = "ENTRY_GEOMETRY_READ:" + e.GetType().Name; return rejected; }
+        }
+
+        private static EntryGeometry EntryGeometryContext(EntryContext context) => new EntryGeometry
+        {
+            Issue = "CONTROLLED_BOX_REQUIRED", LandingGoal = context.LandingGoal, LandingPath = context.LandingPath,
+            SourcePhase = context.SourcePhase, SourceFresh = context.SourceFresh,
+            ReceiverNormalResponse = context.ReceiverNormalResponse,
+            SourceHeldDepth = context.SourceHeldDepth, SourceDt = context.SourceDt
+        };
+
+        // Shared eight-corner readback. Startup supplies the pinned original-floor Box
+        // preview; runtime still requires TryGetEntryBox above and owns all contact authority.
+        internal static EntryGeometry CaptureEntryGeometryAt(BoxCollider foot, Vector3 center, Vector3 half,
+            EntryContext context, float dt)
+        {
+            EntryGeometry g = EntryGeometryContext(context);
+            try
+            {
+                if (foot == null || !FiniteVector(center) || !FiniteVector(half) || half.x <= 0f || half.y <= 0f || half.z <= 0f) return g;
                 g.LandingPath.SupportTop = center.y + half.y;
                 g.LandingPath.Valid &= IsFinite(g.LandingPath.SupportTop);
                 Vector3 size = foot.size, localCenter = foot.center;
@@ -271,12 +297,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             EntryGeometry g = _entryGeometry;
             // One-step constant-point-velocity projection is a conservative admission screen, NOT a solver prediction.
             // Body quietness is physical: a stationary animation cannot stand in for a moving Foot.
-            bool ready = confirmedStance && _entryMissCounted && legacyGeometryReady && g.Valid && g.FullFootprint &&
-                g.MotionValid && g.SourceAge <= RecoveryMaxSourceAgeSeconds && g.AnchorGap <= RecoveryMaxAnchorGapMeters &&
-                g.MinClearance >= -RecoveryMaxPenetrationMeters && g.MinClearance <= MaxEntryGapMeters &&
-                g.PredictedMinClearance >= -RecoveryMaxPenetrationMeters &&
-                g.MaxCornerNormalSpeed <= RecoveryMaxCornerNormalSpeed && g.PlanarSpeed <= RecoveryMaxPlanarSpeed &&
-                g.AngularSpeed <= RecoveryMaxAngularSpeed;
+            bool ready = confirmedStance && _entryMissCounted && legacyGeometryReady && g.Motion.QuietIssue == null;
             if (!ready)
             {
                 _entryRecoveryRejectSamples++;

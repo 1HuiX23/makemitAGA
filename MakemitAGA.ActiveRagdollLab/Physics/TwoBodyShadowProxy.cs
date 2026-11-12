@@ -294,8 +294,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal PelvisReceiverReport PelvisReceiver => _pelvisReceiver.Report;
         internal PelvisReceiverControlStatus PelvisReceiverControl => _pelvisReceiver.ControlStatus;
         internal PelvisHipAttitudeCommand HipAttitudeCommand => _pelvisReceiver.HipAttitudeCommand;
+        internal string HipCompletionIssue => _pelvisReceiver.HipCompletionIssue;
         internal bool CompleteHipTranslationReaction(PhysicsStepContext step, HipAnchorPairReport left, HipAnchorPairReport right) =>
-            _runtimeStep.Matches(step) && _legParentCommand.Matches(step) && _pelvisReceiver.CompleteHipTranslationReaction(step, left, right);
+            _runtimeStep.Matches(step) && _legParentCommand.Matches(step)
+                ? _pelvisReceiver.CompleteHipTranslationReaction(step, left, right)
+                : _pelvisReceiver.RejectHipCompletion("PROXY_PARENT_OR_SHARED_STEP_CONTEXT");
         internal bool DynamicPelvisReceiverSelected => _pelvisReceiver.DynamicSelected;
         private string CurrentParentTranslationReference => DynamicPelvisReceiverSelected ? "TWO_BODY_COMMON_COM_PD" : ParentFeedforwardReferencePoseBridge;
         internal bool PelvisReceiverReady => _pelvisReceiver.ReadyForRun;
@@ -771,7 +774,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             }
         }
 
-        public void FixedUpdate(PhysicsStepContext step)
+        public void FixedUpdate(PhysicsStepContext step, SupportReferenceContext support = default)
         {
             _contextCursor.AcceptFixed(step);
             _legParentCommand = new LegParentCommandFrame();
@@ -780,7 +783,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             try
             {
                 _fixedUpdateStage = "CONTEXT_ACCEPTED";
-                FixedUpdateCore();
+                FixedUpdateCore(support);
                 if (_fixedUpdateStage == "COMPLETE" && IsBuilt && _sampleValid && _controlState.FiniteState && _driveEnabled &&
                     (!DynamicPelvisReceiverSelected || _pelvisReceiver.ReadyForRun))
                 {
@@ -804,7 +807,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             finally { _insideRuntimeStep = false; }
         }
 
-        private void FixedUpdateCore()
+        private void FixedUpdateCore(SupportReferenceContext support)
         {
             _pelvisLegReference.Invalidate();
             if (!IsBuilt)
@@ -872,7 +875,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 };
                 _fixedUpdateStage = "RECEIVER_REFERENCE";
                 if (DynamicPelvisReceiverSelected && _driveEnabled) _pelvisLegReference.BeginStep(_runtimeStep);
-                var controlReceiverReference = _pelvisReceiver.BuildControlReference(rawReceiverReference, PhysicsDt, _runtimeStep);
+                var controlReceiverReference = _pelvisReceiver.BuildControlReference(rawReceiverReference, PhysicsDt, _runtimeStep, support, _sampledPelvisPosition.y);
                 PelvisReceiverReport.TrackingFrame receiverTracking = _pelvisReceiver.CaptureTracking(_traceEnabled,
                     controlReceiverReference.PelvisPosition, controlReceiverReference.PelvisRotation,
                     controlReceiverReference.PelvisVelocity, controlReceiverReference.PelvisW,

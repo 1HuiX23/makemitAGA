@@ -1,6 +1,6 @@
-# MakemitAGA Active Ragdoll Lab 0.4.119 - Full Stance Load Admission A/B
+﻿# MakemitAGA Active Ragdoll Lab 0.4.125 - Bounded Knee Ground Target A/B
 # 保存后执行：arl_profile_reload
-# 当前主线：v0.4.119 arl_pelvis_hip_test(a|b)，各自重启。共同背景为118 B连续Knee相对R/W/A、受限规划A及相同Foot完整/合法部分减穿透参考。A_V041190_DIRECT_STANCE_LOAD直接接入整链载荷；B_V041190_NEAR_SURFACE_LOAD_ADMISSION在原授权接触成立后，以实际Box及当前点速度预测一拍最低点均[-3,+2]mm、完整足印、踝间隙<=5mm、源龄<=100ms连续2个共享Fixed准入。无超时放行；接触资格中断或支持物改变后重置。Foot/Lower/Upper重力、自重传递、Knee法向耦合同用一个资格，不做Foot单独承重或力坡道。双侧kneeReference及kneePlannedFF均True，loadAdmission为A=False/False、B=True/True。原2mm入口、3mm/150ms恢复、30mm安全线和原控制上限不变。日志记录等待/准入及原有实际承重曝光；不能以卸载换取通过。Torso重量、Foot-tether reciprocal与GSP仍OFF。
+# 当前主线：arl_pelvis_hip_test(a|b)，各自重启。同用124 B法向COM反馈40/12.727922及匹配缺口回算，原参考/施力预算和承重门不变。A_V041250_RAW_KNEE_GROUND_TARGET只观察膝部候选，B_V041250_BOUNDED_KNEE_GROUND_TARGET在新鲜强落脚/支撑见证下选用≤5度的合法屈曲几何输入，再由原Knee参考生成R/W/A；不改源动画/刚体姿态，不授予接触权限。kneeGroundTarget双侧A=False:False、B=True:True。R2启动准备raw/control/actual最低点≥-3mm；2至3mm区间只允许无接触、无载荷准备，普通接触2mm与受限恢复3mm不变。arl_test_setup等待SETUP_READY后再drive/PCA；WAIT_INITIAL_GEOMETRY等待预计姿态稳定，WAIT_SETTLED_GEOMETRY等待实际刚体安静稳定，看到STARTED后才计时。Torso重量、Foot-tether reciprocal及GSP仍OFF。
 # 本文件只保留仍由活动运行时消费的配置；历史实验参数与 A/B 细节请查长期版本记录或旧版本 ZIP。
 
 # --- 目标与 Two-Body 几何 ---

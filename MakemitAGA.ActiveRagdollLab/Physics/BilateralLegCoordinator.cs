@@ -425,7 +425,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     FailCloseStanceContactIsolation("HIP_BILATERAL_FORCE_COMPLETION_FAILED:" +
                         (_primary.HipAnchorPair.Issue ?? (_secondary?.HipAnchorPair.Issue) ?? "INPUT_OR_CLOCK"));
                 else if (!_torso.CompleteHipTranslationReaction(step, _primary.HipAnchorPair, _secondary.HipAnchorPair))
-                    FailCloseStanceContactIsolation("HIP_PAIR_RECEIVER_ATTITUDE_COMPLETION_FAILED");
+                    FailCloseStanceContactIsolation("HIP_PAIR_RECEIVER_ATTITUDE_COMPLETION_FAILED:" + (_torso.HipCompletionIssue ?? "UNKNOWN"));
                 else if (!_primary.CompleteHipControllerStep(step) || !_secondary.CompleteHipControllerStep(step))
                     FailCloseStanceContactIsolation("HIP_CONTROLLER_CONTINUATION_FAILED");
                 else
@@ -435,6 +435,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     // and cannot become a second owner or a readiness/safety prerequisite.
                     _primary.CompleteHipPointResponse(step, _secondary.HipAnchorPair);
                     _secondary.CompleteHipPointResponse(step, _primary.HipAnchorPair);
+                    if (string.Equals(PrimarySide, "LEFT", StringComparison.OrdinalIgnoreCase))
+                        _primary.ObserveHipAllocation(step, _secondary);
+                    else
+                        _secondary.ObserveHipAllocation(step, _primary);
                 }
             }
             if (_traceEnabled)
@@ -476,6 +480,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         public string SetDrive(bool enabled)
         {
+            if (!enabled) CancelHipJoinPreparation("CANCELLED_BY_SAFE_OFF");
             // OFF is a cleanup operation and must remain available even if a historical/exceptional half-built
             // coordinator has lost one child. ON still requires the complete bilateral foundation.
             if (!enabled)

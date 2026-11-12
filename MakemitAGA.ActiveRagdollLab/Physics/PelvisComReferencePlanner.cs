@@ -11,7 +11,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal const float MaxV = 3f, MaxA = 6f;
         internal struct ComPlan
         {
+            internal SupportReferenceContext SupportInput;
+            internal bool SupportFloorSelected;
+            internal bool SupportNormalPrioritySelected, SupportTangentBrakingPreserved;
+            internal float SupportFloorY, NominalCandidateY, SupportCandidateDeltaY, SupportRemainingUnderY;
+            internal float SupportPriorityExtraY, SupportTangentDeltaV, SupportCandidateUnderY;
             internal bool ArrivalEnabled, FeedbackEnabled, FeedbackAvailable, SpeedLimited, AccelerationLimited, PhysicalBrakeProtected;
+            internal bool EnhancedNormalFeedback;
             internal Vector3 Position, Velocity, Acceleration, CandidateA;
             internal Vector3 RelativeV, StoppingOffset, ArrivalError, PreviousRequestA, PreviousAllocatedA;
             internal Vector3 SettledVelocity;
@@ -19,11 +25,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         }
 
         internal static ComPlan Build(Vector3 position, Vector3 velocity, Vector3 goal, Vector3 goalV,
-            float dt, bool arrival, bool feedback, Vector3 previousRequest, Vector3 previousAllocated, Vector3 settledV, bool feedbackEnabled)
+            float dt, bool arrival, bool feedback, Vector3 previousRequest, Vector3 previousAllocated, Vector3 settledV, bool feedbackEnabled, SupportReferenceContext support = default,
+            bool supportFloor = false, float supportFloorY = 0f, bool supportNormalPriority = false, bool enhancedNormalFeedback = false)
         {
             if (!F(dt) || dt <= 0f || !V(position) || !V(velocity) || !V(goal) || !V(goalV) ||
                 velocity.magnitude > MaxV + 0.001f || (arrival && !V(settledV)) ||
-                (feedback && (!arrival || !V(previousRequest) || !V(previousAllocated))))
+                (feedback && (!arrival || !V(previousRequest) || !V(previousAllocated))) || (enhancedNormalFeedback && !arrival))
                 throw new InvalidOperationException("COM_REFERENCE_PLANNER_INPUT_INVALID");
             // Incoming goal already denotes this Fixed step: keep the original
             // goal-V prediction, so a constant moving target does not gain v*dt lead.
@@ -44,6 +51,22 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             Vector3 limitedV = Vector3.ClampMagnitude(desiredV, MaxV);
             Vector3 deltaV = limitedV - velocity;
             Vector3 candidateV = Vector3.ClampMagnitude(velocity + Vector3.ClampMagnitude(deltaV, MaxA * dt), MaxV);
+            float nominalCandidateY = candidateV.y;
+            float priorityExtraY = 0f, tangentDeltaV = 0f;
+            bool tangentBrakingPreserved = false;
+            if (supportFloor)
+            {
+                if (!arrival || !support.Matches(support.ForStep) || support.ForStep.Dt != dt)
+                    throw new InvalidOperationException("SUPPORT_REFERENCE_CONTEXT_INVALID");
+                Vector3 remainder = SupportNormalReference.RaiseCandidate(position, velocity, candidateV, supportFloorY, dt, MaxV, MaxA);
+                candidateV = supportNormalPriority ? SupportNormalReference.AllocateNormalPriority(position, velocity, candidateV,
+                    supportFloorY, dt, MaxV, MaxA, out tangentBrakingPreserved) : remainder;
+                priorityExtraY = candidateV.y - remainder.y;
+                tangentDeltaV = new Vector3(candidateV.x - remainder.x, 0f, candidateV.z - remainder.z).magnitude;
+            }
+            // Preserve the original deficit/braking policy AFTER candidate shaping.
+            // Any remaining undershoot is evidence, never permission to snap or raise a cap.
+            float supportCandidateDeltaY = candidateV.y - nominalCandidateY;
             Vector3 candidateA = (candidateV - velocity) / dt;
             Vector3 nextV = candidateV;
             float proposed = 0f, removed = 0f;
@@ -65,9 +88,21 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 if (magnitude > 0.000001f)
                 {
                     Vector3 axis = deficit / magnitude;
-                    float sensitivity = 1f + PelvisHipCommandFrame.VelocityGain * dt + PelvisHipCommandFrame.PositionGain * dt * dt;
+                    float sensitivity = PelvisComFeedback.Sensitivity(dt, false);
+                    float referenceDeficitMagnitude = magnitude / sensitivity;
+                    if (enhancedNormalFeedback)
+                    {
+                        // B has a different normal sensitivity. Invert it per axis
+                        // BEFORE the original direction/braking tests and bounded removal.
+                        // A retains the original arithmetic and all other scopes stay A.
+                        Vector3 referenceDeficit = PelvisComFeedback.ReferenceDeficit(deficit, dt, true);
+                        referenceDeficitMagnitude = referenceDeficit.magnitude;
+                        if (!V(referenceDeficit) || !F(referenceDeficitMagnitude) || referenceDeficitMagnitude <= 0f)
+                            throw new InvalidOperationException("COM_REFERENCE_DEFICIT_MAP_INVALID");
+                        axis = referenceDeficit / referenceDeficitMagnitude;
+                    }
                     proposed = Vector3.Dot(velocity, axis) >= 0f ?
-                        Mathf.Min(Mathf.Max(0f, Vector3.Dot(candidateA, axis)), magnitude / sensitivity) : 0f;
+                        Mathf.Min(Mathf.Max(0f, Vector3.Dot(candidateA, axis)), referenceDeficitMagnitude) : 0f;
                     physicalBrakeProtected = proposed > 0f && Vector3.Dot(settledV, axis) < 0f;
                     removed = physicalBrakeProtected ? 0f : proposed;
                     if (removed > 0f) nextV = Vector3.ClampMagnitude(candidateV - axis * (removed * dt), MaxV);
@@ -79,9 +114,16 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 !V(nextPosition) || !V(nextV) || !V(acceleration) || !F(removed) ||
                 nextV.magnitude > MaxV + 0.00001f || acceleration.magnitude > MaxA + 0.001f)
                 throw new InvalidOperationException("COM_REFERENCE_PLANNER_FINAL_INVALID");
-            // Receipt validity and policy are separate: B still validates and records
-            // the real completion but does not use its deficit to slow this reference.
-            return new ComPlan { ArrivalEnabled = arrival, FeedbackEnabled = arrival && feedbackEnabled, FeedbackAvailable = feedback,
+            // Receipt validity and feedback selection remain separate. Current Hip
+            // arms both retain feedback; support shaping never bypasses that policy.
+            return new ComPlan { EnhancedNormalFeedback = enhancedNormalFeedback, SupportInput = support, SupportFloorSelected = supportFloor,
+                SupportNormalPrioritySelected = supportFloor && supportNormalPriority, SupportTangentBrakingPreserved = tangentBrakingPreserved,
+                SupportFloorY = supportFloorY, NominalCandidateY = nominalCandidateY,
+                SupportCandidateDeltaY = supportCandidateDeltaY,
+                SupportPriorityExtraY = priorityExtraY, SupportTangentDeltaV = tangentDeltaV,
+                SupportCandidateUnderY = support.Matches(support.ForStep) ? Mathf.Max(0f, supportFloorY - (position.y + candidateV.y * dt)) : 0f,
+                SupportRemainingUnderY = support.Matches(support.ForStep) ? Mathf.Max(0f, supportFloorY - nextPosition.y) : 0f,
+                ArrivalEnabled = arrival, FeedbackEnabled = arrival && feedbackEnabled, FeedbackAvailable = feedback,
                 Position = nextPosition, Velocity = nextV, Acceleration = acceleration, CandidateA = candidateA,
                 RelativeV = relativeV, StoppingOffset = stoppingOffset, ArrivalError = arrivalError,
                 PreviousRequestA = feedback ? previousRequest : Vector3.zero,

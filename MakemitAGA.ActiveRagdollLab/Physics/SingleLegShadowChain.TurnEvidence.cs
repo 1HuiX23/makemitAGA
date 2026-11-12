@@ -72,6 +72,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (!_traceEnabled || !_dynamicParentActive) return;
             _legTurnCurrent.Step = _runtimeStep; _legTurnCurrent.Fixed = _fixedUpdateSequence;
             _legTurnCurrent.Source = _runtimeSource;
+            _legTurnCurrent.ReceiverNormalResponse = _torso.PelvisReceiver.NormalResponseAt(_runtimeStep);
             _legTurnCurrent.SourcePhase = _torso.Report != null ? _torso.Report.MotionPhase : null;
             _legTurnCurrent.RawWorldWValid = _legTurnRawSourceValid && _legTurnRawSource.Matches(_runtimeSource);
             _legTurnCurrent.RawSourceDt = _legTurnRawSourceDt;
@@ -255,7 +256,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     ReferenceSelected = _kneeReference.Selected, Reference = _kneeReference.Current,
                     PlannedSourceRecoverySelected = _kneePlannedFeedforwardSelected,
                     FeedforwardStateBits = _legTurnCurrent.HipFeedforwardStateBits,
-                    RawSourceA = _sampledTargetKneeRelativeAngularAccelerationLocal
+                    RawSourceA = _sampledTargetKneeRelativeAngularAccelerationLocal,
+                    GroundTarget = _kneeGroundSample.Matches(_runtimeStep, _runtimeSource) ? _kneeGroundSample : default
                 };
             }
             catch { return default; }

@@ -15,6 +15,7 @@ namespace ARL.Contracts
             Check.Run("session lifecycle and retained evidence", Session);
             Check.Run("session illegal transitions", IllegalTransitions);
             Check.Run("first-cause notice and bounded delivery", Notice);
+            Check.Run("session first cause survives cleanup and clears on new attempt", SessionCause);
         }
 
         private static void Clock()
@@ -111,6 +112,28 @@ namespace ARL.Contracts
             Check.Throws<InvalidOperationException>(() => s.MarkRunning(), "running cannot be committed twice");
             s.BeginStop("DONE"); s.Finish("x", "y", false);
             Check.Throws<InvalidOperationException>(() => s.Finish("overwrite", "overwrite", false), "completed evidence cannot be finalized twice");
+        }
+
+        private static void SessionCause()
+        {
+            foreach (bool started in new[] { false, true })
+            {
+                var s = new RunSession(); s.RecordAutomaticStop("OLD", "IDLE");
+                s.Begin("B", "room"); s.AwaitReadiness(); if (started) s.MarkRunning();
+                s.RecordAutomaticStop("BILATERAL_CONTACT", "HIP_PAIR_RECEIVER_ATTITUDE_COMPLETION_FAILED");
+                s.RecordAutomaticStop("SECOND", "CONTRACT_LOST"); s.BeginStop("AUTO_RECEIVER_OR_SCOPE_ABORT:FootSelfPair");
+                Check.That(s.StopReason == "AUTO_FIRST_CAUSE:BILATERAL_CONTACT:HIP_PAIR_RECEIVER_ATTITUDE_COMPLETION_FAILED" &&
+                    s.StopTriggerDetails.Contains("FootSelfPair"), "first cause and later trigger remain distinct");
+                s.RecordAutomaticStop("CLEANUP", "RESTORE_FAILED");
+                s.Finish(s.StopReason, s.Status(), true); string cause = s.StopReason;
+                Check.That(!s.BeginStop("SECOND_STOP") && s.StopReason == cause, "cleanup cannot overwrite cause");
+                s.NoteCleanup(false); s.Begin("A", "room"); s.BeginStop("USER_STOP");
+                Check.That(s.StopReason == "USER_STOP" && s.StopTriggerDetails == "", "new attempt cannot inherit old cause");
+                s.Finish("cancelled", "cancelled", false); s.Begin("B", "room");
+                s.RecordAutomaticStop("OWNER\n", "FAULT\r\n"); s.BeginStop("USER_STOP");
+                Check.That(s.StopReason.StartsWith("AUTO_FIRST_CAUSE:") && !s.StopReason.Contains('\n') && !s.StopReason.Contains('\r'),
+                    "manual finalization after physical failure still retains a single-line first cause");
+            }
         }
 
         private static void Notice()

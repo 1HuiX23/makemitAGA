@@ -208,6 +208,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal void BindSupportSurface(FootSupportSurfaceIsolation surface) => _supportSurface = surface;
 
         internal Collider CurrentGroundCollider => _currentGroundCollider;
+        internal int CurrentGroundId => _currentGroundColliderInstanceId;
+        internal bool CurrentFootprintSameSurface => _currentFootprintSameSurface;
         internal Vector3 CurrentGroundAverageNormalWorld => _currentGroundAverageNormalWorld;
 
         // v0.4.3.1 observer-only support-normal diagnostics. Expose the already-computed sole probe

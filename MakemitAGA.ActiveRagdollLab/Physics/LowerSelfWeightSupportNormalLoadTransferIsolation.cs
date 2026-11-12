@@ -78,8 +78,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         internal void ResetTrace(SingleLegChainReport report)
         {
-            _finite = true;
-            _invalidReason = null;
+            // Trace resets statistics only. Preserve live receipts and fault latches;
+            // selector/drive transitions own recovery and physical-state clearing.
             _traceSamples = 0;
             _eligibleSamples = 0;
             _appliedSamples = 0;
@@ -94,7 +94,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _lowerSupportAccelerationMax = 0f;
             _footLoadAccelerationAbsSum = 0f;
             _footLoadAccelerationAbsMax = 0f;
-            ClearCurrent();
             CopyToReport(report);
         }
 

@@ -380,6 +380,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _legAngularAccelerationFeedforward.ResetDiagnostics();
             _hipNormalReference.ResetTrace();
             _kneeReference.ResetTrace();
+            ResetKneeGroundTrace();
             _report.HipNormalReferenceSummary = null;
             _report.KneeReferenceSummary = null;
             _report.KneePlannedFeedforwardSummary = null;

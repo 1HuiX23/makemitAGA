@@ -250,9 +250,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                         _pelvisBody.rotation * _controlTargetHipRelative,
                         _measuredPelvisAngularVelocity + _pelvisBody.rotation * _controlTargetHipRelativeAngularVelocityLocal,
                         _torso.ControlPolicy.HipNormalSampleAgePrediction);
-                    _kneePlannedFeedforwardSelected = KneePlannedFeedforwardArmSelected;
-                    _kneeReference.Reset(KneeReferenceArmSelected, _controlTargetKneeRelative,
-                        _controlTargetKneeRelativeAngularVelocityLocal);
+                    ResetKneeReferenceForDrive();
                     _hipCharacterJointResponseIsolation.ResetStats(_report);
                     _kneeParentAngularTransport.ResetDiagnostics(_report);
                     _lastHipAppliedAngularAccelerationWorld = Vector3.zero;
@@ -570,8 +568,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     throw new InvalidOperationException("HIP_PAIR_QUIESCE_FAILED");
             });
             _hipNormalReference.DisablePreserveTrace();
-            _kneeReference.DisablePreserveTrace();
-            _kneePlannedFeedforwardSelected = false;
+            DisableKneeReferencePreserveTrace();
             _collidersEnabled = false;
             _report.CollidersEnabled = false;
             failures += TryCleanupStep("UPPER_COLLIDER", () => { if (_upperCollider != null) _upperCollider.enabled = false; });

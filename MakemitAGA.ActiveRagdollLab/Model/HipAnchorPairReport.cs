@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using MakemitAGA.ActiveRagdollLab.Runtime;
 using UnityEngine;
+using MakemitAGA.ActiveRagdollLab.Physics;
 
 namespace MakemitAGA.ActiveRagdollLab.Model
 {
@@ -21,7 +22,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         internal struct Command
         {
             internal bool JointSolved, FullFeedbackFeasible;
-            internal float MotionScale;
+            internal float MotionScale, UpwardExtraAcceleration;
             internal HipAngularRequest Angular;
             internal Vector3 ParentAngularReaction, BilateralAngularReaction;
             internal Vector3 NetHipTorque, CommonAcceleration, AllocatedHipAlpha;
@@ -87,7 +88,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                 "/basePD=400_40_IMPLICIT_FIXED_DT/compensatedForcePointA_cap=60/upperCorrectionTorqueCapNm=8/upperActuatorCapNm=MAX_8_ORIGINAL_REQUEST/receiverTotalTorqueCapNm=8" +
                 "/motionAllocation(limited-fallback-minScale)=" + MotionLimitedSteps + "-" + FeedbackFallbackSteps + "-" + F(MinimumMotionScale) +
                 "/fullRequestWouldLimit(point-upperCorrection-upperActuator-receiver-common)=" + PointBudgetSteps + "-" + UpperCorrectionBudgetSteps + "-" + UpperActuatorBudgetSteps + "-" + ReceiverBudgetSteps + "-" + CommonBudgetSteps +
-                "/peakFeedbackResidualA=" + F(PeakFeedbackResidualA) + "/allocation=FEEDBACK_PRIORITY_SYSTEM_COM_RESPONSE/commonActuatorCapMps2=12/qMeaning=SYSTEM_COM_AND_NET_UPPER_REQUEST" +
+                "/peakFeedbackResidualA=" + F(PeakFeedbackResidualA) + "/allocation=FEEDBACK_PRIORITY_SYSTEM_COM_RESPONSE/commonActuatorCapMps2=12/qMeaning=BASE_SYSTEM_COM_AND_NET_UPPER_REQUEST_PLUS_EXPLICIT_UPWARD_EXTRA" +
                 "/systemComModel=u_MINUS_SUM_UPPER_FORCE_OVER_TOTAL_MASS/allocationDiagonal=I_OVER_UPPER_MASS" +
                 "/upperCorrection=MINUS_R_CROSS_F/netUpperCommand=SCALED_CONTROLLER_TORQUE/upperActuatorTorque=ALLOCATED_NET_PLUS_POINT_CORRECTION" +
                 "/bias=FINAL_COMMON_AND_NET_UPPER_TORQUE/pointModel=FIXED_LEVERS_OTHER_LOADS_AND_DRAG_EXCLUDED" +
@@ -125,8 +126,10 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                 .Append('/').Append(c.Angular.Details(c.MotionScale, c.ParentInput.JointTorqueReaction, c.ParentAngularReaction))
                 .Append("/allocation(motionScale-fullFeedbackFeasible-forceScale)=").Append(F(c.MotionScale)).Append('|').Append(c.FullFeedbackFeasible).Append('|').Append(F(c.Scale))
                 .Append("/allocatedCommonA-netHipTorque-alpha=").Append(V(c.CommonAcceleration)).Append('|').Append(V(c.NetHipTorque)).Append('|').Append(V(c.AllocatedHipAlpha))
-                .Append("/systemA(target-planned)=").Append(V(c.ParentInput.Acceleration * c.MotionScale)).Append('|')
+                .Append("/systemA(target-planned)=").Append(V(HipSystemAllocation.Target(c.ParentInput, c.MotionScale, c.UpwardExtraAcceleration))).Append('|')
                 .Append(V(c.CommonAcceleration - (c.Force + c.PeerForce) / c.ParentInput.Response.TotalMass))
+                .Append("/upwardRetention(selected-eligible-extraA)=").Append(c.ParentInput.UpwardRetentionSelected).Append('|')
+                .Append(c.ParentInput.UpwardRetentionEligible).Append('|').Append(F(c.UpwardExtraAcceleration))
                 .Append("/upperActuatorLimitNm=").Append(F(c.UpperActuatorLimitNm))
                 .Append("/upperCorrectionAlpha=").Append(V(c.UpperCorrectionAlpha))
                 .Append("/jointA(bias-planned-feedbackResidual)=").Append(V(c.KnownBiasA)).Append('|').Append(V(c.PredictedNetA)).Append('|').Append(V(c.FeedbackResidualA));

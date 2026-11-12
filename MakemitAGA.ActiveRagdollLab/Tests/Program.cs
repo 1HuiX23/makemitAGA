@@ -39,9 +39,23 @@ namespace ARL.Contracts
             Console.WriteLine("ARL managed contracts; no Unity/IL2CPP/PhysX certification.");
             RuntimeContracts.Run();
             CoordinatorContracts.Run();
+            FoundationContracts.Run();
             TrajectoryContracts.Run();
             SampleTimingContracts.Run();
             FootEvidenceContracts.Run();
+            SupportReferenceContracts.Run();
+            ComFeedbackContracts.Run();
+            KneeGroundContracts.Run();
+            MakemitAGA.ActiveRagdollLab.Physics.FootAnkleProxyFoundation.RunReferenceInputContracts();
+            MakemitAGA.ActiveRagdollLab.Physics.BilateralLegCoordinator.RunDynamicContactBoundaryContracts();
+            HipJoinContracts.Run();
+            HipContactPreparationContracts.Run();
+            MakemitAGA.ActiveRagdollLab.Physics.SingleLegShadowChain.RunKneeReferenceContracts();
+            MakemitAGA.ActiveRagdollLab.Physics.PelvisDynamicReceiverIsolation.RunHipCompletionContracts();
+            MakemitAGA.ActiveRagdollLab.Physics.HipPointResponseAudit.RunRotationWindowContracts();
+            HipAllocationContracts.Run();
+            HipAllocationAuditContracts.Run();
+            LoadTraceContracts.Run();
             return Check.Finish();
         }
     }

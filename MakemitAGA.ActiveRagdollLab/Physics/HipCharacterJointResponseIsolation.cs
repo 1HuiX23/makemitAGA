@@ -19,7 +19,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     ///
     /// The unchanged Hip AddTorque controller remains the only deliberate Hip angular actuator.
     /// </summary>
-    internal sealed class HipCharacterJointResponseIsolation
+    internal sealed partial class HipCharacterJointResponseIsolation
     {
         internal const string Mode = "HIP_CHARACTER_JOINT_RESPONSE_ISOLATION_CAUSAL_AB";
         internal const string ProductionArm = "A_V072_CHARACTER_JOINT_BACKEND";
@@ -29,10 +29,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal const string SerialChainArmB = "B_V074_UPPER_ONLY_HIP_TETHER";
 
         // Fixed experimental constants: no profile knobs. 400/40 is critically damped for wn=20 rad/s.
-        internal const float TetherPositionSpring = 400f;
-        internal const float TetherVelocityDamper = 40f;
-        internal const float TetherMaxAcceleration = 60f;
-        internal const float TetherAnchorValidityMeters = 0.03f;
+
 
         private bool _enabled;
         private bool _upperOnlyTether;

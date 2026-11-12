@@ -53,11 +53,14 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             public bool CleanupPending => _cleanupPending;
             public string Preflight()
             {
+                if (FoundationSetupPending) return "FOUNDATION_SETUP_PENDING | 等待[SETUP_READY]再继续。";
                 if (_cleanupPending) return "CLEANUP_PENDING";
                 if (_proxy == null || !_proxy.IsBuilt) return _pelvisWithLegs ? "BUILD_REQUIRED | 先执行arl_test_setup。" : "BUILD_REQUIRED | 先执行arl_pelvis_test_setup。";
                 if (AnkleTestActive) return "ANKLE_TEST_ACTIVE";
                 if (_pelvisWithLegs)
                 {
+                    if (PelvisRunScopes.HasHipCoupling(_pelvisScope) && !_foundationPoseQualified)
+                        return "STABLE_FOUNDATION_REQUIRED | 先arl_test_cleanup，再arl_test_setup并等待[SETUP_READY]；重新PCA/hip_stack。";
                     if (_legChain == null || !_legChain.IsBuilt) return "BILATERAL_BUILD_REQUIRED | 先arl_test_setup及PCA、hip_stack。";
                     if (!PelvisTestActive && !_legChain.DynamicJoinReady) return "DYNAMIC_JOIN_NOT_READY | 需要双侧PCA/stack、驱动OFF、接触及负载OFF、预览关节已移除；查看arl_test_status。 | " + _legChain.FreeSpaceBoundarySummary();
                 }
@@ -68,6 +71,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             }
             public void Prepare(string arm)
             {
+                _legChain?.ResetInitialGeometryPreflight();
                 if (_pelvisWithLegs) _legChain.SelectFootRelativeReference(true);
                 _proxy.SetDrive(false);
                 string select = _proxy.SetPelvisReceiver(arm);
@@ -82,11 +86,52 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             public void AdvancePreparation(PhysicsStepContext step)
             {
                 if (_pelvisWithLegs && _proxy.PelvisReceiverReady && !_legChain.DynamicParentsActive)
+                {
+                    if (PelvisRunScopes.HasHipCoupling(_pelvisScope))
+                    {
+                        bool first = !_legChain.HipJoinPreparationPending;
+                        bool ready;
+                        try { ready = _legChain.AdvanceHipJoinPreparation(step); }
+                        catch (RunPreparationRejectedException) { _foundationPoseQualified = false; throw; }
+                        if (first)
+                        {
+                            const string wait = "ARL [WAIT_INITIAL_GEOMETRY] 请保持站立；双侧预计初态在准备范围内连续稳定约1秒后接入无接触腿链，最长15秒；接入后仍需实际刚体检查，看到[STARTED]后才计时。";
+                            _logger?.LogInfo("[ARL][HIP_JOIN_PREPARATION][WAIT] " + wait);
+                            ActiveRagdollConsolePatch.TryPrintGame(wait);
+                        }
+                        if (!ready) return;
+                        _logger?.LogInfo("[ARL][HIP_JOIN_PREPARATION][QUALIFIED] " + step.Status() + " | " + _legChain.HipJoinPreparationSummary());
+                    }
                     _legChain.ActivateDynamicParents(step);
+                    if (PelvisRunScopes.HasHipCoupling(_pelvisScope))
+                    {
+                        try { _legChain.BeginHipContactPreparation(step); }
+                        catch (RunPreparationRejectedException) { _foundationPoseQualified = false; throw; }
+                        const string wait = "ARL [WAIT_SETTLED_GEOMETRY] 腿链已接入，接触与载荷仍关闭；等待双侧实际刚体安静稳定至少0.15秒，最长15秒。请继续站立，看到[STARTED]后才计时。";
+                        _logger?.LogInfo("[ARL][HIP_CONTACT_PREPARATION][WAIT] " + wait);
+                        ActiveRagdollConsolePatch.TryPrintGame(wait);
+                        return; // No same-step initializer pose may masquerade as a settled native sample.
+                    }
+                }
                 if (_pelvisWithContact && _legChain.DynamicParentsActive && !_legChain.DynamicContactSelected)
                 {
-                    string contact = _legChain.PrepareDynamicContact(_pelvisScope);
-                    _logger?.LogInfo("[ARL][DYNAMIC_CONTACT_PREPARED] " + contact);
+                    try
+                    {
+                        if (PelvisRunScopes.HasHipCoupling(_pelvisScope))
+                        {
+                            if (!_legChain.AdvanceHipContactPreparation(step)) return;
+                            _logger?.LogInfo("[ARL][HIP_CONTACT_PREPARATION][QUALIFIED] " + step.Status() + " | " + _legChain.HipJoinPreparationSummary());
+                        }
+                        string contact = _legChain.PrepareDynamicContact(_pelvisScope, step);
+                        _logger?.LogInfo("[ARL][DYNAMIC_CONTACT_PREPARED] " + contact);
+                    }
+                    catch (RunPreparationRejectedException)
+                    {
+                        // Post-join native geometry must agree with the qualified projection.
+                        // A rejected commit is restored and rebuilt, never repeatedly re-seeded.
+                        _foundationPoseQualified = false;
+                        throw;
+                    }
                 }
             }
             private bool EnvironmentReady => _legChain != null && (_pelvisWithContact
@@ -129,11 +174,14 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
                     return _proxy?.PelvisReceiver?.Issue;
                 }
             }
+            public string PreparationDependency => PelvisRunScopes.HasHipCoupling(_pelvisScope) && _legChain != null
+                ? _legChain.HipPreparationDependency : null;
             public bool Ready => _proxy != null && _proxy.PelvisReceiverReady && (!_pelvisWithLegs ||
                 (_legChain != null && _legChain.DynamicParentsActive && (!_pelvisWithContact || _legChain.DynamicContactMatchesScope(_pelvisScope))));
             public bool Tracing => _proxy != null && _proxy.TraceEnabled && _proxy.PelvisReceiver.TraceRunning &&
                 (!_pelvisWithLegs || (_legChain != null && _legChain.TraceFullyEnabled));
             public string ReadinessSummary() => "passiveResolved=" + (_proxy?.PelvisReceiver?.PassiveResolved ?? 0) +
+                " | " + (_legChain?.HipJoinPreparationSummary() ?? "hipJoinPreparation=NOT_BUILT") +
                 " | legReferenceBound=" + (_proxy != null && _proxy.LegParentReferenceBound) +
                 " | legsJoined=" + (_pelvisWithLegs && _legChain != null && _legChain.DynamicParentsActive) +
                 " | footStepAttribution=READ_ONLY_V04710" +
@@ -146,6 +194,10 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
                 " | hipNormalRecoveryHandoff=" + (_pelvisWithLegs ? HipCompositeReferenceShockAbsorberIsolation.NormalRecoveryHandoffMode : "NOT_BUILT") +
                 " | hipAngularControllerReaction=" + PelvisDynamicReceiverIsolation.HipReactionName(_proxy == null ? null : _proxy.PelvisReceiverControl.Arm) +
                 " | hipNormalParentPolicy=" + PelvisDynamicReceiverIsolation.HipNormalParentName(_proxy == null ? null : _proxy.PelvisReceiverControl.Arm) +
+                " | parentNormalReference=" + (_proxy != null && PelvisDynamicReceiverIsolation.IsDynamicHipArm(_proxy.PelvisReceiverControl.Arm) ? "BOUNDED_V041220" : "OFF_OTHER_SCOPE") +
+                " | referencePreparation=" + PelvisDynamicReceiverIsolation.ReferencePreparationName(_proxy == null ? null : _proxy.PelvisReceiverControl.Arm) +
+                " | normalBudget=" + PelvisDynamicReceiverIsolation.NormalBudgetName(_proxy == null ? null : _proxy.PelvisReceiverControl.Arm) +
+                " | normalFeedback=" + PelvisDynamicReceiverIsolation.NormalFeedbackName(_proxy == null ? null : _proxy.PelvisReceiverControl.Arm) +
                 " | comDeficitFeedbackEnabled=" + (_proxy != null && PelvisDynamicReceiverIsolation.IsDynamicHipArm(_proxy.PelvisReceiverControl.Arm)) +
                 " | referenceBudget=" + (_proxy?.PelvisReceiver?.ReferenceBudgetMode ?? "<none>") +
                 " | referencePlanner=" + (_proxy?.PelvisReceiver?.ReferencePlannerMode ?? "<none>") + " | sameInputComparison=" + _pelvisWithLegs + "/scope=PELVIS_PLANNER_REFERENCE_ONLY" +
@@ -178,7 +230,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
                 if (_legChain == null) return PelvisRunScopes.Dataset(_pelvisScope) + "=False | legs=<missing>";
                 bool ready = started && _proxy != null && _proxy.PelvisReceiver.ExposureReady && _legChain.SharedTraceContextReady && _legChain.DynamicParentsActive && (_pelvisWithContact ? _legChain.DynamicContactMatchesScope(_pelvisScope) : _legChain.FreeSpaceReady) && !_legChain.AnyDriveAborted &&
                     _legChain.BilateralReport.ClockParityPass && FootRunSafety(_legChain.PrimaryFootReport) && FootRunSafety(_legChain.SecondaryFootReport);
-                return (_pelvisWithContact ? _legChain.DynamicContactEvidence(ready, _pelvisScope) : "DYNAMIC_LEG_FREE_SPACE_DATASET_READY=" + ready + " | scope=NO_CONTACT_NO_GRAVITY_NO_HIP_REACTION | loadedSupportCertified=False\n" +
+                return _legChain.HipJoinPreparationSummary() + "\n" + (_pelvisWithContact ? _legChain.DynamicContactEvidence(ready, _pelvisScope) : "DYNAMIC_LEG_FREE_SPACE_DATASET_READY=" + ready + " | scope=NO_CONTACT_NO_GRAVITY_NO_HIP_REACTION | loadedSupportCertified=False\n" +
                     _legChain.FreeSpaceBoundarySummary()) + "\n" + _legChain.DynamicParentSummary() + (PelvisRunScopes.HasHipCoupling(_pelvisScope) ? "\n[HIP_ANCHOR_PAIR_AT_FINALIZE]\n" + _legChain.HipAnchorPairDetails() :
                     PelvisRunScopes.HasUpperWeight(_pelvisScope) ? "\n[HIP_WRENCH_INPUT_AUDIT_AT_FINALIZE]\n" + _legChain.HipPelvisLoadPath.GetDetails() : "") +
                     "\n[PRIMARY_LEG_AT_FINALIZE]\n" + _legChain.PrimaryReport.GetFullText() +
@@ -208,7 +260,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
                 else if (warning) _logger?.LogWarning(text);
                 else _logger?.LogInfo(text);
             }
-            public void ShowStarted(string text) { try { ActiveRagdollConsolePatch.TryPrintGame(text); } catch { } }
+            public void ShowStatus(string text) { try { ActiveRagdollConsolePatch.TryPrintGame(text); } catch { } }
             public void WriteReports() { WriteAllReports(); }
         }
 

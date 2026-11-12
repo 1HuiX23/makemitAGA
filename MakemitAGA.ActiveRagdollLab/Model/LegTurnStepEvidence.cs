@@ -13,6 +13,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         internal LegLandingReferenceInput LandingInput; // Optional; never part of Matches or a control gate.
         internal string SourcePhase; // Current existing torso source classifier; window selection only.
         internal HipGoalPathEvidence HipGoalPath; // Optional; deliberately excluded from Matches.
+        internal PelvisNormalResponseEvidence ReceiverNormalResponse; // Solved N-1 -> PRE_N; optional, never a gate.
         internal bool HipCommitted, KneeCommitted, RawWorldWValid;
         internal float RawSourceDt, HipMaxA;
         internal Quaternion RawUpperR, RawLowerR, UpperR, HipTargetR;

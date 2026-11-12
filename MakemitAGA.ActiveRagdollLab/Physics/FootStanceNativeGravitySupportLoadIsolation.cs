@@ -133,8 +133,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         internal void ResetTrace(FootAnkleFoundationReport report)
         {
-            _finite = true;
-            _invalidReason = null;
+            // Trace resets statistics only. Preserve live receipts and fault latches;
+            // selector/drive transitions own recovery and physical-state clearing.
             _traceSamples = 0;
             _eligibleSamples = 0;
             _appliedSamples = 0;
@@ -159,10 +159,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _gravityOnSignedNormalImpulseMax = 0f;
             _gravityOffSignedNormalImpulseSum = 0f;
             _gravityOffSignedNormalImpulseMax = 0f;
-            _currentGravityWorld = UnityEngine.Physics.gravity;
-            _currentFootMass = 0f;
-            _currentApplied = false;
-            _currentScheduledFixed = 0;
             CopyToReport(report);
         }
 

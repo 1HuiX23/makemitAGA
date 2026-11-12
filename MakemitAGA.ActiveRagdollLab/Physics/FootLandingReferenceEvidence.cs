@@ -171,7 +171,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 "/kneeParentTransport=" + k.ParentTransportEnabled +
                 "/kneeWorldA(relative-parent-total)=" + Vec(k.RelativeA) + "|" + Vec(k.ParentA) + "|" + Vec(k.TotalA) +
                 "/kneeReceiptResidual(feedback-allocation-transport)=" + S(feedbackResidual) + "|" + S(allocationResidual) + "|" + Vec(transportResidual) +
-                "/" + KneeReferenceText(p);
+                "/" + KneeReferenceText(p) + "/" +
+                (k.GroundTarget.Matches(p.Step, p.Source) ? KneeGroundTarget.Text(k.GroundTarget) : "kneeFootGroundV041260=NA_MISSING_STALE_OR_INVALID");
         }
         private static string KneeReferenceText(LandingPath p)
         {
@@ -181,7 +182,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 return "kneeReferenceV041170=NA_MISSING_STALE_OR_INVALID";
             return "kneeReferenceV041170=UPPER_LOCAL_RELATIVE_RWA" +
                 "/kneeReference(stale-alphaLimited-speedLimited)=" + r.Stale + "|" + r.AlphaLimited + "|" + r.SpeedLimited +
-                "/kneeReferenceR(previous-raw-final)=" + Quat(r.PreviousR) + "|" + Quat(r.InputR) + "|" + Quat(r.R) +
+                "/kneeReferenceR(previous-input-final)=" + Quat(r.PreviousR) + "|" + Quat(r.InputR) + "|" + Quat(r.R) +
                 "/kneeReferenceW(previous-raw-final)=" + Vec(r.PreviousW) + "|" + Vec(r.InputW) + "|" + Vec(r.W) +
                 "/kneeReferenceA(raw-final)=" + Vec(p.Knee.RawSourceA) + "|" + Vec(r.A) +
                 "/kneeReferenceLimits(W-A)=" + S(r.MaxW) + "|" + S(r.MaxA);

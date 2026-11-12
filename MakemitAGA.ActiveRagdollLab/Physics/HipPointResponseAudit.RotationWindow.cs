@@ -14,12 +14,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private readonly ResponseFrame[] _rotationWindow = new ResponseFrame[RotationBefore + 1 + RotationAfter];
         private PelvisReceiverReport.TrackingFrame _rotationPeak;
         private PhysicsStepContext _rotationSessionStep;
-        private int _rotationSessionFixed;
 
         private void ResetRotationWindow()
         {
             _rotationPeak = new PelvisReceiverReport.TrackingFrame();
-            _rotationSessionStep = new PhysicsStepContext(); _rotationSessionFixed = 0;
+            _rotationSessionStep = new PhysicsStepContext();
             Array.Clear(_rotationWindow, 0, _rotationWindow.Length);
         }
         private static bool RotationTrackingValid(PelvisReceiverReport.TrackingFrame f) =>
@@ -28,15 +27,32 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             F(f.Rotation) && f.Rotation >= 0f && F(f.Position) && F(f.RawRenderRotation) &&
             V(f.RotationErrorVector) && V(f.BodyW) && V(f.CommandW);
 
+        internal void CompleteAttitudeBudget(PhysicsStepContext step, int localFixed, PelvisReceiverReport receiver)
+        {
+            CaptureRotationTracking(step, localFixed, receiver);
+            if (!_hasPending) return;
+            try
+            {
+                ResponseFrame f = _pending;
+                if (!f.Command.Step.Matches(step) || f.Command.Fixed != localFixed || !f.CoupledInputsJoined || f.Budget.Valid ||
+                    receiver == null || !receiver.TraceRunning || !receiver.TraceHipTranslation || receiver.CurrentTraceFixed <= 0 ||
+                    receiver.AngularActuation.Fixed != receiver.CurrentTraceFixed || !receiver.AngularActuation.Step.Matches(step)) return;
+                f.Budget = HipAttitudeBudgetSample.Evaluate(f.Command.ParentInput, receiver.AngularActuation, f.Attitude,
+                    -f.Command.Force - f.PeerForce, f.Command.ParentTorque + f.PeerParentTorque);
+                _pending = f;
+                RetainRotationFrame(f);
+            }
+            catch { } // Missing/invalid evidence is counted at resolution; never changes run eligibility.
+        }
         private void CaptureRotationTracking(PhysicsStepContext step, int localFixed, PelvisReceiverReport receiver)
         {
             try
             {
                 if (receiver == null || !receiver.TraceRunning || !receiver.TraceHipTranslation ||
-                    receiver.CurrentTraceFixed != localFixed) return;
+                    receiver.CurrentTraceFixed <= 0) return;
                 var t = receiver.LastTracking;
                 if (_hasPending && _pending.Command.Step.Matches(step) && _pending.Command.Fixed == localFixed &&
-                    RotationTrackingValid(t) && t.Fixed == localFixed && t.RuntimeContext.Matches(step))
+                    RotationTrackingValid(t) && t.Fixed == receiver.CurrentTraceFixed && t.RuntimeContext.Matches(step))
                     _pending.ReceiverTracking = t;
                 SyncRotationPeak(receiver);
                 if (_hasPending) RetainRotationFrame(_pending);
@@ -45,10 +61,15 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         }
         private void SyncRotationPeak(PelvisReceiverReport receiver)
         {
-            if (receiver == null || !_rotationSessionStep.Valid || _rotationSessionFixed <= 0) return;
+            if (receiver == null || !_rotationSessionStep.Valid) return;
+            var latest = receiver.LastTracking;
             var peak = receiver.PeakRotationTracking;
-            if (!RotationTrackingValid(peak) || peak.RuntimeContext.Epoch != _rotationSessionStep.Epoch ||
-                peak.Fixed - _rotationSessionFixed != peak.RuntimeContext.Sequence - _rotationSessionStep.Sequence) return;
+            // Check the receiver's local clock against its own current observation.
+            // Leg/receiver trace starts can differ after staged preparation.
+            if (!RotationTrackingValid(latest) || !latest.RuntimeContext.Matches(_rotationSessionStep) ||
+                latest.Fixed != receiver.CurrentTraceFixed || !RotationTrackingValid(peak) ||
+                peak.RuntimeContext.Epoch != latest.RuntimeContext.Epoch || peak.Fixed > latest.Fixed ||
+                latest.Fixed - peak.Fixed != latest.RuntimeContext.Sequence - peak.RuntimeContext.Sequence) return;
             if (_rotationPeak.Valid && _rotationPeak.Fixed == peak.Fixed && _rotationPeak.RuntimeContext.Matches(peak.RuntimeContext)) return;
             _rotationPeak = peak;
             Array.Clear(_rotationWindow, 0, _rotationWindow.Length);
@@ -60,9 +81,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             if (!_rotationPeak.Valid || !f.Command.Step.Valid || f.Command.Fixed <= 0 ||
                 f.Command.Step.Epoch != _rotationPeak.RuntimeContext.Epoch) return;
-            int offset = f.Command.Fixed - _rotationPeak.Fixed;
+            int offset = f.Command.Step.Sequence - _rotationPeak.RuntimeContext.Sequence;
             if (offset < -RotationBefore || offset > RotationAfter ||
-                f.Command.Step.Sequence - _rotationPeak.RuntimeContext.Sequence != offset ||
                 (offset == 0 && !f.Command.Step.Matches(_rotationPeak.RuntimeContext))) return;
             _rotationWindow[offset + RotationBefore] = f;
         }
@@ -94,7 +114,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 var f = _rotationWindow[i];
                 if (f.Command.Fixed <= 0)
                 {
-                    sb.Append("\nhipPelvisRotationMissing=offset:").Append(offset).Append("/expectedLocalGlobal=")
+                    sb.Append("\nhipPelvisRotationMissing=offset:").Append(offset).Append("/expectedReceiverTraceGlobal=")
                         .Append(_rotationPeak.Fixed + offset).Append('|').Append(_rotationPeak.RuntimeContext.Sequence + offset)
                         .Append("/response=NA_NO_CAPTURED_COMMAND");
                     continue;
@@ -112,7 +132,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     .Append('|').Append(t.SourceActive).Append('|').Append(t.SourceFresh).Append('|').Append(N(t.SourceAge)).Append('|').Append(N(t.SourceDt))
                     .Append("/receiverClamps(L-A-T)=").Append(t.LinearClamped).Append('|').Append(t.AngularClamped).Append('|').Append(t.TorqueClamped);
                 var a = t.AngularActuation;
-                if (!a.Valid || a.Fixed != f.Command.Fixed || !a.Step.Matches(f.Command.Step))
+                if (!a.Valid || a.Fixed != t.Fixed || !a.Step.Matches(f.Command.Step))
                 { sb.Append("/pelvisBaseline=NA_NOT_JOINED"); continue; }
                 sb.Append("/pelvisBaselineAlpha(P-D-FF-applied)=").Append(S(a.PAlpha)).Append('|').Append(S(a.DAlpha))
                     .Append('|').Append(S(a.FeedforwardAlpha)).Append('|').Append(S(a.AppliedAlpha))

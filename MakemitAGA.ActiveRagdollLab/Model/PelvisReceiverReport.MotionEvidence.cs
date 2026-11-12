@@ -17,6 +17,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
             internal PelvisComReferencePlanner.ComPlan ComReference;
             internal Vector3 NativeGoalCom, NativeGoalV;
             internal int SourceSequence, SourceEvent, TimingGroup, Stage, StopStartFixed;
+            internal string SourcePhase;
             internal float SourceAge, SourceDt, Time, StopForward;
             internal Vector3 TargetCom, TargetV, Error, VelocityError, RawError, PdA, FeedforwardA;
             internal Vector3 SourceV, SourceW, StopDirection, PredictedA, ObservedA, ResidualA;
@@ -54,6 +55,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
 
         private void ResetMotionEvidence()
         {
+            ResetNormalResponse();
             _motionRaw.Reset(); _motionStop.Reset();
             _motionRawHistoryNext = _motionRawHistoryCount = 0;
             MotionIssued = MotionInputMissing = MotionResolved = MotionCensored = MotionGaps = 0;
@@ -95,6 +97,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                     TargetCom = t.CommandCom, TargetV = t.CommandComV, Error = t.ComError, VelocityError = t.ComVelocityError,
                     RawError = t.RawRenderComError, PdA = t.PdA, FeedforwardA = t.FeedforwardA, LinearClamped = t.LinearClamped,
                     SourceV = t.SourceV, SourceW = t.SourceWVector, SourceSequence = t.SourceSequence, SourceEvent = t.SourceEventId,
+                    SourcePhase = t.SourcePhase,
                     SourceFresh = t.SourceFresh, SourceAge = t.SourceAge, SourceDt = t.SourceDt, TimingGroup = t.RawTimingGroup,
                     Stage = t.Stage, InStopWindow = t.InStopWindow, StopStartFixed = t.StopStartFixed,
                     StopDirection = t.StopDirection, StopForward = Mathf.Max(0f, -Vector3.Dot(t.ComError, t.StopDirection)),
@@ -140,6 +143,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                 if (!FiniteVector(f.Motion.ObservedA) || !FiniteVector(f.Motion.ResidualA))
                 { MotionGap("RESPONSE_COM_NONFINITE"); return; }
                 f.MotionNextStep = next; MotionResolved++;
+                RecordNormalResponse(f);
                 MotionPeakResidualA = Mathf.Max(MotionPeakResidualA, f.Motion.ResidualA.magnitude);
                 float q = f.HipAttitude.MotionScale;
                 bool adjacent = _motionLast.Valid && _motionLast.Epoch == f.Motion.Step.Epoch &&
@@ -261,6 +265,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                     .Append("/rawQualifiedPeakMm(issued-resolved)=").Append(F(MotionRawPeakIssued * 1000f)).Append('|').Append(F(MotionRawPeakResolved * 1000f))
                     .Append("/systemResidualAPeak=").Append(F(MotionPeakResidualA)).Append("/issue=").Append(_motionIssue ?? "<none>")
                     .Append("/model=P_PLUS_C_MASS_WEIGHTED_COM_INPUT_LEDGER/qMeaning=SYSTEM_COM_AND_NET_UPPER_REQUEST/commonActuatorCapMps2=12/notPelvisPointA=True/notWholeBody=True/diagnosticFeedback=False");
+                AppendNormalResponse(sb);
                 AppendMotionWindow(sb, "RAW_COM_PEAK", _motionRaw); AppendMotionWindow(sb, "STOP_FORWARD_PEAK", _motionStop);
             }
             catch { sb.Append("\nreceiverMotionEvidence=FORMAT_UNAVAILABLE"); }
@@ -269,6 +274,8 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         {
             if (!p.ArrivalEnabled) return;
             sb.Append("/comPlanner=RELATIVE_V_ARRIVAL")
+                .Append("/normalFeedback(KpY-KdY)=").Append(F(PelvisComFeedback.PositionY(p.EnhancedNormalFeedback)))
+                .Append('|').Append(F(PelvisComFeedback.VelocityY(p.EnhancedNormalFeedback)))
                 .Append("/comPlannerStep(epoch-fixed-source-time-dt)=").Append(step.Epoch).Append('|').Append(step.Sequence).Append('|').Append(step.SourceSequence)
                 .Append('|').Append(F(step.FixedTime)).Append('|').Append(F(step.Dt))
                 .Append("/comDeficitFeedbackEnabled=").Append(p.FeedbackEnabled)
@@ -279,6 +286,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                 .Append("/comPlanA(candidate-final-removed)=").Append(V(p.CandidateA)).Append('|').Append(V(p.Acceleration)).Append('|').Append(F(p.RemovedAcceleration))
                 .Append("/comBodyV-brakeProtected-proposedReduction=").Append(V(p.SettledVelocity)).Append('|').Append(p.PhysicalBrakeProtected).Append('|').Append(F(p.ProposedReduction))
                 .Append("/comPreviousA(request-allocated)=").Append(V(p.PreviousRequestA)).Append('|').Append(V(p.PreviousAllocatedA));
+            AppendSupportReference(sb, p, step);
         }
         private static void AppendMotionWindow(StringBuilder sb, string tag, MotionWindow w)
         {
@@ -304,6 +312,8 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                     .Append('|').Append(V((f.PelvisMass * f.PostPelvisV + f.ChestMass * f.PostChestV) / mass))
                     .Append("/driveA(pd-ff-request-actuator)=").Append(V(m.PdA)).Append('|').Append(V(m.FeedforwardA)).Append('|').Append(V(a.Baseline.Acceleration)).Append('|').Append(V(a.CommonAcceleration))
                     .Append("/systemTargetA=").Append(V(a.TargetSystemAcceleration))
+                    .Append("/upwardRetention(selected-eligible-extraA)=").Append(a.Baseline.UpwardRetentionSelected).Append('|')
+                    .Append(a.Baseline.UpwardRetentionEligible).Append('|').Append(F(a.UpwardExtraAcceleration))
                     .Append("/q-linearClamped=").Append(F(a.MotionScale)).Append('|').Append(m.LinearClamped)
                     .Append("/HipJ(left-right)=").Append(V(f.HipLeftJ)).Append('|').Append(V(f.HipRightJ))
                     .Append("/systemA(predicted-observed-residual)=").Append(V(m.PredictedA)).Append('|').Append(V(m.ObservedA)).Append('|').Append(V(m.ResidualA))

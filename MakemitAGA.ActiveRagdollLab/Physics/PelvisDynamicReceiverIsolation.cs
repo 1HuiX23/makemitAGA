@@ -8,7 +8,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     // V04470 rebuilds the receiver as one coherent foundation, following the V0316/20 failure boundaries.
     // The receiver owns common translation and Pelvis rotation, including the
     // bounded bilateral Hip compensation in the typed Hip scope. Torso gravity stays off.
-    internal sealed class PelvisDynamicReceiverIsolation
+    internal sealed partial class PelvisDynamicReceiverIsolation
     {
         internal const string ArmB = "B_V04600_RUNTIME_SESSION_CONTEXT";
         internal const string DynamicLegArmA = "A_V04830_COHERENT_HIP_NORMAL_AGE_PREDICTED";
@@ -62,7 +62,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         // V04520 compares the incoming end-of-step goal with a prediction at that same step.
         // Native P/C targets are reconstructed from the same COM and angular clocks.
         // No lag clipping, source-event reset or pose snap is allowed during the run.
-        internal Reference BuildControlReference(Reference raw, float dt, PhysicsStepContext step)
+        internal Reference BuildControlReference(Reference raw, float dt, PhysicsStepContext step,
+            SupportReferenceContext support = default, float sampledPelvisY = 0f)
         {
             if (!DynamicSelected || !_control.Active) return raw;
             if (!Near(_control.NativeChestAnchor, _control.ChestComLocal))
@@ -113,7 +114,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             PelvisComReferencePlanner.ComPlan comPlan = PelvisComReferencePlanner.Build(_referenceCom, _referenceComV,
                 nativeGoalCom, nativeGoalV, dt, comArrival, feedback,
                 feedback ? _hipCommand.Acceleration : Vector3.zero,
-                feedback ? _hipAttitudeCommand.TargetSystemAcceleration : Vector3.zero, settledV, IsDynamicHipArm(_control.Arm));
+                feedback ? _hipAttitudeCommand.TargetSystemAcceleration : Vector3.zero, settledV, IsDynamicHipArm(_control.Arm), support.Matches(step) ? support : default,
+                IsDynamicHipArm(_control.Arm) && support.Matches(step), sampledPelvisY + offset.y,
+                IsDynamicHipArm(_control.Arm), IsDynamicHipArm(_control.Arm));
+            if (Report.TraceRunning && comArrival) Report.RecordSupportReference(comPlan, step);
             Vector3 nextComV = comPlan.Velocity, nextCom = comPlan.Position;
             Report.LastReferenceSpeedLimited = plan.SpeedLimited;
             Report.LastReferenceAlphaLimited = plan.AlphaLimited;
@@ -272,10 +276,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal const string DynamicFootLoadArm = "B_V04840_DYNAMIC_FOOT_SELF_WEIGHT_CONTACT";
         internal const string DynamicLowerLoadArm = "B_V04860_DYNAMIC_LOWER_SELF_WEIGHT_LEDGER_AUDIT";
         internal const string DynamicKneeCouplingArm = "B_V04870_DYNAMIC_KNEE_NORMAL_COUPLING";
-        internal const string DynamicHipArmA = "A_V041190_DIRECT_STANCE_LOAD";
-        internal const string DynamicHipArmB = "B_V041190_NEAR_SURFACE_LOAD_ADMISSION";
+        internal const string DynamicHipArmA = "A_V041280_UNIFORM_BASELINE";
+        internal const string DynamicHipArmB = "B_V041280_SAME_INPUT_BUDGET_AUDIT";
         // v105 OFF arm did not establish net benefit; only its A physical policy is
         // the current baseline. v105 remains the reproducible comparison artifact.
+        internal static string ReferencePreparationName(string arm) => IsDynamicHipArm(arm) ? "EARLY_STRONG_TO_STANCE_OR_CONFIRMED" : "OFF_OTHER_SCOPE";
+        internal static string NormalBudgetName(string arm) => IsDynamicHipArm(arm) ? "NORMAL_PRIORITY_KEEP_TANGENT_BRAKING" : "OFF_OTHER_SCOPE";
+        internal static string NormalFeedbackName(string arm) => IsDynamicHipArm(arm) ? "Y_KP40_KD12.727922" : "BASELINE_OTHER_SCOPE";
         internal static string HipReactionName(string arm) => IsDynamicHipArm(arm) ? "RELATIVE_CONTROL_ONLY" : "OFF";
         internal static string HipNormalParentName(string arm) => IsDynamicHipArm(arm) ? "RECEIVER_TARGET_NORMAL_ONLY" : "PHYSICAL_CONTROL_PARENT";
         internal static bool IsDynamicHipArm(string arm) => arm == DynamicHipArmA || arm == DynamicHipArmB;
@@ -360,6 +367,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal bool BeginDrive()
         {
             ResetHipCommands();
+            HipCompletionIssue = null;
             if (!_control.Selected) return true;
             try
             {
@@ -400,6 +408,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 return Invalid("RECEIVER_HIP_ATTITUDE_PREVIOUS_COMPLETION_OR_CLOCK_INVALID");
             _hipCommand = new PelvisHipCommandFrame();
             _hipAttitudeCommand = new PelvisHipAttitudeCommand();
+            HipCompletionIssue = null;
             ControlErrorsValid = false;
             if (!_control.Active || !DynamicSelected) return false;
             try
@@ -450,7 +459,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 Vector3 targetComV = (_pelvis.mass * pTargetComV + _chest.mass * targetChestV) / totalMass;
                 Vector3 error = targetCom - actualCom;
                 if (!V(error) || error.magnitude > positionSafetyMeters) return Invalid("RECEIVER_COM_POSITION_SAFETY_GATE");
-                Vector3 pdA = PelvisHipCommandFrame.PositionGain * error + PelvisHipCommandFrame.VelocityGain * (targetComV - actualV);
+                Vector3 pdA = PelvisComFeedback.Evaluate(error, targetComV - actualV, IsDynamicHipArm(_control.Arm));
                 // V04530 B is frozen: same governed COM A before the actuator cap.
                 Vector3 feedforwardA = _referenceA;
                 Vector3 rawA = pdA + feedforwardA;
@@ -512,6 +521,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 if (publishCommon) _hipCommand = new PelvisHipCommandFrame
                     { JointTorqueReaction = IsDynamicHipArm(_control.Arm), Committed = true, Step = step, BodyId = commonBodyId, ChestBodyId = chestBodyId,
                         Acceleration = commonA, ReceiverTorque = torque, ParentW = parentW, Response = parentResponse,
+                        // v128: both arms execute the v127 A allocation. B only captures audit input.
+                        UpwardRetentionSelected = false, UpwardRetentionEligible = false,
+                        AllocationAudit = HipAllocationAuditContext.Capture(_control.Arm == DynamicHipArmB, step,
+                            _comReferenceStep, _comReferencePlan, error.y, commonA),
                         ReferenceRotation = targetPelvisRotation, ReferenceW = targetW };
                 Report.LastPdA = pdA; Report.LastFeedforwardA = feedforwardA;
                 if (trace)
@@ -528,96 +541,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     Report.RotationErrorPeak = Mathf.Max(Report.RotationErrorPeak, Mathf.Abs(angleDeg));
                     Report.ForceSumPeak = Mathf.Max(Report.ForceSumPeak, pForce.magnitude + cForce.magnitude);
                     Report.TorquePeak = Mathf.Max(Report.TorquePeak, torque.magnitude);
-                    var f = new PelvisReceiverReport.Frame { Fixed = Report.CurrentTraceFixed, Dt = dt,
-                        PelvisMass = _pelvis.mass, ChestMass = _chest.mass, PrePelvisV = preP, PreChestV = preC,
-                        PelvisJ = pForce * dt, ChestJ = cForce * dt, TorqueJ = torque * dt };
-                    Report.Ring[Report.Next] = f; _pending = Report.Next;
-                    Report.Next = (Report.Next + 1) % Report.Ring.Length; Report.Count = Mathf.Min(Report.Count + 1, Report.Ring.Length);
+                    CaptureReceiverTraceInput(step, dt, preP, preC, pForce, cForce, torque);
                 }
                 return true;
             }
             catch (Exception e) { return Invalid("RECEIVER_STEP_EXCEPTION:" + e.GetType().Name); }
         }
-        // Both real force pairs have returned. The sole receiver owner now adds
-        // (bounded total - already committed baseline) torque, once before solve.
-        internal bool CompleteHipTranslationReaction(MakemitAGA.ActiveRagdollLab.Runtime.PhysicsStepContext step,
-            HipAnchorPairReport left, HipAnchorPairReport right)
-        {
-            try
-            {
-                if (!IsDynamicHipArm(_control.Arm) || !ReadyForRun || left == null || right == null || !left.Selected || !right.Selected || !left.Finite || !right.Finite ||
-                    !left.CurrentApplied || !right.CurrentApplied || !left.Current.Step.Matches(step) || !right.Current.Step.Matches(step) ||
-                    left.ParentId != _pelvis.GetInstanceID() || right.ParentId != left.ParentId || left.ChildId == right.ChildId ||
-                    left.Current.ChildId != left.ChildId || right.Current.ChildId != right.ChildId ||
-                    left.Current.ParentId != left.ParentId || right.Current.ParentId != right.ParentId ||
-                    left.Current.Fixed <= 0 || left.Current.Fixed != right.Current.Fixed || !V(left.Current.Force) || !V(right.Current.Force) ||
-                    !_hipCommand.Matches(step, left.ParentId) ||
-                    !left.Current.ParentInput.Matches(step, left.ParentId) || !right.Current.ParentInput.Matches(step, right.ParentId) ||
-                    !left.Current.ParentInput.SameAs(_hipCommand) || !right.Current.ParentInput.SameAs(_hipCommand) ||
-                    _hipAttitudeCommand.Committed || !BodyStateMatch() ||
-                    !left.Current.JointSolved || !right.Current.JointSolved ||
-                    !F(left.Current.MotionScale) || left.Current.MotionScale < 0f || left.Current.MotionScale > 1f ||
-                    left.Current.MotionScale != right.Current.MotionScale ||
-                    left.Current.Scale != right.Current.Scale || left.Current.FullFeedbackFeasible != right.Current.FullFeedbackFeasible ||
-                    !PelvisChestPointResponse.Same(left.Current.PeerForce, right.Current.Force) ||
-                    !PelvisChestPointResponse.Same(right.Current.PeerForce, left.Current.Force) ||
-                    !PelvisChestPointResponse.Same(left.Current.CommonAcceleration, right.Current.CommonAcceleration) ||
-                    !PelvisChestPointResponse.Same(left.Current.BilateralAngularReaction, right.Current.BilateralAngularReaction) ||
-                    !PelvisChestPointResponse.Same(left.Current.BilateralAngularReaction, left.Current.ParentAngularReaction + right.Current.ParentAngularReaction) ||
-                    !ReactionMatches(left.Current) || !ReactionMatches(right.Current)) return false;
-                if (!PelvisHipAttitudeCommand.TryPlanWithReaction(_hipCommand, -left.Current.Force - right.Current.Force,
-                    left.Current.ParentTorque + right.Current.ParentTorque, left.Current.BilateralAngularReaction, out PelvisHipAttitudeCommand command) || command.Clamped) return false;
-                command.MotionScale = left.Current.MotionScale; command.CommonAcceleration = left.Current.CommonAcceleration;
-                if (!command.AllocationMatches()) return false;
-                var f = new PelvisReceiverReport.Frame();
-                if (Report.TraceRunning)
-                {
-                    if (_pending < 0 || !Report.TraceHipTranslation) return false;
-                    f = Report.Ring[_pending];
-                    if (f.Fixed != left.Current.Fixed || f.Dt != step.Dt || f.HipReactionRecorded || f.Resolved || f.Censored) return false;
-                }
-                f.HipLeftJ = -left.Current.Force * step.Dt; f.HipRightJ = -right.Current.Force * step.Dt;
-                f.HipMomentJ = (left.Current.ParentTorque + right.Current.ParentTorque) * step.Dt;
-                f.TorqueJ = command.AppliedTorque * step.Dt;
-                if (!V(f.HipLeftJ) || !V(f.HipRightJ) || !V(f.HipMomentJ) || !V(f.TorqueJ)) return false;
-                Vector3 deltaA = command.CommonAcceleration - _hipCommand.Acceleration;
-                Vector3 pDelta = _pelvis.mass * deltaA, cDelta = _chest.mass * deltaA;
-                if (!V(pDelta) || !V(cDelta)) return false;
-                int written = 0;
-                try
-                {
-                    _pelvis.AddForce(pDelta, ForceMode.Force); written = 1;
-                    _chest.AddForce(cDelta, ForceMode.Force); written = 2;
-                    _pelvis.AddTorque(command.CorrectionTorque, ForceMode.Force);
-                }
-                catch (Exception e)
-                {
-                    // Only returned writes are owned. Continue rollback if either native call fails.
-                    if (written >= 2) { try { _chest.AddForce(-cDelta, ForceMode.Force); } catch { Report.FaultEvents++; } }
-                    if (written >= 1) { try { _pelvis.AddForce(-pDelta, ForceMode.Force); } catch { Report.FaultEvents++; } }
-                    return Invalid("RECEIVER_HIP_ALLOCATION_WRITE_EXCEPTION:" + e.GetType().Name);
-                }
-                f.PelvisJ = _pelvis.mass * command.CommonAcceleration * step.Dt;
-                f.ChestJ = _chest.mass * command.CommonAcceleration * step.Dt;
-                Report.CommonA = command.CommonAcceleration;
-                command.Committed = true; _hipAttitudeCommand = command; _expectHipCompletion = true;
-                Report.PelvisTorque = command.AppliedTorque;
-                if (!Report.TraceRunning) return true;
-                f.HipAttitude = command;
-                f.HipReactionRecorded = true;
-                Report.CaptureMotionInput(ref f, step); // Optional evidence; catches its own failures.
-                Report.Ring[_pending] = f; Report.HipReactionRecords++;
-                if (command.Clamped) Report.HipAttitudeClamps++;
-                Report.HipAttitudeRequestedPeak = Mathf.Max(Report.HipAttitudeRequestedPeak, command.RequestedTorque.magnitude);
-                Report.HipAttitudeAppliedPeak = Mathf.Max(Report.HipAttitudeAppliedPeak, command.AppliedTorque.magnitude);
-                Report.HipAttitudeResidualPeak = Mathf.Max(Report.HipAttitudeResidualPeak, command.ResidualTorque.magnitude);
-                return true;
-            }
-            catch (Exception e) { return Invalid("RECEIVER_HIP_ATTITUDE_COMPLETION_EXCEPTION:" + e.GetType().Name); }
-        }
-        private static bool ReactionMatches(HipAnchorPairReport.Command c) => c.Angular.Valid &&
-            PelvisChestPointResponse.Same(c.ParentAngularReaction,
-                c.ParentInput.JointTorqueReaction ? -c.MotionScale * c.Angular.RelativeTorque : Vector3.zero);
         // Capture the settled native pair before the next controller write.
         // Commit after the existing control step to attach its actual clamp/source labels.
         // A diagnostic failure marks only tracking coverage; it never changes native state or drive eligibility.
@@ -807,24 +736,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             return ok;
         }
         internal void MarkFault(string reason) { Invalid(reason); }
-        private void CountStep(string phase)
-        { Report.Samples++; Report.CurrentTraceFixed++; if (phase == "IDLE") Report.IdleSamples++; else Report.MotionSamples++; }
-        private void ResolvePending(PhysicsStepContext step)
-        {
-            if (_pending < 0) return;
-            PelvisReceiverReport.Frame f = Report.Ring[_pending];
-            if (f.Fixed != Report.CurrentTraceFixed || !BodyStateMatch() || !V(_pelvis.velocity) || !V(_chest.velocity))
-            { Invalid("RECEIVER_SETTLED_CLOCK_OR_BODY_INVALID"); EndTrace(); return; }
-            f.PostPelvisV = _pelvis.velocity; f.PostChestV = _chest.velocity; f.Settled = f.Fixed + 1;
-            f.SystemDeltaP = f.PelvisMass * (f.PostPelvisV - f.PrePelvisV) + f.ChestMass * (f.PostChestV - f.PreChestV);
-            if (Report.TraceHipTranslation && !f.HipReactionRecorded) { Invalid("RECEIVER_HIP_INPUT_MISSING"); EndTrace(); return; }
-            f.SystemResidual = f.SystemDeltaP - f.PelvisJ - f.ChestJ - f.HipLeftJ - f.HipRightJ;
-            if (!V(f.SystemDeltaP) || !V(f.SystemResidual)) { Invalid("RECEIVER_SETTLED_NONFINITE"); EndTrace(); return; }
-            f.Resolved = true;
-            Report.ResolveMotionInput(ref f, step); // Read-only N -> N+1, before ring replacement.
-            Report.Ring[_pending] = f; _pending = -1; Report.Resolved++;
-            Report.SystemResidualPeak = Mathf.Max(Report.SystemResidualPeak, f.SystemResidual.magnitude);
-        }
         private bool BodyStateMatch() => _pelvis != null && _chest != null && ParametersMatch() && !_pelvis.useGravity && !_chest.useGravity &&
             !_chest.isKinematic && _pelvis.isKinematic == !_control.Dynamic && V(_pelvis.velocity) && V(_chest.velocity) && V(_pelvis.angularVelocity) && V(_chest.angularVelocity);
         private bool ParametersMatch()

@@ -40,15 +40,14 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         internal void ResetTrace()
         {
-            Report.Finite = true;
-            Report.InvalidReason = null;
+            // Trace resets statistics only. Preserve live receipts and fault latches;
+            // selector/drive transitions own recovery and physical-state clearing.
             Report.NormalConstraintWrites = Report.NearCapWrites = Report.AdjacentSignFlips = 0;
             Report.Samples = Report.Eligible = Report.NonStance = Report.Writes = Report.NonzeroCandidates = 0;
             Report.UpwardWrites = Report.DownwardWrites = Report.FirstWrittenFixed = Report.LastWrittenFixed = 0;
             Report.PeakAbsForce = Report.PeakUpperAcceleration = Report.PeakPairClosureNewtons = 0f;
             Report.CandidateAbsForceSum = Report.AppliedNormalImpulseSum = 0d;
             Report.LastWrittenForceWorld = Vector3.zero;
-            Quiesce();
         }
 
         // AddForce is a one-solve command, not a persistent force. Drive-off makes the bodies kinematic.

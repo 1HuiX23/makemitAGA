@@ -254,7 +254,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         public int ForceSafeState()
         {
-            _groundReference.DisablePreserveTrace();
+            _previousReferenceSupport = default;
+            _groundReference.DisablePreserveTrace(); ClearKneeFootGroundPacket();
             _loadAdmission.DisablePreserveTrace();
             int failures = 0;
             // Stop-time failures must not skip independent native shutdown attempts. Keep
@@ -331,7 +332,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         public bool SetDriveState(bool enabled, bool physicalParent = false)
         {
-            if (!enabled) { _groundReference.DisablePreserveTrace(); _loadAdmission.DisablePreserveTrace(); }
+            _previousReferenceSupport = default;
+            if (!enabled) { _groundReference.DisablePreserveTrace(); ClearKneeFootGroundPacket(); _loadAdmission.DisablePreserveTrace(); }
             if (!IsBuilt) return false;
             try
             {

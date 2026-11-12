@@ -54,6 +54,21 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         { _hipContinuationPending = false; return _hipAnchorPair.CancelQueued(step); }
         internal bool CommitBilateralHipPairs(PhysicsStepContext step, SingleLegShadowChain peer) =>
             peer != null && HipAnchorTranslationPair.CommitBilateral(step, _hipAnchorPair, peer._hipAnchorPair);
+        internal void ObserveHipAllocation(PhysicsStepContext step, SingleLegShadowChain peer)
+        {
+            if (!_traceEnabled || peer == null || _torso == null || !_torso.PelvisReceiver.TraceRunning ||
+                _torso.PelvisReceiverControl.Arm != PelvisDynamicReceiverIsolation.DynamicHipArmB) return;
+            var audit = _torso.PelvisReceiver.AllocationAudit;
+            try
+            {
+                if (_hipAnchorPair.TryReadCommittedInput(step, out var left) &&
+                    peer._hipAnchorPair.TryReadCommittedInput(step, out var right))
+                    audit.Observe(true, left, right, _hipAnchorPair.Report.Current, peer._hipAnchorPair.Report.Current,
+                        _torso.HipAttitudeCommand);
+                else audit.NoteMissing();
+            }
+            catch { audit.NoteMissing(); }
+        }
         internal void CompleteHipPointResponse(PhysicsStepContext step, HipAnchorPairReport peer)
         {
             if (!_traceEnabled) return;
@@ -502,7 +517,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 }
 
                 // Raw sampled Knee pose/W remain the baseline and the independent health truth.
-                // V041170 B replaces only consumed R/W/A below with one continuous reference;
+                // Both Hip arms consume one continuous reference; both v127 arms may consume the v126 joint Render input;
                 // the rejected v0.2.104 phase-lead branch is not restored.
                 _controlTargetKneeRelative = _sampledTargetKneeRelative;
                 _controlTargetKneeRelativeAngularVelocityLocal = _sampledTargetKneeRelativeAngularVelocityLocal;
@@ -704,17 +719,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     return;
                 }
 
-                if (!UpdateKneeReference())
+                if (!UpdateKneeReferenceAndFeedforward(out string kneeReferenceIssue))
                 {
-                    AbortDrive("KNEE_REFERENCE_INVALID:" + (_kneeReference.Issue ?? "SELECTION_OR_STEP_MISMATCH"));
-                    return;
-                }
-
-                // V041180 both arms use coherent Knee R/W/A; only B can pass planned
-                // Knee A through source/torso recovery. All other gates still apply.
-                if (!UpdateLegAngularAccelerationFeedforward())
-                {
-                    AbortDrive("LEG_ANGULAR_ACCELERATION_FEEDFORWARD_INVALID");
+                    AbortDrive(kneeReferenceIssue);
                     return;
                 }
 
@@ -1187,7 +1194,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     CopyTraceStatsToReport();
                     CopyLegAngularAccelerationFeedforwardToReport();
                     _report.HipNormalReferenceSummary = _hipNormalReference.GetSummary();
-                    _report.KneeReferenceSummary = _kneeReference.GetSummary();
+                    _report.KneeReferenceSummary = _kneeReference.GetSummary() + "\n" + KneeGroundSummary();
                     _report.KneePlannedFeedforwardSummary = _legAngularAccelerationFeedforward.GetKneeSourceRecoverySummary();
 
                     // v0.3.52 maintenance: completed historical observers are retired from the hot path. Keep only diagnostics that
@@ -1679,44 +1686,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private bool HipFeedforwardGoalBridgeActive => _dynamicParentActive && _torso.Report != null && _torso.ControlPolicy.UseDynamicTorsoRecovery &&
             (_hipSourceReferenceShockAbsorber.Active || _hipReferenceGovernor.Active || _hipCompositeReferenceShockAbsorber.OutputAppliedThisStep);
 
-        private bool UpdateLegAngularAccelerationFeedforward()
-        {
-            // The exemption is never a raw-input fallback. Reject a missing, stale
-            // identity or wrong arm before selecting any feedforward contribution.
-            if (_kneeReference.Selected != KneeReferenceArmSelected ||
-                _kneePlannedFeedforwardSelected != KneePlannedFeedforwardArmSelected ||
-                (_kneePlannedFeedforwardSelected && !_kneeReference.Selected) ||
-                (_kneeReference.Selected && (!PelvisRunScopes.HasHipCoupling(_dynamicScope) ||
-                    !_kneeReference.Current.Matches(_runtimeStep, _runtimeSource)))) return false;
-            Vector3 hipTargetRelativeAWorld = _hipNormalReference.Current.Applied ? _hipNormalReference.Current.A :
-                GetHipDerivativeParentRotation() * _sampledTargetHipRelativeAngularAccelerationLocal;
-            Vector3 flexionAxisWorld = _lowerBody.transform.TransformDirection(_kneeFlexionAxisLowerLocal);
-            if (flexionAxisWorld.sqrMagnitude < 0.0001f)
-                return false;
-            flexionAxisWorld.Normalize();
-            Vector3 kneeTargetRelativeAWorld = GetKneeDerivativeParentRotation() * KneeTargetRelativeA;
-            float kneeTargetAxisA = Vector3.Dot(kneeTargetRelativeAWorld, flexionAxisWorld);
-
-            bool ok = _legAngularAccelerationFeedforward.Step(
-                hipTargetRelativeAWorld,
-                kneeTargetAxisA,
-                _torso.ControlPhase,
-                _torso.ControlRecoveryActive,
-                _targetSampleTiming.AgeSeconds,
-                _profile.LegAngularAccelerationFeedforwardGain,
-                _profile.LegAngularAccelerationFeedforwardMaxAcceleration,
-                _profile.LegAngularAccelerationFeedforwardMaxSourceSampleAgeSeconds,
-                _hipAuthority.PhysicalRecoveryPending,
-                _softKneeAuthority.PhysicalRecoveryPending,
-                (_hipControlFrame.Active && _profile.LegHipControlFrameInertialization),
-                HipFeedforwardGoalBridgeActive,
-                _dynamicParentActive && _torso.Report != null && _torso.ControlPolicy.HipGoalGateOnlyHip,
-                _kneePlannedFeedforwardSelected);
-            CaptureLegTurnHipFeedforward(ok, hipTargetRelativeAWorld, kneeTargetAxisA);
-            CopyLegAngularAccelerationFeedforwardToReport();
-            return ok;
-        }
-
         private void ApplyHipPd()
         {
             _lastHipAppliedAngularAccelerationWorld = Vector3.zero;
@@ -2201,7 +2170,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _controlTargetKneeRelativeAngularVelocityLocal = _sampledTargetKneeRelativeAngularVelocityLocal;
 
             if (_footFoundation != null && _footFoundation.IsBuilt)
-                _footFoundation.SampleSourcePose(_runtimeSource, _targetRenderSampleSequence, _targetRenderSampleUnscaledTime, advanceVelocityEstimator);
+                _footFoundation.SampleSourcePose(_runtimeSource, _targetRenderSampleSequence, _targetRenderSampleUnscaledTime,
+                    advanceVelocityEstimator, advanceVelocityEstimator ? CaptureKneeFootGroundInput() : default);
         }
 
         private void UpdatePhaseTimingBeforeBodyMeasurement()

@@ -9,6 +9,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
 {
     internal sealed partial class PelvisReceiverReport
     {
+        internal readonly HipAllocationAuditReport AllocationAudit = new HipAllocationAuditReport();
         internal string Arm = "OFF_V04470_PELVIS_RECEIVER", TraceArm, Issue;
         internal bool Selected, Dynamic, Active, Ready, Quiesced, Finite = true, BaselineCaptured, BaselineRestored = true;
         internal bool TraceRunning, TraceDynamic, TraceHipTranslation;
@@ -239,6 +240,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
 
         internal struct Frame
         {
+            internal PhysicsStepContext InputStep; // Physical identity; Fixed is receiver-trace-local.
             internal MotionInput Motion;
             internal PhysicsStepContext MotionNextStep;
             internal PelvisHipAttitudeCommand HipAttitude;
@@ -291,7 +293,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
             for (int k = 0; k < Count; k++)
             {
                 Frame f = Ring[(Next - Count + k + Ring.Length) % Ring.Length];
-                sb.Append("\nreceiverRow=").Append(f.Fixed).Append('>').Append(f.Settled).Append("/dt=").Append(F(f.Dt))
+                sb.Append("\nreceiverRow=").Append(f.Fixed).Append('>').Append(f.Settled).Append('/').Append(f.InputStep.Status()).Append("/dt=").Append(F(f.Dt))
                     .Append("/knownCommonJ(pelvis-chest)=").Append(V(f.PelvisJ)).Append('|').Append(V(f.ChestJ)).Append("/pelvisTorqueJ=").Append(V(f.TorqueJ))
                     .Append("/externalHipTranslationJ(left-right)=").Append(V(f.HipLeftJ)).Append('|').Append(V(f.HipRightJ))
                     .Append("/externalHipMomentJ=").Append(V(f.HipMomentJ)).Append("/hipInputJoined=").Append(f.HipReactionRecorded)
@@ -307,6 +309,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                     .Append("/end=").Append(f.Resolved ? "RESOLVED" : f.Censored ? "CENSORED_UNRESOLVED" : "PENDING");
             }
             sb.Append(GetTrackingDetails());
+            if (TraceHipTranslation) sb.Append("\n").Append(SupportReferenceSummary());
             sb.Append("\nangularEvidence=V04600_RUNTIME_SESSION_CONTEXT/valid-invalid-ready=").Append(AngularEvidenceSamples).Append('-').Append(AngularEvidenceInvalid).Append('-').Append(AngularEvidenceReady)
                 .Append("/responseIntervals-jointAvailable=").Append(AngularResponseSamples).Append('-').Append(JointEvidenceSamples)
                 .Append("/quiet-referenceAway-bodyAway=").Append(QuietSourceSamples).Append('-').Append(ReferenceAwaySamples).Append('-').Append(BodyAwaySamples)
@@ -322,6 +325,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                 .Append("/scope=REFERENCE_CONTRACT_ONLY/legBodies-joints-forces=RUNTIME_SCOPE_OWNED/nativeV=COM_V/commandV=ORIGIN_V/UpperTarget=SOURCE_RELATIVE_POSE_ONLY");
             AppendStops(sb);
             AppendMotionEvidence(sb);
+            if (TraceHipTranslation) sb.Append("\n").Append(AllocationAudit.Details(TraceArm == PelvisDynamicReceiverIsolation.DynamicHipArmB));
             sb.Append("\nreceiverReactionContract=V041070/receiverTotalIncludesJointReaction=True/externalAndTotalCapNm=8/attitudeResidualIncludesIntentionalReaction=True/pointForceReactionNotRepeated=True");
             sb.Append("\nreceiverEvidenceNotes=V041060/reference-and-commands=N/response-and-jointReadback=SOLVE_N_MINUS_1/responseDt=PREVIOUS_COMMAND_DT/noSyntheticCleanupResponse=True/jointReadback=UNCALIBRATED_NOT_FEEDBACK/childAngularCommandUnits=RAD_PER_SEC2_NOT_NM/diagnosticFailureChangesPhysics=False")
                 .Append("\nreceiverComContract=P_PLUS_C_MASS_WEIGHTED_NOT_WHOLE_BODY/q=SYSTEM_RESPONSE_RETENTION_NOT_ACTUATOR_RATIO/commonCapMps2=12/referenceLimits=3MPS_6MPS2/deficitFeedback=V105_A_WITH_SETTLED_COM_BRAKE_GUARD/previousReceipt=ADJACENT_COMMITTED_NOT_CURRENT_FEASIBILITY/rawWindow=24PRE_8POST/stopWindow=8PRE_48POST");
@@ -330,7 +334,9 @@ namespace MakemitAGA.ActiveRagdollLab.Model
 
         internal void ResetTracking()
         {
+            ResetSupportReference();
             ResetMotionEvidence();
+            AllocationAudit.Reset();
             ParentReferenceSamples = ParentReferenceInvalid = 0; ParentReferenceIssue = null;
             ParentHipControlGapPeak = ParentHipBridgeShiftPeak = ParentSourceLocalDriftPeak = 0f;
             Array.Clear(RawTiming, 0, RawTiming.Length);

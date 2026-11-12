@@ -108,7 +108,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         internal string GetSummary() => "KNEE_REFERENCE_V041170/selected=" + _selected + "/traceArm=" + _traceArm +
             "/steps-held-stale-alphaLimited-speedLimited=" + _steps + "|" + _held + "|" + _stale + "|" + _alphaLimited + "|" + _speedLimited +
-            "/peak(rawGapDeg-W-A)=" + S(_peakGap * Mathf.Rad2Deg) + "|" + S(_peakW) + "|" + S(_peakA) +
+            "/peak(inputGapDeg-W-A)=" + S(_peakGap * Mathf.Rad2Deg) + "|" + S(_peakW) + "|" + S(_peakA) +
             "/domain=SHARED_FIXED_UPPER_LOCAL_RELATIVE_RWA/FF=CALLER_SELECTED_GATES_ORIGINAL_ALLOCATION_CAPS" +
             "/bounds=KNEE_MAX_A_OVER_KD_AND_EXISTING_FF_BOUND/notHumanLimits=True/traceReset=STATISTICS_ONLY/issue=" + (Issue ?? "<none>");
 

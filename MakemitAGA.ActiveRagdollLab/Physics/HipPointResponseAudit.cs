@@ -92,7 +92,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     (f.ParentV + Vector3.Cross(f.ParentW, f.ParentLever) - c.ParentV).magnitude > 0.0001f)
                 { Fault("CAPTURE_NATIVE_STATE_INVALID"); return; }
                 _pending = f; _hasPending = true; Captured++;
-                _rotationSessionStep = c.Step; _rotationSessionFixed = c.Fixed;
+                _rotationSessionStep = c.Step;
             }
             catch { Fault("CAPTURE_NATIVE_READ_EXCEPTION"); }
         }
@@ -108,7 +108,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 if (!c.Step.Matches(step) || c.Fixed != localFixed || f.CoupledInputsJoined || !f.HipTorqueCaptured ||
                     peer == null || !peer.CurrentApplied || !peer.Finite || !peer.Current.Step.Matches(step) ||
                     peer.Current.Fixed != localFixed || peer.Current.ChildId == c.ChildId || peer.Current.ParentId != c.ParentId ||
-                    !c.ParentInput.SameAs(peer.Current.ParentInput) || !attitude.Matches(c.ParentInput) || attitude.MotionScale != c.MotionScale ||
+                    !c.ParentInput.SameAs(peer.Current.ParentInput) || !attitude.Matches(c.ParentInput) || attitude.MotionScale != c.MotionScale || attitude.UpwardExtraAcceleration != c.UpwardExtraAcceleration ||
+                    peer.Current.UpwardExtraAcceleration != c.UpwardExtraAcceleration ||
                     !PelvisChestPointResponse.Same(attitude.CommonAcceleration, c.CommonAcceleration) ||
                     !PelvisChestPointResponse.Same(attitude.HipForce, -c.Force - peer.Current.Force) ||
                     !PelvisChestPointResponse.Same(attitude.AngularReaction, c.ParentAngularReaction + peer.Current.ParentAngularReaction))
@@ -136,23 +137,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _pending.GoalPath = path;
                 if (normal.Matches(path.Step)) _pending.NormalReference = normal;
             }
-        }
-        internal void CompleteAttitudeBudget(PhysicsStepContext step, int localFixed, PelvisReceiverReport receiver)
-        {
-            CaptureRotationTracking(step, localFixed, receiver);
-            if (!_hasPending) return;
-            try
-            {
-                ResponseFrame f = _pending;
-                if (!f.Command.Step.Matches(step) || f.Command.Fixed != localFixed || !f.CoupledInputsJoined || f.Budget.Valid ||
-                    receiver == null || !receiver.TraceRunning || !receiver.TraceHipTranslation || receiver.CurrentTraceFixed != localFixed ||
-                    receiver.AngularActuation.Fixed != localFixed) return;
-                f.Budget = HipAttitudeBudgetSample.Evaluate(f.Command.ParentInput, receiver.AngularActuation, f.Attitude,
-                    -f.Command.Force - f.PeerForce, f.Command.ParentTorque + f.PeerParentTorque);
-                _pending = f;
-                RetainRotationFrame(f);
-            }
-            catch { } // Missing/invalid evidence is counted at resolution; never changes run eligibility.
         }
         // Called only AFTER this Upper's single full-actuator AddTorque returned.
         // The unissued original request and point correction remain available in Command.
@@ -345,10 +329,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 .Append("/hipActuatorTorque-desiredAlpha=").Append(f.HipTorqueCaptured ? S(f.HipTorque) + "|" + S(f.HipDesiredAlpha) : "NA_NOT_CAPTURED")
                 .Append("/upperTorque(originalRequest-pointCorrection-actuator-netResidual)=").Append(S(c.PureHipTorque)).Append('|').Append(S(c.UpperCorrectionTorque))
                 .Append('|').Append(S(c.UpperActuatorTorque)).Append('|').Append(S(c.UpperActuatorTorque + c.ChildTorque - c.NetHipTorque))
-                .Append("/systemA(target-planned)=").Append(S(c.ParentInput.Acceleration * c.MotionScale)).Append('|')
+                .Append("/systemA(target-planned)=").Append(S(HipSystemAllocation.Target(c.ParentInput, c.MotionScale, c.UpwardExtraAcceleration))).Append('|')
                 .Append(S(c.CommonAcceleration - (c.Force + c.PeerForce) / c.ParentInput.Response.TotalMass))
                 .Append("/q1CommonBudgetRatio=").Append(N(c.CommonBudgetRatio))
                 .Append("/upperActuatorLimitNm=").Append(N(c.UpperActuatorLimitNm))
+                .Append("/upwardExtraA=").Append(N(c.UpwardExtraAcceleration))
                 .Append("/allocation(motionScale-fullFeedbackFeasible-forceScale)=").Append(N(c.MotionScale)).Append('|').Append(c.FullFeedbackFeasible).Append('|').Append(N(c.Scale))
                 .Append("/allocatedCommonA-netHipTorque-alpha=").Append(S(c.CommonAcceleration)).Append('|').Append(S(c.NetHipTorque)).Append('|').Append(S(c.AllocatedHipAlpha))
                 .Append("/upperCorrectionAlpha=").Append(S(c.UpperCorrectionAlpha))

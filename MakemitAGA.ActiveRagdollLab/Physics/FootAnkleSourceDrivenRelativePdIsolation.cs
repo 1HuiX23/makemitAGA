@@ -11,33 +11,16 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     /// remains MaxRelA30 / MaxTau0.35. Contact/gravity are owned separately by the selected run scope.
     /// The historical kinematic A is retained as the unbuilt/drive-off state, not a selectable experiment.
     /// </summary>
-    internal sealed class FootAnkleSourceDrivenRelativePdIsolation
+    internal sealed partial class FootAnkleSourceDrivenRelativePdIsolation
     {
         internal const string Mode = "SOURCE_BONE_DRIVEN_RELATIVE_ANKLE_PD_CAUSAL_AB_V0358";
         internal const string ArmA = "A_KINEMATIC_FROZEN_BASELINE";
         internal const string ArmB = "B_DYNAMIC_SOURCE_BONE_RELATIVE_ANKLE_PD";
 
-        internal const float AnkleAnchorValidityMeters = 0.030f;
-        internal const float FlexionLimitDegrees = 30f;
-        internal const float AxialLimitDegrees = 25f;
-        internal const float InversionLimitDegrees = 15f;
-
-        // First physical-controller qualification values.  These are intentionally code-frozen for one causal run;
-        // they are not Profile sweep knobs.  Kd is near the critical-damping scale for Kp while MaxA/MaxTorque keep
-        // the first source-driven experiment well below the authority used by the major leg joints.
-        internal const float Kp = 24f;
-        internal const float Kd = 8f;
-        internal const float MaxRelativeAngularAcceleration = 30f;
-        internal const float MaxInternalTorqueNm = 0.35f;
-        internal const float MaxFreshTargetAgeSeconds = 0.12f;
-
         // v0.3.69 promoted the v0.3.68 conditioned target-A lane into the frozen free-space Foot baseline; v0.3.70 keeps it unchanged.
         // It still reallocates only the existing MaxRelativeAngularAcceleration budget and composes BEFORE the unchanged
         // final MaxRelA30 and MaxTau0.35 clamps, so no new final authority is introduced.
         internal const string ProductionTargetAccelerationMode = "PRODUCTION_V0368_PERSISTENCE_CONDITIONED_TARGET_A_FF";
-        internal const float TargetAccelerationFeedforwardGain = 1f;
-        internal const float MaxTargetAccelerationFeedforward = 20f;
-
         private const float InertiaEpsilon = 0.000001f;
 
         private bool _armB;

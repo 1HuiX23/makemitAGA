@@ -7,56 +7,51 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 {
     internal sealed partial class BilateralLegCoordinator
     {
+        private string _initialGeometryStatus = "NOT_CHECKED";
+        internal void ResetInitialGeometryPreflight() { _initialGeometryStatus = "NOT_CHECKED"; ResetHipPreparation(); }
+        private void RequireInitialGeometry(PhysicsStepContext step)
+        {
+            InitialGeometryPreflight left = default, right = default;
+            if (SourceContextReady && step.Valid && _contextCursor.Source.Epoch == step.Epoch &&
+                _contextCursor.Source.Sequence == step.SourceSequence &&
+                _supportSurface.TryGetEntryBox(_supportSurface.SelectedId, out UnityEngine.Vector3 center, out UnityEngine.Vector3 half))
+            {
+                if (!_hipContactWindow.QualifiedFor(step) || !_hipJoinWindow.MatchesSupport(_supportSurface.OriginalId, center, half))
+                {
+                    _initialGeometryStatus = "REJECTED";
+                    Plugin.Logger?.LogInfo("[ARL][INITIAL_GEOMETRY_PREFLIGHT] pass=False | issue=QUALIFIED_PREVIEW_OR_SUPPORT_CHANGED | " +
+                        step.Status() + " | " + HipJoinPreparationSummary());
+                    throw new RunPreparationRejectedException("INITIAL_GEOMETRY:QUALIFIED_PREVIEW_OR_SUPPORT_CHANGED");
+                }
+                left = _primary.CaptureInitialGeometry(step, center, half);
+                right = _secondary.CaptureInitialGeometry(step, center, half);
+            }
+            bool pass = left.PreparationIssue == null && right.PreparationIssue == null;
+            _initialGeometryStatus = pass ? "PREPARATION_PASS_CONTACT_NOT_YET_AUTHORIZED" : "REJECTED";
+            string evidence = "[ARL][INITIAL_GEOMETRY_PREFLIGHT] pass=" + pass + " | " + step.Status() +
+                " | supportId=" + _supportSurface.SelectedId +
+                " | domain=PREPARATION_ONLY_CONTACT_AND_LOAD_OFF | limitsMm(rawMin-preparationMin-soleMax-hipGap)=-3|-3|15|5" +
+                " | contactEntryMm(ordinary-recovery)=2|3 | sourceAgeMaxMs=100\n" +
+                left.Summary("PRIMARY") + "\n" + right.Summary("SECONDARY");
+            Plugin.Logger?.LogInfo(evidence);
+            if (!pass) throw new RunPreparationRejectedException("INITIAL_GEOMETRY:primary=" +
+                (left.PreparationIssue ?? "PASS") + ";secondary=" + (right.PreparationIssue ?? "PASS"));
+        }
         internal bool DynamicContactSelected => (_primary != null && _primary.DynamicContactSelected) ||
             (_secondary != null && _secondary.DynamicContactSelected);
-        internal DynamicContactBoundaryIssue DynamicContactIssue
-        {
-            get
-            {
-                if (!IsBuilt || !_bilateralEnabled || _primary == null || _secondary == null)
-                    return DynamicContactBoundaryIssue.MissingFoundation;
-                if (!_primary.DynamicContactSelected || !_secondary.DynamicContactSelected || _primary.DynamicScope != _secondary.DynamicScope)
-                    return DynamicContactBoundaryIssue.Scope;
-                if (!_supportSurface.Active || !_supportSurface.Finite || _supportSurface.Arm != FootSupportSurfaceIsolation.ArmB)
-                    return DynamicContactBoundaryIssue.SupportSurface;
-                if (!_contactShadowSelfPairReadback || _contactShadowSelfPairPrimary != _primary.FootContactShadowCollider ||
-                    _contactShadowSelfPairSecondary != _secondary.FootContactShadowCollider)
-                    return DynamicContactBoundaryIssue.FootSelfPair;
-                bool continuousEntry = PelvisRunScopes.HasHipCoupling(_primary.DynamicScope);
-                bool recoveryEntry = continuousEntry;
-                bool partialGround = continuousEntry;
-                bool coherentKnee = continuousEntry;
-                bool plannedKneeFeedforward = continuousEntry;
-                bool loadAdmission = continuousEntry && _torso != null &&
-                    _torso.PelvisReceiverControl.Arm == PelvisDynamicReceiverIsolation.DynamicHipArmB;
-                if (_primary.ContactEntryContinuous != continuousEntry || _secondary.ContactEntryContinuous != continuousEntry ||
-                    _primary.ContactEntryRecovery != recoveryEntry || _secondary.ContactEntryRecovery != recoveryEntry ||
-                    _primary.StanceLoadAdmissionSelected != loadAdmission || _secondary.StanceLoadAdmissionSelected != loadAdmission ||
-                    _primary.GroundReferenceEnabled != continuousEntry || _secondary.GroundReferenceEnabled != continuousEntry ||
-                    _primary.GroundReferenceApplied != continuousEntry || _secondary.GroundReferenceApplied != continuousEntry ||
-                    _primary.GroundReferencePartial != partialGround || _secondary.GroundReferencePartial != partialGround ||
-                    _primary.KneeReferenceSelected != coherentKnee || _secondary.KneeReferenceSelected != coherentKnee ||
-                    _primary.KneePlannedFeedforwardSelected != plannedKneeFeedforward ||
-                    _secondary.KneePlannedFeedforwardSelected != plannedKneeFeedforward)
-                    return DynamicContactBoundaryIssue.ContactLifecycle;
-                DynamicContactBoundaryIssue primary = _primary.DynamicContactIssue;
-                return primary != DynamicContactBoundaryIssue.None ? primary : _secondary.DynamicContactIssue;
-            }
-        }
-        internal bool DynamicContactReady => DynamicContactIssue == DynamicContactBoundaryIssue.None;
-        internal bool DynamicContactMatchesScope(PelvisRunScope scope) => PelvisRunScopes.IsContact(scope) &&
-            DynamicContactReady && _primary.DynamicScope == scope && _secondary.DynamicScope == scope;
-
-        internal string PrepareDynamicContact(PelvisRunScope scope)
+        internal string PrepareDynamicContact(PelvisRunScope scope, PhysicsStepContext step)
         {
             if (!PelvisRunScopes.IsContact(scope) || !DynamicParentsActive || !FreeSpaceReady || TraceEnabled)
                 throw new InvalidOperationException("DYNAMIC_CONTACT_REQUIRES_JOINED_FREE_SPACE_AND_TRACE_OFF");
-            // Synchronous, after bilateral continuous join and before formal trace/next solve.
+            bool settledHipPreparation = PelvisRunScopes.HasHipCoupling(scope) && _hipContactWindow.QualifiedFor(step);
+            if (PelvisRunScopes.HasHipCoupling(scope) && !settledHipPreparation)
+                throw new RunPreparationRejectedException("HIP_CONTACT_PREPARATION_RECEIPT_REQUIRED");
+            // Synchronous, after join/settled preparation and before formal trace/next solve.
             // No collider is enabled by this setup; stance owns later OFF->ON transitions.
             if (PelvisRunScopes.HasKneeCoupling(scope))
             {
-                _primary.PrepareDynamicKneeCoupling(scope);
-                _secondary.PrepareDynamicKneeCoupling(scope);
+                _primary.PrepareDynamicKneeCoupling(scope, step, settledHipPreparation);
+                _secondary.PrepareDynamicKneeCoupling(scope, step, settledHipPreparation);
             }
             SetTranslationPredictiveTailCapture(false);
             SetStanceContactFrictionIsolation(true);
@@ -67,11 +62,14 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             string support = ConfigureFootSupportSurface(FootSupportSurfaceIsolation.ArmB);
             if (!_supportSurface.Active || !_supportSurface.Finite || _supportSurface.Arm != FootSupportSurfaceIsolation.ArmB)
                 throw new InvalidOperationException("DYNAMIC_CONTACT_SUPPORT_SETUP_FAILED:" + support);
+            // Both feet are still collision/gravity OFF. Reject the initial geometry before
+            // selecting contact/enabling load or starting trace; prior preparation is restored
+            // by the normal coordinator if this check rejects the fixture.
+            if (PelvisRunScopes.HasHipCoupling(scope)) RequireInitialGeometry(step);
             bool continuousEntry = PelvisRunScopes.HasHipCoupling(scope);
             bool recoveryEntry = continuousEntry;
             bool partialGround = continuousEntry;
-            bool loadAdmission = continuousEntry && _torso != null &&
-                _torso.PelvisReceiverControl.Arm == PelvisDynamicReceiverIsolation.DynamicHipArmB;
+            bool loadAdmission = continuousEntry; // V041200: both arms retain v119 B admission.
             _primary.SelectContactEntryContinuous(continuousEntry, recoveryEntry, continuousEntry, partialGround, loadAdmission);
             _secondary.SelectContactEntryContinuous(continuousEntry, recoveryEntry, continuousEntry, partialGround, loadAdmission);
             SetStanceOnlyContactQualification(true);
@@ -89,8 +87,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         }
 
         internal string DynamicContactBoundarySummary() => "dynamicContactBoundary=V04870/selected=" + DynamicContactSelected +
+            "/initialGeometry=" + _initialGeometryStatus +
             "/kneeReference(primary-secondary)=" + (_primary?.KneeReferenceSelected ?? false) + ":" + (_secondary?.KneeReferenceSelected ?? false) +
             "/kneePlannedFF(primary-secondary)=" + (_primary?.KneePlannedFeedforwardSelected ?? false) + ":" + (_secondary?.KneePlannedFeedforwardSelected ?? false) +
+            "/kneeGroundTarget(primary-secondary)=" + (_primary?.KneeGroundTargetSelected ?? false) + ":" + (_secondary?.KneeGroundTargetSelected ?? false) +
             "/loadAdmission(primary-secondary)=" + (_primary?.StanceLoadAdmissionSelected ?? false) + ":" + (_secondary?.StanceLoadAdmissionSelected ?? false) +
             "/scope(primary-secondary)=" + (_primary?.DynamicScope.ToString() ?? "MISSING") + ":" + (_secondary?.DynamicScope.ToString() ?? "MISSING") +
             "/issue=" + DynamicContactIssue + "/primary=" + (_primary?.DynamicContactIssue ?? DynamicContactBoundaryIssue.MissingFoundation) +
@@ -149,6 +149,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 " | lowerSelfWeightEvidenceReady=" + (lowerWeight && lower) +
                 " | hipAnchorTranslationPairEvidenceReady=" + (PelvisRunScopes.HasHipCoupling(scope) && hip) +
                 " | dynamicHipWrenchInputEvidenceReady=" + wrench +
+                " | dynamicHipWrenchAuditApplicable=" + (upperWeight && !PelvisRunScopes.HasHipCoupling(scope)) +
                 " | upperSelfWeightEvidenceReady=" + (upperWeight && upper) +
                 " | upperLoadLedgerEvidenceReady=" + upperLedger +
                 " | kneeNormalCouplingEvidenceReady=" + (kneeCoupling && knee) +

@@ -14,6 +14,8 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
         internal string Arm { get; private set; } = "<none>";
         internal string Scene { get; private set; }
         internal string StopReason { get; private set; }
+        internal string StopTrigger { get; private set; }
+        private string _firstAutomaticCause;
         internal bool Started { get; private set; }
         internal bool CleanupPending { get; private set; }
         internal string CompletedSnapshot { get; private set; }
@@ -34,6 +36,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
         {
             if (OwnsScope || CleanupPending) throw new InvalidOperationException("SESSION_BUSY_OR_CLEANUP_PENDING");
             RunId++; Arm = arm; Scene = scene; Started = false; PendingSteps = 0; StopReason = null;
+            StopTrigger = _firstAutomaticCause = null;
             _preparingFor = preparingFor;
             Phase = RunPhase.Preparing;
         }
@@ -43,6 +46,11 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             _warmingFor = dependency;
             Phase = RunPhase.Warming;
         }
+        internal void UpdateReadinessDependency(string dependency)
+        {
+            if (Phase != RunPhase.Warming) throw new InvalidOperationException("SESSION_NOT_WARMING");
+            _warmingFor = dependency;
+        }
         internal void MarkRunning()
         {
             if (Phase != RunPhase.Warming) throw new InvalidOperationException("SESSION_NOT_WARMING");
@@ -50,10 +58,20 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             CompletedSnapshot = CompletedSummary = RejectedSnapshot = RejectedSummary = null;
         }
         internal void CountPendingStep() { if (Phase == RunPhase.Warming) PendingSteps++; }
+        // Capture before the native owner turns selectors/drive off. Later health
+        // checks observe that shutdown, not necessarily the original fault.
+        // This is result provenance only; it never changes eligibility or timing.
+        internal void RecordAutomaticStop(string owner, string reason)
+        {
+            if (!Active || _firstAutomaticCause != null) return;
+            _firstAutomaticCause = "AUTO_FIRST_CAUSE:" + OneLine(owner) + ":" + OneLine(reason);
+        }
+        private static string OneLine(string value) => (value ?? "<none>").Replace('\r', ' ').Replace('\n', ' ');
         internal bool BeginStop(string reason)
         {
             if (!Active) return false;
-            StopReason = reason; Phase = RunPhase.Stopping; return true;
+            StopTrigger = reason; StopReason = _firstAutomaticCause ?? reason;
+            Phase = RunPhase.Stopping; return true;
         }
         internal void Finish(string snapshot, string summary, bool cleanupPending)
         {
@@ -72,6 +90,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             _preparingFor : Phase == RunPhase.Warming ? _warmingFor : "<none>";
         internal string Status() => "runtimeSession=V04620/phase=" + Phase + "/runId=" + RunId +
             "/started=" + Started + "/pending=" + Pending + "/pendingSteps=" + PendingSteps +
-            "/cleanupPending=" + CleanupPending + "/waitingFor=" + WaitingFor + "/stopReason=" + (StopReason ?? "<none>");
+            "/cleanupPending=" + CleanupPending + "/waitingFor=" + WaitingFor + "/stopReason=" + (StopReason ?? "<none>") + StopTriggerDetails;
+        internal string StopTriggerDetails => StopTrigger != StopReason ? "/stopTrigger=" + StopTrigger : "";
     }
 }

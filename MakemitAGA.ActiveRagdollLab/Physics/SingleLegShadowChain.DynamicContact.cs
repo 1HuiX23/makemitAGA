@@ -8,7 +8,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     internal sealed partial class SingleLegShadowChain
     {
         private PelvisRunScope _dynamicScope = PelvisRunScope.DynamicLegFreeSpace;
+        private PhysicsStepContext _dynamicContactPreparationStep;
+        // Before the first contact-scope command, only the exact selection-step receipt
+        // may stand in for an absent command. Free-space warmup steps remain real steps.
+        private bool InitialContactCommandPending => _dynamicContactPreparationStep.Matches(_runtimeStep);
         internal PelvisRunScope DynamicScope => _dynamicScope;
+        internal PreviousFootSupport PreviousReferenceSupport => DriveEnabled && _footFoundation != null
+            ? _footFoundation.PreviousReferenceSupport : default;
         internal bool ContactEntryContinuous => _footFoundation != null && _footFoundation.ContactEntryContinuous;
         internal bool StanceLoadAdmissionSelected => _footFoundation != null && _footFoundation.StanceLoadAdmissionSelected;
         internal bool ContactEntryRecovery => _footFoundation != null && _footFoundation.ContactEntryRecovery;
@@ -50,21 +56,24 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (!PelvisRunScopes.HasHipCoupling(scope)) return _hipAnchorPair.Off;
             HipAnchorPairReport r = _hipAnchorPair.Report;
             if (!r.Selected || !r.Finite || r.RollbackFailures != 0 || r.ChildId != _upperBody.GetInstanceID() || r.ParentId != _pelvisBody.GetInstanceID()) return false;
-            if (r.Current.Fixed == 0) return _dynamicParentSteps == 0 && !r.CurrentApplied;
+            if (r.Current.Fixed == 0) return InitialContactCommandPending && !r.CurrentApplied;
             return r.CurrentApplied && r.Current.Fixed == _fixedUpdateSequence && r.Current.Step.Matches(_runtimeStep) &&
                 r.Current.ChildId == r.ChildId && r.Current.ParentId == r.ParentId;
         }
 
-        // A narrow preparation boundary, called synchronously just after continuous join, before
-        // any child control/trace/contact step. The general drive-OFF selector remains unchanged.
-        internal void PrepareDynamicKneeCoupling(PelvisRunScope scope)
+        // A narrow preparation boundary: immediate join for legacy scopes, or this exact
+        // settled Hip preparation step. No pose, velocity or controller-clock reset occurs.
+        internal void PrepareDynamicKneeCoupling(PelvisRunScope scope, PhysicsStepContext step, bool settledHipPreparation)
         {
+            bool entry = _dynamicParentSteps == 0 ? _joinStep.Matches(step) :
+                PelvisRunScopes.HasHipCoupling(scope) && settledHipPreparation;
             if (!PelvisRunScopes.HasKneeCoupling(scope) || !DynamicParentActive || _traceEnabled ||
-                _dynamicScope != PelvisRunScope.DynamicLegFreeSpace || _dynamicParentSteps != 0 || _dynamicJoinPending ||
+                !entry || !_runtimeStep.Matches(step) ||
+                _dynamicScope != PelvisRunScope.DynamicLegFreeSpace || _dynamicJoinPending ||
                 !FreeSpaceSelectorsOff || !FreeSpaceNativeReady || _hipJoint != null || _kneeJoint != null ||
                 !_hipCharacterJointResponseIsolation.UpperOnlyTetherEnabled || !_kneeCharacterJointResponseIsolation.Enabled ||
                 _kneeCharacterJointResponseIsolation.DeferredForcePending)
-                throw new InvalidOperationException("DYNAMIC_KNEE_COUPLING_REQUIRES_NEW_JOIN_AND_FREE_SPACE_BASELINE");
+                throw new InvalidOperationException("DYNAMIC_KNEE_COUPLING_REQUIRES_CURRENT_PREPARATION_AND_FREE_SPACE_BASELINE");
             _kneeSupportReaction.Select(true);
             if (!KneeSupportNormalReactionIsolation.SelectorContract(_kneeSupportReaction.Report, KneeSupportNormalReactionIsolation.ArmB))
                 throw new InvalidOperationException("DYNAMIC_KNEE_COUPLING_SELECTOR_READBACK_FAILED");
@@ -72,6 +81,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 throw new InvalidOperationException("DYNAMIC_UPPER_LOAD_SELECTOR_READBACK_FAILED");
             if (PelvisRunScopes.HasHipCoupling(scope) && !_hipAnchorPair.Prepare(_upperBody, _pelvisBody))
                 throw new InvalidOperationException("DYNAMIC_HIP_PAIR_PREPARATION_FAILED");
+            _dynamicContactPreparationStep = step;
         }
 
         private bool DynamicUpperWeightMatches()
@@ -79,7 +89,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             UpperSelfWeightSupportReport upper = _upperSelfWeightTransfer.Report;
             if (_upperBody.useGravity != upper.CurrentApplied) return false;
             if (upper.CurrentFixed == 0)
-                return _dynamicParentSteps == 0 && UpperSelfWeightSupportNormalLoadTransferIsolation.SelectorContract(upper,
+                return InitialContactCommandPending && UpperSelfWeightSupportNormalLoadTransferIsolation.SelectorContract(upper,
                     UpperSelfWeightSupportNormalLoadTransferIsolation.ArmB, true);
             return UpperSelfWeightSupportNormalLoadTransferIsolation.DynamicCommandMatches(upper, _report,
                 _footFoundation.Report, _fixedUpdateSequence, _stanceLowerNativeGravity.CurrentApplied);
@@ -92,7 +102,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 !_kneeCharacterJointResponseIsolation.Enabled || _kneeJoint != null ||
                 _kneeCharacterJointResponseIsolation.DeferredForcePending || !IsFinite(knee.CurrentUpperForceWorld)) return false;
             if (knee.CurrentFixed == 0)
-                return _dynamicParentSteps == 0 && knee.CurrentSourceFixed == 0 && !knee.CurrentEligible &&
+                return InitialContactCommandPending && knee.CurrentSourceFixed == 0 && !knee.CurrentEligible &&
                     !knee.CurrentApplied && !knee.CurrentNormalConstraint &&
                     !_kneeCharacterJointResponseIsolation.CurrentSupportNormalConstraint && knee.CurrentUpperForceWorld == UnityEngine.Vector3.zero;
             // Validate the LAST completed pre-solve command, not contact eligibility changed by
@@ -149,6 +159,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 (enabled ? GetDynamicContactIssue(scope) != DynamicContactBoundaryIssue.None : _driveEnabled))
                 throw new InvalidOperationException("DYNAMIC_CONTACT_SCOPE_TRANSITION_NOT_READY");
             _dynamicScope = scope;
+            if (!enabled) _dynamicContactPreparationStep = default;
         }
 
         private bool DynamicEnvironmentNativeReady => DynamicContactSelected

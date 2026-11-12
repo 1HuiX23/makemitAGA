@@ -40,7 +40,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             Report.HipNormalSum = Report.CommonNormalSum = Report.KneeNormalSum = Report.WeightSupportNormalSum = Report.GravityNormalSum = Report.DeltaNormalSum = Report.ResidualNormalSum = 0d;
             Report.PeakAbsHipNormal = Report.PeakAbsResidual = 0f; Report.LedgerFinite = true; Report.LedgerIssue = null;
             // Statistics reset must not erase a gravity command already queued for the next solve.
-            _lastScheduledFixed = 0;
         }
 
         // Resolve the last solve BEFORE any controller, gravity clear, kinematic preview or stop zeroes velocity.
@@ -160,7 +159,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         internal bool Quiesce(Rigidbody upper)
         {
-            EndTrace(); bool ok = GravityOff(upper); ClearCurrent(); return ok;
+            EndTrace(); bool ok = GravityOff(upper); ClearCurrent();
+            _lastScheduledFixed = 0; // Drive/selection lifecycle owns the local clock reset.
+            return ok;
         }
         internal void EndTrace()
         {

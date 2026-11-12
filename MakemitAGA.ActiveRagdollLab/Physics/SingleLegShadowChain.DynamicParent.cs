@@ -71,9 +71,47 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             return state;
         }
 
+        internal InitialGeometryPreflight CaptureInitialGeometry(PhysicsStepContext step, Vector3 floorCenter, Vector3 floorHalf)
+        {
+            if (_footFoundation == null || !_runtimeSource.Valid || _runtimeSource.Epoch != step.Epoch ||
+                _runtimeSource.Sequence != step.SourceSequence ||
+                !_torso.TryGetHeldPelvisTargetPose(_runtimeSource, out Vector3 rawP, out Quaternion rawR)) return default;
+            InitialGeometryPreflight result = _footFoundation.CaptureInitialGeometry(_runtimeSource, step.UnscaledTime, floorCenter, floorHalf);
+            // Reconstruct the frozen Hip anchor in the held raw proxy frame, rather than
+            // conflating its binding offset with current physical tracking response.
+            Vector3 offset = rawP + rawR * _rawHipConnectedAnchorLocal - _sampledUpperPosition;
+            result.HipBindingGap = offset.magnitude; result.HipBindingY = offset.y;
+            return result;
+        }
+
+        internal HipJoinPose ProjectDynamicJoin(PhysicsStepContext step, PelvisParentFrame parent,
+            Vector3 floorCenter, Vector3 floorHalf)
+        {
+            LegInitialState state = PrepareDynamicJoin(step, parent);
+            HipJoinPose p = new HipJoinPose { Hip = state.UpperPosition, Knee = state.LowerPosition,
+                Upper = state.UpperRotation, Lower = state.LowerRotation, RawHip = _sampledUpperPosition,
+                RawUpper = _sampledUpperRotation, RawLower = _sampledLowerRotation };
+            p.Geometry = _footFoundation.ProjectInitialGeometry(_runtimeSource, step.UnscaledTime, floorCenter, floorHalf,
+                state.LowerPosition, state.LowerRotation, out p.Ankle, out p.Foot, out p.RawFoot, out p.RawFootRotation);
+            if (!_torso.TryGetHeldPelvisTargetPose(_runtimeSource, out Vector3 rawP, out Quaternion rawR))
+                p.Geometry.Valid = false;
+            else
+            {
+                Vector3 offset = rawP + rawR * _rawHipConnectedAnchorLocal - _sampledUpperPosition;
+                p.Geometry.HipBindingGap = offset.magnitude; p.Geometry.HipBindingY = offset.y;
+            }
+            return p;
+        }
+
+        internal HipContactPreparationSample CaptureContactPreparation(PhysicsStepContext step, int supportId,
+            Vector3 floorCenter, Vector3 floorHalf) => _footFoundation == null ? default :
+            _footFoundation.CaptureContactPreparation(step, _runtimeSource, supportId, floorCenter, floorHalf,
+                CaptureInitialGeometry(step, floorCenter, floorHalf));
+
         internal void ActivateDynamicJoin(PhysicsStepContext step, PelvisParentFrame parent, LegInitialState state)
         {
             _physicalParent = parent; _initialState = state; _joinStep = step;
+            _dynamicContactPreparationStep = default;
             _dynamicParentSteps = 0; _dynamicJoinPending = true;
             try
             {

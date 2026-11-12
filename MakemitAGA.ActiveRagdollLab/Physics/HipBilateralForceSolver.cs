@@ -5,16 +5,18 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 {
     // Same-solve algebra only. Cancel Upper point moments and the combined effective
     // Pelvis point-force moment, then solve the P+C COM response together with both attachment
-    // forces. Let aS=q*baselineA, F act on Upper, and u drive BOTH P/C COMs:
+    // forces. Let aS=q*baselineA + upwardExtra*Y, F act on Upper, and u drive BOTH P/C COMs:
     //   aSystem=u-(FL+FR)/M; Fi=mi*(feedback_i-pointBias_i+aS).
     // Thus u=aS+(FL+FR)/M. This is known same-step input, not measured-A feedback
-    // or an inverse-q gain. In B, -q*relativeTorque enters parent pointBias and
+    // or an inverse-q gain. With joint reaction enabled, -q*relativeTorque enters parent pointBias and
     // is NOT cancelled by the external point-force compensation. q scales requested
-    // SYSTEM motion and net Upper torque;
+    // the baseline SYSTEM motion and net Upper torque. The retained v127 path can
+    // add upward SYSTEM input at that SAME q under all the same budgets.
+    // v128 publishes uniform actual inputs; the old path serves a value-only candidate;
     // the final actuator u has its own unchanged 12m/s² bound in the same interval.
     // If no full-feedback q is feasible, q=0 and scale forces AND their common
     // compensation together. Flag the lost feedback; do not reset source/reference.
-    internal static class HipBilateralForceSolver
+    internal static partial class HipBilateralForceSolver
     {
         internal const float UpperCorrectionTorqueLimit = 8f;
         internal const float UpperActuatorTorqueLimit = 8f;
@@ -57,9 +59,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             // all balls on that line; q=0 need not be feasible (do not binary-search
             // the whole allocation under a false monotonicity assumption).
             float lo = 0f, hi = 1f;
-            bool feasible = MotionInterval(left, right, lf0, rf0, lf, rf, common0, common1, ref lo, ref hi);
+            bool feasible = BudgetInterval(left, right, 0f, 1f, lf0, rf0, lf, rf, common0, common1, ref lo, ref hi);
             float motion = feasible ? hi : 0f;
             if (!MotionRequest(left, right, motion, out lf, out rf, out Vector3 common)) return false;
+            float upwardExtra = 0f;
+            if (feasible && baseline.UpwardRetentionEligible)
+                RetainUpward(left, right, motion, ref lf, ref rf, ref common, out upwardExtra);
             float scale = 1f;
             if (!feasible)
             {
@@ -85,37 +90,44 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             moment = Vector3.Cross(left.Seed.ParentPoint - left.Seed.ParentCom, -actualL) +
                 Vector3.Cross(right.Seed.ParentPoint - right.Seed.ParentCom, -actualR);
             if (!PelvisHipAttitudeCommand.TryPlanWithReaction(baseline, -actualL - actualR, moment, Reaction(left, right, motion), out PelvisHipAttitudeCommand final) || final.Clamped) return false;
-            final.MotionScale = motion; final.CommonAcceleration = common;
+            final.MotionScale = motion; final.CommonAcceleration = common; final.UpwardExtraAcceleration = upwardExtra;
             if (!final.AllocationMatches()) return false;
-            lc = Compose(left, lf, rf, actualL, actualR, ldf * scale, common, scale, pointScale, correctionScale, actuatorScale, receiverScale, commonScale, dampingPower, motion, feasible, Reaction(left, right, motion));
-            rc = Compose(right, rf, lf, actualR, actualL, rdf * scale, common, scale, pointScale, correctionScale, actuatorScale, receiverScale, commonScale, dampingPower, motion, feasible, Reaction(left, right, motion));
+            lc = Compose(left, lf, rf, actualL, actualR, ldf * scale, common, scale, pointScale, correctionScale, actuatorScale, receiverScale, commonScale, dampingPower, motion, upwardExtra, feasible, Reaction(left, right, motion));
+            rc = Compose(right, rf, lf, actualR, actualL, rdf * scale, common, scale, pointScale, correctionScale, actuatorScale, receiverScale, commonScale, dampingPower, motion, upwardExtra, feasible, Reaction(left, right, motion));
             float le = lc.FeedbackResidualA.magnitude, re = rc.FeedbackResidualA.magnitude;
             return V(lc.PredictedNetA) && V(rc.PredictedNetA) && V(lc.UpperActuatorTorque) && V(rc.UpperActuatorTorque) &&
                 V(lc.AllocatedHipAlpha) && V(rc.AllocatedHipAlpha) && F(le) && F(re) &&
                 (!feasible || (le <= 0.001f * (1f + left.Seed.FeedbackA.magnitude) && re <= 0.001f * (1f + right.Seed.FeedbackA.magnitude)));
         }
-        private static bool MotionInterval(HipAnchorPairInput l, HipAnchorPairInput r, Vector3 lf0, Vector3 rf0,
-            Vector3 lf1, Vector3 rf1, Vector3 common0, Vector3 common1, ref float lo, ref float hi)
+        // Second one-dimensional interval at the ORIGINAL feasible q. XZ, relative
+        // reaction and allocated net Upper torque stay exact. No authority tradeoff,
+        // q inverse, extra force owner or post-hoc clamp. If numerical validation of
+        // the new endpoint fails, retain the already feasible uniform allocation.
+        private static void RetainUpward(HipAnchorPairInput l, HipAnchorPairInput r, float q,
+            ref Vector3 lf, ref Vector3 rf, ref Vector3 common, out float extra)
         {
-            Vector3 lu0 = -Vector3.Cross(l.Seed.ChildPoint - l.Seed.ChildCom, lf0),
-                ru0 = -Vector3.Cross(r.Seed.ChildPoint - r.Seed.ChildCom, rf0),
-                lu1 = -Vector3.Cross(l.Seed.ChildPoint - l.Seed.ChildCom, lf1),
-                ru1 = -Vector3.Cross(r.Seed.ChildPoint - r.Seed.ChildCom, rf1);
-            Vector3 m0 = Vector3.Cross(l.Seed.ParentPoint - l.Seed.ParentCom, -lf0) + Vector3.Cross(r.Seed.ParentPoint - r.Seed.ParentCom, -rf0),
-                m1 = Vector3.Cross(l.Seed.ParentPoint - l.Seed.ParentCom, -lf1) + Vector3.Cross(r.Seed.ParentPoint - r.Seed.ParentCom, -rf1);
-            if (!PelvisHipAttitudeCommand.TryPlanWithReaction(l.Seed.ParentInput, -lf0 - rf0, m0, Reaction(l, r, 0f), out PelvisHipAttitudeCommand p0) ||
-                !PelvisHipAttitudeCommand.TryPlanWithReaction(l.Seed.ParentInput, -lf1 - rf1, m1, Reaction(l, r, 1f), out PelvisHipAttitudeCommand p1)) return false;
-            return BallInterval(common0, common1, PelvisHipCommandFrame.MaxMagnitude, ref lo, ref hi) &&
-                BallInterval(ForceResponse(l, lf0, rf0), ForceResponse(l, lf1, rf1), HipCharacterJointResponseIsolation.TetherMaxAcceleration, ref lo, ref hi) &&
-                BallInterval(ForceResponse(r, rf0, lf0), ForceResponse(r, rf1, lf1), HipCharacterJointResponseIsolation.TetherMaxAcceleration, ref lo, ref hi) &&
-                BallInterval(lu0, lu1, UpperCorrectionTorqueLimit, ref lo, ref hi) &&
-                BallInterval(ru0, ru1, UpperCorrectionTorqueLimit, ref lo, ref hi) &&
-                BallInterval(lu0, l.PureTorque + lu1, ActuatorLimit(l.PureTorque), ref lo, ref hi) &&
-                BallInterval(ru0, r.PureTorque + ru1, ActuatorLimit(r.PureTorque), ref lo, ref hi) &&
-                BallInterval(p0.RequestedTorque, p1.RequestedTorque, PelvisHipAttitudeCommand.TotalTorqueLimit, ref lo, ref hi) &&
-                (!l.Seed.ParentInput.JointTorqueReaction || BallInterval(p0.ExternalRequestedTorque, p1.ExternalRequestedTorque,
-                    PelvisHipAttitudeCommand.TotalTorqueLimit, ref lo, ref hi));
+            extra = 0f;
+            float available = (1f - q) * l.Seed.ParentInput.Acceleration.y;
+            if (available <= .000001f || !HipSystemAllocation.Valid(l.Seed.ParentInput, q, available) ||
+                !MotionRequest(l, r, q, out Vector3 lf1, out Vector3 rf1, out Vector3 common1, available)) return;
+            float lo = 0f, hi = 1f;
+            if (!BudgetInterval(l, r, q, q, lf, rf, lf1, rf1, common, common1, ref lo, ref hi)) return;
+            float candidate = available * hi;
+            // Recompute from the actual command expression, not the interpolated
+            // interval endpoints. A boundary rounding difference must not stop a run.
+            for (int i = 0; i < 4 && candidate > .000001f; i++, candidate *= .99999f)
+            {
+                if (!MotionRequest(l, r, q, out Vector3 a, out Vector3 b, out Vector3 u, candidate)) return;
+                lo = 0f; hi = 1f;
+                if (!BudgetInterval(l, r, q, q, a, b, a, b, u, u, ref lo, ref hi) ||
+                    !HipSystemAllocation.Matches(l.Seed.ParentInput, q, candidate, u, -a - b)) continue;
+                lf = a; rf = b; common = u; extra = candidate;
+                return;
+            }
         }
+        private static Vector3 Actuator(Vector3 pure, float q, Vector3 correction) =>
+            q == 0f ? correction : q == 1f ? pure + correction : q * pure + correction;
+
         // A convex ball cuts a closed interval, possibly [lo>0,hi]. Find its minimum
         // first, then bisect each crossing from the feasible side. Fixed bounded work;
         // no allocations, iterative physics, trace dependence or arbitrary search grid.
@@ -151,9 +163,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             return lo <= hi;
         }
         private static bool MotionRequest(HipAnchorPairInput left, HipAnchorPairInput right, float motion,
-            out Vector3 lf, out Vector3 rf, out Vector3 common)
+            out Vector3 lf, out Vector3 rf, out Vector3 common, float upwardExtra = 0f)
         {
-            Vector3 systemA = motion * left.Seed.ParentInput.Acceleration;
+            Vector3 systemA = HipSystemAllocation.Target(left.Seed.ParentInput, motion, upwardExtra);
             Vector3 reaction = Reaction(left, right, motion);
             lf = left.Seed.ChildMass * (left.Seed.FeedbackA - PointBias(left, motion, reaction) + systemA);
             rf = right.Seed.ChildMass * (right.Seed.FeedbackA - PointBias(right, motion, reaction) + systemA);
@@ -173,7 +185,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             return Vector3.Cross(pureAlpha, input.Seed.ChildPoint - input.Seed.ChildCom) - parentA;
         }
         private static HipAnchorPairReport.Command Compose(HipAnchorPairInput input, Vector3 raw, Vector3 rawPeer, Vector3 force, Vector3 peer,
-            Vector3 damping, Vector3 common, float scale, float pointScale, float correctionScale, float actuatorScale, float receiverScale, float commonScale, float totalPower, float motion, bool feasible, Vector3 reaction)
+            Vector3 damping, Vector3 common, float scale, float pointScale, float correctionScale, float actuatorScale, float receiverScale, float commonScale, float totalPower, float motion, float upwardExtra, bool feasible, Vector3 reaction)
         {
             HipAnchorPairReport.Command c = input.Seed;
             c.Angular = input.Angular;
@@ -184,7 +196,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             c.CommonBudgetRatio = commonScale;
             c.ChildTorque = Vector3.Cross(c.ChildPoint - c.ChildCom, force); c.ParentTorque = Vector3.Cross(c.ParentPoint - c.ParentCom, -force);
             c.UpperCorrectionTorque = -c.ChildTorque; c.NetHipTorque = motion * input.PureTorque; c.CommonAcceleration = common;
-            c.MotionScale = motion; c.FullFeedbackFeasible = feasible;
+            c.MotionScale = motion; c.UpwardExtraAcceleration = upwardExtra; c.FullFeedbackFeasible = feasible;
             c.AllocatedHipAlpha = input.DesiredAlpha + HipPointPairMobility.InverseTensor(input.ChildInertia, input.ChildPrincipal, c.NetHipTorque - input.PureTorque);
             c.UpperActuatorTorque = c.NetHipTorque + c.UpperCorrectionTorque;
             c.UpperCorrectionAlpha = HipPointPairMobility.InverseTensor(input.ChildInertia, input.ChildPrincipal, c.UpperCorrectionTorque);

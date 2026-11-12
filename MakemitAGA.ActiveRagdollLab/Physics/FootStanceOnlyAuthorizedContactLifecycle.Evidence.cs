@@ -148,6 +148,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 text.Append('/').Append(EntryReferenceGeometryText(frame.Geometry.ReferencePath));
                 text.Append('/').Append(FootGroundReference.SampleText(frame.Geometry.LandingGoal));
                 text.Append('/').Append(FootLandingReferenceEvidence.SampleText(frame.Geometry.LandingPath));
+                text.Append('/').Append(frame.Geometry.ReceiverNormalResponse.Text());
             }
             LogEvent(text.ToString());
         }

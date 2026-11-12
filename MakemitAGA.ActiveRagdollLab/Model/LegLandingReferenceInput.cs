@@ -1,4 +1,5 @@
 using MakemitAGA.ActiveRagdollLab.Runtime;
+using MakemitAGA.ActiveRagdollLab.Physics;
 using UnityEngine;
 
 namespace MakemitAGA.ActiveRagdollLab.Model
@@ -76,6 +77,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         internal int FeedforwardStateBits;
         internal KneeReferenceState Reference;
         internal Vector3 RawSourceA;
+        internal KneeGroundTarget.Sample GroundTarget;
 
         internal bool Matches(PhysicsStepContext step, SourceStepContext source, int localFixed) =>
             Prepared && Step.Matches(step) && Source.Matches(source) && Fixed == localFixed &&
