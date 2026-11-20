@@ -382,6 +382,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _driveEnabled && _poseBridge.Initialized ? _poseBridge.CommandPosition : _sampledPelvisPosition;
         internal Quaternion CurrentPelvisCommandRotation => DynamicPelvisReceiverSelected ? RequireDynamicParentFrame().CommandRotation :
             _driveEnabled && _poseBridge.Initialized ? _poseBridge.CommandRotation : _sampledPelvisRotation;
+        internal ParentHeightProbe.Input LandingHeightInput => _pelvisReceiver.LandingHeightInput;
         internal bool TryGetLegParentCommand(PhysicsStepContext step, out LegParentCommandFrame command)
         {
             command = _legParentCommand;

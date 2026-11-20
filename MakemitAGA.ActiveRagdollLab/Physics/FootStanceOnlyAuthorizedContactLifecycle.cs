@@ -10,8 +10,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     /// v0.4.5 proved that the source animation provides repeatable STANCE/SWING phase evidence while
     /// v0.4.4 proved that keeping both Foot colliders planted through native walking is invalid.  This
     /// layer therefore reuses the frozen v0.4.5 classifier as a phase witness and the closed v0.4.1-v0.4.4
-    /// exact-support contact stack as the mechanical primitive, but allows contact only for a confirmed
-    /// STANCE on an exact currently-qualified static support Collider.
+    /// exact-support contact stack as the mechanical primitive, to grant formal stance contact on an exact currently-qualified static support Collider.
+    /// v154 gives the right Foot a separate, unloaded approach window on the pinned Main Box.
     ///
     /// Important timing rule: the first strong swing sample changes the gait state to TRANSITION_TO_SWING;
     /// this lifecycle sees that state in the same FixedUpdate and disables the Foot Collider before the
@@ -79,15 +79,18 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal void SetEnabled(bool enabled, FootQualifiedContactShadow shadow, BoxCollider footCollider, FootAnkleFoundationReport report)
         {
             _enabled = enabled;
-            if (!enabled) _continuousEntry = _entryRecovery = false;
-            ResetEntryRecoveryHold();
+            AwaitingFormalCallback = false;
+            if (!enabled)
+            {
+                ContactDisabled(report);
+                Precontact.Select(RightFootPrecontact.Mode.Off);
+                _continuousEntry = _entryRecovery = false;
+            }
+            ResetStanceHold();
             _finite = true;
             _invalidReason = null;
             _state = enabled ? StateWaiting : StateDisabled;
             _lastReason = enabled ? "WAITING_FOR_CONFIRMED_STANCE" : "DISABLED";
-            _qualifiedStanceSeconds = 0f;
-            _qualifiedStanceColliderId = 0;
-            _activationGeometryReadySamples = 0;
             _preparedColliderId = 0;
 
             if (!enabled && shadow != null)
@@ -97,6 +100,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         internal void ResetTrace(FootAnkleFoundationReport report)
         {
+            Precontact.ResetTrace();
+            PrecontactEventOrigin = 0;
             ResetEntryTrace();
             _fixedSamples = 0;
             _activeSamples = 0;
@@ -111,20 +116,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _surfaceChangeReleaseCount = 0;
             _identityRejectSamples = 0;
             _activationGeometryRejectSamples = 0;
-            _activationGeometryReadySamples = 0;
             _nonStanceActiveSamples = 0;
             _enableFailures = 0;
             _disableFailures = 0;
             _firstContactFixed = 0;
             _lastContactFixed = 0;
             _lastReleaseFixed = 0;
-            _qualifiedStanceSeconds = 0f;
-            _qualifiedStanceColliderId = 0;
-            if (_enabled && _finite)
-            {
-                _state = StateWaiting;
-                _lastReason = "WAITING_FOR_CONFIRMED_STANCE";
-            }
+            // The next formal decision uses the live hold, identity and geometry across trace boundaries.
             CopyToReport(report);
         }
 
@@ -143,8 +141,41 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             Transform sourceRoot,
             FootAnkleFoundationReport report,
             FootSupportSurfaceIsolation supportSurface = null,
-            EntryContext entryContext = default)
+            EntryContext entryContext = default, FootStanceContactFrictionIsolation friction = null)
         {
+            bool pending = false;
+            bool ok = StepCore(traceEnabled, fixedSequence, fixedDeltaTime, gaitState, strongStanceSample, identityCurrentQualified,
+                identityColliderId, identityColliderPath, currentGroundCollider, shadow, footCollider, sourceRoot, report,
+                supportSurface, entryContext, ref pending);
+            if (ok && _enabled && _continuousEntry && Precontact.Selected != RightFootPrecontact.Mode.Off)
+                ok = FinishPrecontact(pending, fixedSequence, currentGroundCollider, shadow, footCollider, sourceRoot, report, friction);
+            if (Precontact.Physical) AwaitingFormalCallback = true;
+            else if (shadow == null || !shadow.Active) AwaitingFormalCallback = false;
+            if (!ok && Precontact.Tracking)
+                ClosePrecontact(RightFootPrecontact.End.Fault, fixedSequence, shadow, report);
+            if (report != null) report.PrecontactColliderActive = Precontact.Physical;
+            return ok;
+        }
+
+        private bool StepCore(
+            bool traceEnabled,
+            int fixedSequence,
+            float fixedDeltaTime,
+            string gaitState,
+            bool strongStanceSample,
+            bool identityCurrentQualified,
+            int identityColliderId,
+            string identityColliderPath,
+            Collider currentGroundCollider,
+            FootQualifiedContactShadow shadow,
+            BoxCollider footCollider,
+            Transform sourceRoot,
+            FootAnkleFoundationReport report,
+            FootSupportSurfaceIsolation supportSurface,
+            EntryContext entryContext, ref bool pending)
+        {
+            DiagnosticEntryGeometry = default;
+            FirstMissThisStep = OrdinaryEnabledThisStep = RecoveryEnabledThisStep = false;
             if (!_enabled)
             {
                 CopyToReport(report);
@@ -163,26 +194,42 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 return false;
             }
             float dt = fixedDeltaTime;
-            if (_continuousEntry && !shadow.Active)
+            if (_continuousEntry && (!shadow.Active || Precontact.Physical))
             {
                 // Observe the approach before the strong-STANCE filter, using the already-selected Box only.
                 // Invalid pre-candidate evidence is diagnostic; actual admission still fails closed below.
                 if (entryContext.FixedSequence != fixedSequence) entryContext = default;
-                bool captureHistory = traceEnabled && _entryHistoryLogs < MaxEntryHistoryLogs;
+                bool captureHistory = traceEnabled && EntryHistoryAvailable;
                 entryContext.DecompositionValid &= captureHistory;
                 _entryGeometry = CaptureEntryGeometry(footCollider, supportSurface,
                     currentGroundCollider != null ? currentGroundCollider.GetInstanceID() : 0, entryContext, dt);
                 _entryGeometryFixed = fixedSequence;
                 _entryGeometryAtEnable = false;
+                if (traceEnabled)
+                {
+                    DiagnosticEntryGeometry = _entryGeometry;
+                    // A missing current ray identity must not hide height relative
+                    // to the owner's already-validated controlled Box. This second
+                    // query runs only when the original path read NO corners;
+                    // never copy it back into _entryGeometry or grant contact.
+                    if (!_entryGeometry.Valid && _entryGeometry.Issue == "CONTROLLED_BOX_REQUIRED" && supportSurface != null)
+                    {
+                        var diagnostic = CaptureEntryGeometry(footCollider, supportSurface, supportSurface.SelectedId, entryContext, dt);
+                        diagnostic.DiagnosticSelectedBox = true;
+                        DiagnosticEntryGeometry = diagnostic;
+                    }
+                }
                 if (captureHistory) RecordEntryHistory(fixedSequence, dt, gaitState, strongStanceSample, identityCurrentQualified, _entryGeometry);
             }
+            if (_continuousEntry && !UpdatePrecontact(fixedSequence, gaitState, currentGroundCollider, shadow,
+                footCollider, supportSurface, report, entryContext, ref pending)) return false;
             bool confirmedStance = string.Equals(gaitState, FootGameNativeLocomotionPhaseObserver.StateStance, StringComparison.Ordinal);
             bool transitionToSwing = string.Equals(gaitState, FootGameNativeLocomotionPhaseObserver.StateToSwing, StringComparison.Ordinal);
             bool swing = string.Equals(gaitState, FootGameNativeLocomotionPhaseObserver.StateSwing, StringComparison.Ordinal);
             bool anyTransition = string.Equals(gaitState, FootGameNativeLocomotionPhaseObserver.StateToSwing, StringComparison.Ordinal) ||
                                  string.Equals(gaitState, FootGameNativeLocomotionPhaseObserver.StateToStance, StringComparison.Ordinal);
 
-            if (shadow.Active)
+            if (shadow.Active && !Precontact.Physical)
             {
                 // Contact authority is stricter than the hysteretic phase label: the current source/sole sample
                 // must still satisfy the frozen strong-STANCE predicate. The first sample that leaves that
@@ -332,33 +379,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
             } // legacy serial qualification
 
-            // Reuse a prepared exact support whenever the foot returns to the same floor. Reprepare only when the
-            // authorized support identity changes. This avoids a full scene-isolation rebuild every stride.
-            if (!shadow.Prepared || shadow.AuthorizedColliderId != identityColliderId)
-            {
-                if (shadow.Prepared && shadow.AuthorizedColliderId != identityColliderId)
-                    _surfaceReprepareCount++;
-
-                if (!shadow.PrepareArmB(footCollider, currentGroundCollider, sourceRoot, report, out string prepareError))
-                {
-                    Invalidate("STANCE_CONTACT_PREPARE_FAILED:" + Clean(prepareError), report);
-                    return false;
-                }
-                _prepareCount++;
-                _preparedColliderId = identityColliderId;
-            }
-            else
-            {
-                _preparedReuseCount++;
-                _preparedColliderId = identityColliderId;
-            }
-
-            if (!shadow.EnablePreparedArmB(report, out string enableError))
-            {
-                _enableFailures++;
-                Invalidate("STANCE_CONTACT_ENABLE_FAILED:" + Clean(enableError), report);
-                return false;
-            }
+            if (!EnableSupport(identityColliderId, currentGroundCollider, sourceRoot, shadow, footCollider, report)) return false;
 
             _contactActivations++;
             _entryGeometryAtEnable = true;
@@ -384,6 +405,47 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             return true;
         }
 
+        private bool EnableSupport(int identityColliderId, Collider currentGroundCollider, Transform sourceRoot,
+            FootQualifiedContactShadow shadow, BoxCollider footCollider, FootAnkleFoundationReport report)
+        {
+            // Reuse a prepared exact support whenever the foot returns to the same floor. Reprepare only when the
+            // authorized support identity changes. This avoids a full scene-isolation rebuild every stride.
+            if (!shadow.Prepared || shadow.AuthorizedColliderId != identityColliderId)
+            {
+                if (shadow.Prepared && shadow.AuthorizedColliderId != identityColliderId)
+                    _surfaceReprepareCount++;
+
+                if (!shadow.PrepareArmB(footCollider, currentGroundCollider, sourceRoot, report, out string prepareError))
+                {
+                    Invalidate("STANCE_CONTACT_PREPARE_FAILED:" + Clean(prepareError), report);
+                    return false;
+                }
+                _prepareCount++;
+                _preparedColliderId = identityColliderId;
+            }
+            else
+            {
+                _preparedReuseCount++;
+                _preparedColliderId = identityColliderId;
+            }
+
+            // Handoff reuses the live pair. Enabling again would clear its current callback receipt.
+            if (shadow.Active)
+            {
+                if (Precontact.Physical && shadow.AuthorizedCollider == currentGroundCollider && shadow.RuntimeContractValid(footCollider)) return true;
+                Invalidate("STANCE_CONTACT_LIVE_PAIR_MISMATCH", report);
+                return false;
+            }
+            if (!shadow.EnablePreparedArmB(report, out string enableError))
+            {
+                _enableFailures++;
+                Invalidate("STANCE_CONTACT_ENABLE_FAILED:" + Clean(enableError), report);
+                return false;
+            }
+
+            return true;
+        }
+
         internal void EndTrace(FootAnkleFoundationReport report)
         {
             CopyToReport(report);
@@ -397,6 +459,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 if (!shadow.DisableColliderPreservePreparation(report, out error))
                     return false;
             }
+            ContactDisabled(report);
             _enabled = false;
             _continuousEntry = _entryRecovery = false;
             ResetEntryRecoveryHold();
@@ -410,6 +473,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             if (shadow != null)
                 shadow.SetArmA(footCollider, report);
+            ContactDisabled(report);
             _enabled = false;
             _continuousEntry = _entryRecovery = false;
             _state = StateDisabled;
@@ -496,6 +560,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal void CopyToReport(FootAnkleFoundationReport report)
         {
             if (report == null) return;
+            report.PrecontactColliderActive = Precontact.Physical;
             CopyEntryToReport(report);
             bool traceQualified = _finite && report.ContactEntryEvidenceReady &&
                                   _contactActivations >= MinContactActivations &&

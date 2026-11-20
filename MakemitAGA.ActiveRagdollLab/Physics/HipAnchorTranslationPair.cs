@@ -100,11 +100,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             }
             catch (Exception e) { return left.Invalid("HIP_BILATERAL_COMMIT_EXCEPTION:" + e.GetType().Name); }
         }
-        // Value snapshot only, read after bilateral/receiver/controller completion.
-        internal bool TryReadCommittedInput(PhysicsStepContext step, out HipAnchorPairInput input)
+        internal bool TryGetCommittedInput(PhysicsStepContext step, out HipAnchorPairInput input)
         {
-            input = _input;
-            return Report.CurrentApplied && Report.Current.Step.Matches(step) && input.Seed.Step.Matches(step) && input.Ready;
+            input=_input;
+            return Report.CurrentApplied && Report.Current.Step.Matches(step) && input.Seed.Step.Matches(step);
         }
         private bool Commit(HipAnchorPairReport.Command c)
         {

@@ -1,4 +1,5 @@
 using System;
+using MakemitAGA.ActiveRagdollLab.Physics;
 using System.Text;
 
 namespace MakemitAGA.ActiveRagdollLab.Runtime
@@ -43,7 +44,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
     internal sealed class PelvisTestCoordinator
     {
         internal const string Plan = "TORSO_SAMPLE> TORSO_CONTROL_AND_PARENT_PUBLISH> CLOCKED_LEGS_IF_PRESENT> SESSION_READINESS";
-        internal const string TestInstructions = "ARL pelvis v0.4.128：骨盆独立基线使用arl_pelvis_test_setup → arl_pelvis_test(b)。自动[STARTED]后才计时；结束arl_pelvis_test(stop)、arl_test_cleanup、arl_test_status各一次。动态腿足无接触用arl_pelvis_leg_test，无载荷接触用arl_pelvis_contact_test，足部自重接触用arl_pelvis_foot_load_test，小腿自重用arl_pelvis_lower_load_test，膝部耦合回归用arl_pelvis_knee_test，大腿自重回归用arl_pelvis_upper_load_test，当前Hip同输入只读对照先测arl_pelvis_hip_test(b)，重启后从建模到收尾全程客厅Main；两臂固定126 B膝足联合输入并实际执行127 A统一q，B只在实际命令完成后计算原预算内的同q向上与角请求交换候选；candidateExecuted=False为预期，A保留为关闭审计的回归入口；arl_test_setup先等待[SETUP_READY]再drive/PCA，正式Hip run前分别等待预计初态与接入后的实际刚体检查，WAIT_INITIAL_GEOMETRY/WAIT_SETTLED_GEOMETRY期间继续站立；[NOT_STARTED]时清理后重新建模，勿继续正式测试。原接触/承重准入、缺口反馈方向/制动保护、安全线和控制预算保持。";
+        internal const string TestInstructions = "ARL v0.4.166。本轮测 B，在 Main 平地从 arl_test_setup 开始。SETUP_READY 后 arl_drive(on) → arl_knee_axis_calibrate(on)，自然行走和转身采样。arl_knee_axis_status 双侧 COLLECTING_QUALITY_READY_STOP_TO_FINALIZE 后 arl_knee_axis_calibrate(off)，双侧 ready=True 后 arl_knee_axis_apply → arl_hip_stack(on)。arl_hip_stack_status 双侧 READY 后静止约 1 秒，执行 arl_pelvis_hip_test(b)。等待几何时静止，见 STARTED 与对应实验臂后计时。静止 40 秒、自然走停转身 40 秒（直线优先）、静止 20 秒。arl_pelvis_hip_test(stop) → arl_test_cleanup → arl_test_status。NOT_STARTED 或自动停止后直接 cleanup、status。revision=V041660_LEFT_FOOT_HORIZONTAL_LEAD_20261120。";
         private readonly IPelvisRunPort _port;
         internal readonly RunSession Session = new RunSession();
         private PhysicsStepContext _lastStep;
@@ -53,7 +54,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
         {
             if (string.Equals(requestedArm, "stop", StringComparison.OrdinalIgnoreCase)) return Stop("USER_STOP");
             string arm = _port.ResolveArm(requestedArm);
-            if (arm == null) return Reject("RETIRED_OR_INVALID_ARM | 当前Hip用arl_pelvis_hip_test(a|b)，A=原Knee输入并观察候选，B=有界地面相容Knee输入；两臂共同采用124 B法向反馈、匹配缺口回算及原参考/承重/足部背景，保留原保护、接触入口与安全门，旧完整arm标识已退休。大腿自重用arl_pelvis_upper_load_test(b)，膝部法向耦合用arl_pelvis_knee_test(b)，小腿自重用arl_pelvis_lower_load_test(b)，足部自重用arl_pelvis_foot_load_test(b)，无载荷接触用arl_pelvis_contact_test(b)，无接触用arl_pelvis_leg_test(a|b)，独立骨盆用arl_pelvis_test(b)。");
+            if (arm == null) return Reject("RETIRED_OR_INVALID_ARM | 参数与当前测试入口不匹配。请用 arl_help 核对该入口支持的实验臂。");
             string failure = _port.Preflight();
             if (failure != null) return Reject(failure);
             if (Session.Active)
@@ -70,9 +71,9 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
                 _port.Prepare(arm);
                 Session.AwaitReadiness();
                 if (_port.Ready) BeginTrace();
-                string result = "ARL pelvis v0.4.128 | started=" + Session.Started + " | pending=" + Session.Pending +
+                string result = "ARL pelvis v0.4.166 | started=" + Session.Started + " | pending=" + Session.Pending +
                     " | scope=" + _port.Scope + " | runId=" + Session.RunId + " | testArm=" + Session.Arm + " | " + _port.ReadinessSummary() + " | " + Session.Status();
-                _port.Emit("[ARL][PELVIS_TEST_BUNDLE][" + (Session.Started ? "START_ACK" : "PENDING_NATIVE_SOLVES") + "] " + result, false, false);
+                Emit("[ARL][PELVIS_TEST_BUNDLE][" + (Session.Started ? "START_ACK" : "PENDING_NATIVE_SOLVES") + "] " + result, false, false);
                 return result;
             }
             catch (RunPreparationRejectedException e) { return RejectPreparation(e.Message); }
@@ -86,16 +87,20 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
         private string Reject(string reason)
         {
             string result = "ARL pelvis | started=False | reason=" + reason;
-            _port.Emit("[ARL][PELVIS_TEST_BUNDLE][NOT_STARTED] " + result, true, false); return result;
+            Emit("[ARL][PELVIS_TEST_BUNDLE][NOT_STARTED] " + result, true, false); return result;
         }
         private void BeginTrace()
         {
             _port.BeginTrace();
             if (!_port.Tracing) throw new InvalidOperationException("RECEIVER_TRACE_START_FAILED");
             Session.MarkRunning();
-            string text = "ARL pelvis [STARTED] | started=True | pending=False | runId=" + Session.RunId +
+            LandingObservationTiming.Run.Begin(Session.Arm);
+            string observation = LandingObservationTiming.Run.Running ? " | landingObservation=" + LandingObservationTiming.ModeName(LandingObservationTiming.Run.Compact) +
+                " | eventHistory=" + LandingObservationTiming.Run.History + " | rightPrecontactArm=" +
+                RightFootPrecontact.ForArm(Session.Arm) + " | leftReleaseProbe=" + LandingObservationTiming.Run.LeftReleaseProbe : "";
+            string text = "ARL pelvis [STARTED] | started=True | pending=False | runId=" + Session.RunId + observation +
                 " | scope=" + _port.Scope + " | testArm=" + Session.Arm + " | " + _port.ReadinessSummary() + " | " + Session.Status();
-            _port.Emit("[ARL][PELVIS_TEST_BUNDLE][STARTED] " + text, false, false);
+            Emit("[ARL][PELVIS_TEST_BUNDLE][STARTED] " + text, false, false);
             _port.ShowStatus(text);
         }
         private string RejectPreparation(string reason)
@@ -103,7 +108,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             Stop("SETUP_REJECTED:" + Clean(reason));
             string text = "ARL pelvis [NOT_STARTED] | started=False | reason=" + Clean(reason) +
                 " | 初始化未通过，已停止准备；先arl_test_cleanup，再站稳后重新arl_test_setup及PCA。";
-            _port.Emit("[ARL][PELVIS_TEST_BUNDLE][NOT_STARTED] " + text, true, false);
+            Emit("[ARL][PELVIS_TEST_BUNDLE][NOT_STARTED] " + text, true, false);
             _port.ShowStatus(text);
             return text;
         }
@@ -133,6 +138,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
         internal string Stop(string reason)
         {
             if (!Session.BeginStop(reason)) return "ARL pelvis stop | alreadyStopped=True | " + (Session.CompletedSummary ?? "completedRun=<none>");
+            bool measured = Session.Started && LandingObservationTiming.Run.Seal();
             string header = "resultId=PELVIS/" + Plugin.SourceRevision + "/" + Session.RunId + " | sourceRevision=" + Plugin.SourceRevision + " | runId=" + Session.RunId + " | finishingArm=" + Session.Arm +
                 " | scope=" + _port.Scope + " | started=" + Session.Started + " | scene=" + Clean(Session.Scene) + " | stopReason=" + Session.StopReason + Session.StopTriggerDetails;
             bool automatic = reason.StartsWith("AUTO_", StringComparison.Ordinal);
@@ -149,27 +155,42 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             bool safe = false, restoreReturned = false;
             try { safe = _port.Restore(cleanup); restoreReturned = true; }
             catch (Exception e) { cleanup.AppendLine("RESTORE_EXCEPTION=" + e.GetType().Name); }
+            if (measured)
+            {
+                try { snapshot += LandingObservationTiming.Run.Summary(); }
+                catch (Exception e) { cleanup.AppendLine("LANDING_COST_SUMMARY_EXCEPTION=" + e.GetType().Name); }
+            }
+            string notice;
+            try { notice = _port.Notice(); }
+            catch (Exception e) { notice = "NOTICE_SNAPSHOT_EXCEPTION=" + e.GetType().Name; }
             string summary = header + " | torsoSafeOffAndBaselineRestored=" + safe;
             string complete = (Session.Started ? "[COMPLETED_PELVIS_TEST]\n" : "[REJECTED_PELVIS_SETUP]\n") + snapshot +
-                "\n[NOTICE_AT_FINALIZE]\n" + _port.Notice() + "\n[STOP_CLEANUP]\n" + cleanup;
+                "\n[NOTICE_AT_FINALIZE]\n" + notice + "\n[STOP_CLEANUP]\n" + cleanup;
             Session.Finish(complete, summary, _port.CleanupPending || !safe);
             // A successful defensive full rollback resolves pending ownership, while preserving
             // the baseline-restore failure in immutable evidence.
             if (restoreReturned && !_port.CleanupPending) Session.NoteCleanup(false);
-            _port.Emit("[ARL][PELVIS_TEST_BUNDLE][STOP] " + complete + "\n[SESSION_AFTER_STOP]\n" + Session.Status(), false, automatic);
+            Emit("[ARL][PELVIS_TEST_BUNDLE][STOP] " + complete + "\n[SESSION_AFTER_STOP]\n" + Session.Status(), false, automatic);
             try { _port.WriteReports(); }
-            catch (Exception e) { _port.Emit("[ARL][REPORT_WRITE_FAILED] " + e.GetType().Name, true, false); }
-            return "ARL pelvis v0.4.128 | stopped=True | " + summary;
+            catch (Exception e) { Emit("[ARL][REPORT_WRITE_FAILED] " + e.GetType().Name, true, false); }
+            return "ARL pelvis v0.4.166 | stopped=True | " + summary;
         }
         internal string Status(bool detailed = true)
         {
-            string live = "ARL pelvis v0.4.128 | stateScope=LIVE_STATE | scope=" + _port.Scope + " | pelvisTestActive=" + Session.Active +
+            string live = "ARL pelvis v0.4.166 | stateScope=LIVE_STATE | scope=" + _port.Scope + " | pelvisTestActive=" + Session.Active +
                 " | started=" + Session.Started + " | pending=" + Session.Pending + " | testArm=" + Session.Arm + " | " + Session.Status() +
                 " | plan=" + Plan + " | " + _lastStep.Status();
             if (!detailed) return live + Session.EvidenceSummary();
             if (Session.Active) return live + "\n" + _port.LiveDetails();
             return live + (Session.RejectedSnapshot != null ? "\n[LAST_REJECTED_PELVIS_SETUP]\n" + Session.RejectedSnapshot : "") +
                 (Session.CompletedSnapshot != null ? "\n" + Session.CompletedSnapshot : "");
+        }
+        // Presentation is optional. A failed logger must not be caught as a
+        // preparation/control failure, or escape after native restoration completed.
+        private void Emit(string text, bool warning, bool deferred)
+        {
+            try { _port.Emit(text, warning, deferred); }
+            catch { } // Session snapshots remain available through explicit status.
         }
         private static string Clean(string value) => (value ?? "<none>").Replace('\r', ' ').Replace('\n', ' ');
     }

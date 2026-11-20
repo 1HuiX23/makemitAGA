@@ -49,6 +49,9 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         internal Vector3 RawP, ReferenceP, ActualP, LocalAnchor;
         internal Quaternion RawR, ReferenceR, ActualR;
 
+        internal Vector3 ReferencePoint => ReferenceP + ReferenceR * LocalAnchor;
+        internal Vector3 ActualPoint => ActualP + ActualR * LocalAnchor;
+
         internal bool Matches(PhysicsStepContext step, SourceStepContext source) =>
             Prepared && Step.Matches(step) && Source.Matches(source) && source.Valid &&
             source.Epoch == step.Epoch && source.Sequence == step.SourceSequence &&

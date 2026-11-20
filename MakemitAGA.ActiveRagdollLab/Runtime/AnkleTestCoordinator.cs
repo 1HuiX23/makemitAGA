@@ -34,7 +34,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
     {
         internal const string StopCommand = "arl_ankle_test(stop)";
         internal const string Plan = "PREFLIGHT>FROZEN_SELECTORS>LEG_DRIVE>CCD_OFFSET_SOLVERS>SUPPORT>SHARED_TRACE>RUNNING";
-        internal const string TestInstructions = "ARL ankle v0.4.128：旧腿足组合的共享时钟与父级命令回归。重启游戏、同房同起点；arl_test_setup → 等待[SETUP_READY] → arl_drive(on) → arl_knee_axis_calibrate(on)。同房走动采样，以arl_knee_axis_status确认双侧COLLECTING_QUALITY_READY_STOP_TO_FINALIZE后arl_knee_axis_calibrate(off)，确认双侧ready=True → arl_knee_axis_apply → arl_hip_stack(on)，确认READY；arl_ankle_test(b)，须started=True、phase=Running、sharedTraceReady=True、V04460ReceiverCaptured=True、auditFinite=True、sourceContextReady=True后arl_test_status；站立40秒、正常走动30秒、停下站立10秒；arl_ankle_test(stop) → arl_test_cleanup → arl_test_status各一次。拒绝启动或自动停止则直接收尾并保存完整日志。";
+        internal const string TestInstructions = "ARL ankle v0.4.140：旧腿足组合的共享时钟与父级命令回归。重启游戏、同房同起点；arl_test_setup → 等待[SETUP_READY] → arl_drive(on) → arl_knee_axis_calibrate(on)。同房走动采样，以arl_knee_axis_status确认双侧COLLECTING_QUALITY_READY_STOP_TO_FINALIZE后arl_knee_axis_calibrate(off)，确认双侧ready=True → arl_knee_axis_apply → arl_hip_stack(on)，确认READY；arl_ankle_test(b)，须started=True、phase=Running、sharedTraceReady=True、V04460ReceiverCaptured=True、auditFinite=True、sourceContextReady=True后arl_test_status；站立40秒、正常走动30秒、停下站立10秒；arl_ankle_test(stop) → arl_test_cleanup → arl_test_status各一次。拒绝启动或自动停止则直接收尾并保存完整日志。";
         private readonly IAnkleRunPort _port;
         internal readonly RunSession Session = new RunSession();
         internal string CompletedAudit { get; private set; }
@@ -64,11 +64,11 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
                 Session.AwaitReadiness("BOTH_LEG_DRIVES_AND_SHARED_TRACE");
                 if (!_port.Ready) throw new InvalidOperationException("ANKLE_READY_READBACK_FAILED:" + _port.ReadinessSummary());
                 Session.MarkRunning(); CompletedAudit = null;
-                string result = "ARL ankle v0.4.128 | started=True | pending=False | runId=" + Session.RunId +
+                string result = "ARL ankle v0.4.140 | started=True | pending=False | runId=" + Session.RunId +
                     " | arm=" + Session.Arm + " | " + Session.Status() + " | " + _port.ReadinessSummary();
-                _port.Emit("[ARL][ANKLE_TEST_BUNDLE][STARTED] " + result + " | " + details, true, false);
+                Emit("[ARL][ANKLE_TEST_BUNDLE][STARTED] " + result + " | " + details, true, false);
                 try { _port.WriteReports(); }
-                catch (Exception e) { _port.Emit("[ARL][REPORT_WRITE_FAILED] " + e.GetType().Name, true, false); }
+                catch (Exception e) { Emit("[ARL][REPORT_WRITE_FAILED] " + e.GetType().Name, true, false); }
                 return result;
             }
             catch (Exception e)
@@ -82,7 +82,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
         private string Reject(string reason)
         {
             string text = "ARL ankle | started=False | reason=" + reason;
-            _port.Emit("[ARL][ANKLE_TEST_BUNDLE][NOT_STARTED] " + text, true, false);
+            Emit("[ARL][ANKLE_TEST_BUNDLE][NOT_STARTED] " + text, true, false);
             return text;
         }
 
@@ -105,7 +105,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             if (!Session.BeginStop(reason))
             {
                 string noOp = "ARL ankle stop | alreadyStopped=True | " + (Session.CompletedSummary ?? "completedRun=<none>");
-                _port.Emit("[ARL][ANKLE_STOP_NO_OP] " + noOp, false, false); return noOp;
+                Emit("[ARL][ANKLE_STOP_NO_OP] " + noOp, false, false); return noOp;
             }
             string header = "resultId=ANKLE/" + Plugin.SourceRevision + "/" + Session.RunId + " | sourceRevision=" + Plugin.SourceRevision + " | runId=" + Session.RunId +
                 " | finishingArm=" + Session.Arm + " | scene=" + Clean(Session.Scene) + " | stopReason=" + Session.StopReason + Session.StopTriggerDetails;
@@ -129,22 +129,32 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             catch (Exception e) { cleanup.AppendLine("RESTORE_EXCEPTION=" + e.GetType().Name); }
             cleanup.AppendLine("legStopReadbackSafe=" + safe + " | torsoDriveRequiresTestCleanup=" + Session.Started);
             string scope = Session.Started ? "COMPLETED_RUN" : "REJECTED_SETUP";
+            string notice;
+            try { notice = _port.Notice(); }
+            catch (Exception e) { notice = "NOTICE_SNAPSHOT_EXCEPTION=" + e.GetType().Name; }
             string summary = header + " | resultScope=" + scope + " | legStopReadbackSafe=" + safe;
             string snapshot = (Session.Started ? "[COMPLETED_ANKLE_TEST] " : "[REJECTED_ANKLE_SETUP] ") + header +
                 "\n" + evidence.Audit + "\n" + evidence.Snapshot + "\n[RUNTIME_AT_FINALIZE]\n" + Session.Status() +
-                "/plan=" + Plan + "\n" + _lastStep.Status() + "\n[NOTICE_AT_FINALIZE]\n" + _port.Notice() + "\n[STOP_CLEANUP]\n" + cleanup;
+                "/plan=" + Plan + "\n" + _lastStep.Status() + "\n[NOTICE_AT_FINALIZE]\n" + notice + "\n[STOP_CLEANUP]\n" + cleanup;
             if (Session.Started) CompletedAudit = evidence.Audit;
             Session.Finish(snapshot, summary, _port.CleanupPending || !safe);
             if (restoreReturned && !_port.CleanupPending) Session.NoteCleanup(false);
-            _port.Emit("[ARL][ANKLE_TEST_BUNDLE][" + (Session.Started ? "STOP" : "REJECTED_SETUP") + "] " + snapshot +
+            Emit("[ARL][ANKLE_TEST_BUNDLE][" + (Session.Started ? "STOP" : "REJECTED_SETUP") + "] " + snapshot +
                 "\n[SESSION_AFTER_STOP]\n" + Session.Status(), !Session.Started, automatic);
             try { _port.WriteReports(); }
-            catch (Exception e) { _port.Emit("[ARL][REPORT_WRITE_FAILED] " + e.GetType().Name, true, false); }
-            return "ARL ankle v0.4.128 | stopped=True | started=" + Session.Started + " | " + summary;
+            catch (Exception e) { Emit("[ARL][REPORT_WRITE_FAILED] " + e.GetType().Name, true, false); }
+            return "ARL ankle v0.4.140 | stopped=True | started=" + Session.Started + " | " + summary;
         }
 
-        internal string Status(bool detailed = true) => "ARL ankle v0.4.128 | stateScope=LIVE_STATE | ankleTestActive=" + Session.Active +
+        internal string Status(bool detailed = true) => "ARL ankle v0.4.140 | stateScope=LIVE_STATE | ankleTestActive=" + Session.Active +
             " | " + Session.Status() + " | plan=" + Plan + " | sessionLastStep=" + _lastStep.Status() + (detailed ? "\n" + _port.LiveDetails() : "");
+        // Presentation is optional. A failed logger must not be caught as a
+        // preparation/control failure, or escape after native restoration completed.
+        private void Emit(string text, bool warning, bool deferred)
+        {
+            try { _port.Emit(text, warning, deferred); }
+            catch { } // Session snapshots remain available through explicit status.
+        }
         private static string Clean(string text) => (text ?? "<none>").Replace('\r', ' ').Replace('\n', ' ');
     }
 }

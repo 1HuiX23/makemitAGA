@@ -108,7 +108,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 if (!c.Step.Matches(step) || c.Fixed != localFixed || f.CoupledInputsJoined || !f.HipTorqueCaptured ||
                     peer == null || !peer.CurrentApplied || !peer.Finite || !peer.Current.Step.Matches(step) ||
                     peer.Current.Fixed != localFixed || peer.Current.ChildId == c.ChildId || peer.Current.ParentId != c.ParentId ||
-                    !c.ParentInput.SameAs(peer.Current.ParentInput) || !attitude.Matches(c.ParentInput) || attitude.MotionScale != c.MotionScale || attitude.UpwardExtraAcceleration != c.UpwardExtraAcceleration ||
+                    !c.ParentInput.SameAs(peer.Current.ParentInput) || !attitude.Matches(c.ParentInput) || attitude.MotionScale != c.MotionScale || attitude.UpperAngularScale != c.UpperAngularScale || peer.Current.UpperAngularScale != c.UpperAngularScale || attitude.UpwardExtraAcceleration != c.UpwardExtraAcceleration ||
                     peer.Current.UpwardExtraAcceleration != c.UpwardExtraAcceleration ||
                     !PelvisChestPointResponse.Same(attitude.CommonAcceleration, c.CommonAcceleration) ||
                     !PelvisChestPointResponse.Same(attitude.HipForce, -c.Force - peer.Current.Force) ||
@@ -334,7 +334,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 .Append("/q1CommonBudgetRatio=").Append(N(c.CommonBudgetRatio))
                 .Append("/upperActuatorLimitNm=").Append(N(c.UpperActuatorLimitNm))
                 .Append("/upwardExtraA=").Append(N(c.UpwardExtraAcceleration))
-                .Append("/allocation(motionScale-fullFeedbackFeasible-forceScale)=").Append(N(c.MotionScale)).Append('|').Append(c.FullFeedbackFeasible).Append('|').Append(N(c.Scale))
+                .Append("/allocation(motionScale-upperAngularScale-fullFeedbackFeasible-forceScale)=").Append(N(c.MotionScale)).Append('|').Append(N(c.UpperAngularScale)).Append('|').Append(c.FullFeedbackFeasible).Append('|').Append(N(c.Scale))
                 .Append("/allocatedCommonA-netHipTorque-alpha=").Append(S(c.CommonAcceleration)).Append('|').Append(S(c.NetHipTorque)).Append('|').Append(S(c.AllocatedHipAlpha))
                 .Append("/upperCorrectionAlpha=").Append(S(c.UpperCorrectionAlpha))
                 .Append("/pairAlpha(freeUpper-freePelvis-constrainedPelvis)=").Append(S(f.PairChildAlpha)).Append('|').Append(S(f.PairParentAlpha)).Append('|').Append(S(c.ParentResponseAlpha))
@@ -387,7 +387,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (!f.CoupledInputsJoined || !f.HipTorqueCaptured ||
                 !HipActuationOwnership.TryMeasure(f.Command, f.HipTorque, f.ChildW, f.ParentW, f.Attitude, out var o))
             { sb.Append("/hipOwnership=NA_UNJOINED_OR_INVALID"); return; }
-            sb.Append('/').Append(f.Command.Angular.Details(f.Command.MotionScale, f.Command.ParentInput.JointTorqueReaction, f.Command.ParentAngularReaction));
+            sb.Append('/').Append(f.Command.Angular.Details(f.Command.UpperAngularScale, f.Command.ParentInput.JointTorqueReaction, f.Command.ParentAngularReaction));
             sb.Append("/hipOwnership=COMMITTED_INPUTS")
                 .Append("/pointPairMomentNm(parentOrigin-closureResidual)=").Append(S(o.PointPairMoment)).Append('|').Append(S(o.PointMomentClosure))
                 .Append("/upperAngularNm(actualCorrection-netResidual)=").Append(S(o.UpperCorrection)).Append('|').Append(S(o.UpperNetResidual))

@@ -52,7 +52,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private float _peakAllocatedRawAbs;
         private float _peakAppliedAbs;
         private float _suppressedFfAbsSum;
-        private string _lastEvidence = "<none>";
+        private bool _lastInvalid;
 
         internal bool Enabled => _enabled;
         internal string Arm => _enabled ? ArmB : ArmA;
@@ -89,8 +89,18 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _peakAllocatedRawAbs = 0f;
             _peakAppliedAbs = 0f;
             _suppressedFfAbsSum = 0f;
-            _lastEvidence = "<none>";
+            _lastInvalid = false;
             CopyToReport(report);
+        }
+
+        // The live port and the read-only, same-state comparison share the same scalar allocation.
+        internal static float Allocate(float feedback, float feedforward, float cap, bool priority,
+            out float selected, out float raw, out bool opposing)
+        {
+            opposing = feedback * feedforward < -1e-6f;
+            selected = priority && opposing ? 0f : feedforward;
+            raw = feedback + selected;
+            return Mathf.Clamp(raw, -cap, cap);
         }
 
         internal float Compose(
@@ -120,29 +130,26 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _currentOpposing = false;
                 _currentOriginalWouldClamp = false;
                 _currentFinalClamped = false;
-                _lastEvidence = "invalid=True/step=" + _steps;
+                _lastInvalid = true;
                 CopyToReport(report);
                 return 0f;
             }
 
             _activeSteps++;
             _currentOriginalRaw = pdFeedbackSigned + kneeAccelerationFeedforwardSigned;
-            _currentOpposing = pdFeedbackSigned * kneeAccelerationFeedforwardSigned < -1e-6f;
+            float applied = Allocate(pdFeedbackSigned, kneeAccelerationFeedforwardSigned, _currentMaxA, _enabled,
+                out effectiveFeedforwardSigned, out allocatedRawSigned, out _currentOpposing);
             if (_currentOpposing)
                 _opposingSteps++;
             else if (Mathf.Abs(pdFeedbackSigned) > 1e-6f && Mathf.Abs(kneeAccelerationFeedforwardSigned) > 1e-6f)
                 _sameDirectionSteps++;
 
-            effectiveFeedforwardSigned = kneeAccelerationFeedforwardSigned;
             if (_enabled && _currentOpposing)
             {
-                effectiveFeedforwardSigned = 0f;
                 _suppressedOpposingFfSteps++;
                 _suppressedFfAbsSum += Mathf.Abs(kneeAccelerationFeedforwardSigned);
             }
 
-            allocatedRawSigned = pdFeedbackSigned + effectiveFeedforwardSigned;
-            float applied = Mathf.Clamp(allocatedRawSigned, -_currentMaxA, _currentMaxA);
             finalClamped = Mathf.Abs(allocatedRawSigned - applied) > 0.0001f;
 
             _currentEffectiveFf = effectiveFeedforwardSigned;
@@ -158,17 +165,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _peakOriginalRawAbs = Mathf.Max(_peakOriginalRawAbs, Mathf.Abs(_currentOriginalRaw));
             _peakAllocatedRawAbs = Mathf.Max(_peakAllocatedRawAbs, Mathf.Abs(allocatedRawSigned));
             _peakAppliedAbs = Mathf.Max(_peakAppliedAbs, Mathf.Abs(applied));
-            _lastEvidence =
-                "step=" + _steps +
-                "/opposing=" + _currentOpposing +
-                "/pd=" + F(pdFeedbackSigned) +
-                "/ffIn=" + F(kneeAccelerationFeedforwardSigned) +
-                "/ffEff=" + F(effectiveFeedforwardSigned) +
-                "/rawA=" + F(_currentOriginalRaw) +
-                "/allocatedA=" + F(allocatedRawSigned) +
-                "/appliedA=" + F(applied) +
-                "/maxA=" + F(_currentMaxA) +
-                "/clamp=" + finalClamped;
+            _lastInvalid = false;
             CopyToReport(report);
             return applied;
         }
@@ -205,8 +202,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             report.KneeFlexionAllocationSuppressedFfAbsMean = _suppressedOpposingFfSteps > 0
                 ? _suppressedFfAbsSum / _suppressedOpposingFfSteps
                 : 0f;
-            report.KneeFlexionAllocationLastEvidence = _lastEvidence;
-            report.KneeFlexionAllocationKey = GetKey(report);
+            report.CaptureKneeAllocationTextInputs(_lastInvalid);
         }
 
         internal string GetStatus(SingleLegChainReport report)
@@ -221,35 +217,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                    " | current(PD/ffIn/ffEff/raw/allocated/applied/maxA)=" +
                    F(_currentPd) + "/" + F(_currentInputFf) + "/" + F(_currentEffectiveFf) + "/" +
                    F(_currentOriginalRaw) + "/" + F(_currentAllocatedRaw) + "/" + F(_currentApplied) + "/" + F(_currentMaxA) +
-                   " | key=" + GetKey(report);
-        }
-
-        internal string GetKey(SingleLegChainReport report)
-        {
-            string primary;
-            if (!_enabled)
-                primary = "A_V077_SUM_THEN_CLAMP";
-            else if (_invalidSteps > 0)
-                primary = "B_INVALID_NON_FINITE_ALLOCATION_INPUT";
-            else if (_activeSteps == 0)
-                primary = "B_NO_EXPOSURE";
-            else if (_opposingSteps == 0)
-                primary = "B_NO_OPPOSING_AFF_EXPOSURE";
-            else
-                primary = "B_FEEDBACK_PRIORITY_ACTIVE_FROZEN";
-
-            return "primary=" + primary +
-                   " | mode=" + Mode +
-                   " | arm=" + Arm +
-                   " | steps(active/total/invalid)=" + _activeSteps + "/" + _steps + "/" + _invalidSteps +
-                   " | direction(opposing/suppressed/same)=" + _opposingSteps + "/" + _suppressedOpposingFfSteps + "/" + _sameDirectionSteps +
-                   " | clamp(original/final)=" + _originalWouldClampSteps + "/" + _finalClampSteps +
-                   " | peak(PD/ffIn/raw/allocated/applied)=" + F(_peakPdAbs) + "/" + F(_peakInputFfAbs) + "/" + F(_peakOriginalRawAbs) + "/" + F(_peakAllocatedRawAbs) + "/" + F(_peakAppliedAbs) +
-                   " | suppressedFfMean=" + F(_suppressedOpposingFfSteps > 0 ? _suppressedFfAbsSum / _suppressedOpposingFfSteps : 0f) +
-                   " | knee(clamp/mean/max)=" +
-                   (report != null ? report.TraceKneeClampSamples : 0) + "/" +
-                   F(report != null ? report.TraceKneeRotationMeanDegrees : 0f) + "/" +
-                   F(report != null ? report.TraceKneeRotationMaxDegrees : 0f);
+                   " | key=" + (report?.KneeFlexionAllocationKey ?? "<none>");
         }
 
         private static bool IsFinite(float value)

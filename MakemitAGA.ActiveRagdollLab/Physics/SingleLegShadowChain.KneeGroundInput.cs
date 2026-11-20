@@ -19,10 +19,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 return new KneeFootGroundInput
                 {
                     Source = _runtimeSource, CompletedStep = _runtimeStep,
-                    Enabled = true, Apply = _kneeGroundTargetSelected,
+                    Enabled = true, Apply = _kneeGroundTargetSelected, AllowExtension = _kneeGroundExtensionSelected,
+                    PreferKneeProgress = _torso.PelvisReceiverControl.Arm == PelvisDynamicReceiverIsolation.DynamicHipArmA ||
+                        _torso.PelvisReceiverControl.Arm == PelvisDynamicReceiverIsolation.DynamicHipArmB,
+                    CompletedKneeReference = _kneeReference.Current,
                     ParentId = _pelvisBody.GetInstanceID(), UpperId = _upperBody.GetInstanceID(), LowerId = _lowerBody.GetInstanceID(),
                     Hip = _pelvisBody.position + _pelvisBody.rotation * Vector3.Scale(_rawHipConnectedAnchorLocal, parentScale),
-                    // Native readback from this Render snapshot; do not reuse a trace
+                    // PHYSICAL proxy readback at Render, not animation bones; do not reuse a trace
                     // Hip target or pretend last Fixed's command is a new source pose.
                     Upper = _upperBody.rotation, UpperSpan = Vector3.Scale(_kneeParentAnchorUpperLocal, upperScale),
                     LowerKneeAnchor = _kneeChildAnchorLowerLocal,

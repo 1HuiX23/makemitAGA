@@ -15,6 +15,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
             internal bool Valid, InStopWindow, SourceFresh, LinearClamped;
             internal PhysicsStepContext Step, ComReferenceStep, ComFeedbackStep;
             internal PelvisComReferencePlanner.ComPlan ComReference;
+            internal SupportNormalRecovery.Result SupportRecovery;
             internal Vector3 NativeGoalCom, NativeGoalV;
             internal int SourceSequence, SourceEvent, TimingGroup, Stage, StopStartFixed;
             internal string SourcePhase;
@@ -102,7 +103,8 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                     Stage = t.Stage, InStopWindow = t.InStopWindow, StopStartFixed = t.StopStartFixed,
                     StopDirection = t.StopDirection, StopForward = Mathf.Max(0f, -Vector3.Dot(t.ComError, t.StopDirection)),
                     PredictedA = predicted, NativeGoalCom = t.NativeGoalCom, NativeGoalV = t.NativeGoalV,
-                    ComReference = t.ComReference, ComReferenceStep = t.ComReferenceStep, ComFeedbackStep = t.ComFeedbackStep };
+                    ComReference = t.ComReference, ComReferenceStep = t.ComReferenceStep, ComFeedbackStep = t.ComFeedbackStep,
+                    SupportRecovery = t.SupportRecovery };
                 if (RawMotionEligible(f.Motion))
                 {
                     MotionRawEligibleIssued++;
@@ -320,6 +322,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                     .Append("/stop(active-start-direction-forwardMm)=").Append(m.InStopWindow).Append('|').Append(m.StopStartFixed)
                     .Append('|').Append(V(m.StopDirection)).Append('|').Append(F(m.StopForward * 1000f));
                 AppendComReference(sb, m.ComReference, m.ComReferenceStep, m.ComFeedbackStep);
+                AppendSupportRecovery(sb, m.SupportRecovery);
             }
         }
     }

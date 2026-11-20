@@ -4,19 +4,20 @@ using UnityEngine;
 namespace MakemitAGA.ActiveRagdollLab.Physics
 {
     // Horizontal controlled Box only: reduce parent-position lag BELOW the held
-    // calibrated animation origin, within the original vector V/A budget. The
-    // V041200 remainder candidate is retained as A; V041220 B may reallocate the
-    // nominal X/Z increment to normal correction while preserving tangent braking.
+    // calibrated animation origin, within the original vector V/A budget. Historical
+    // V041220 B reallocates the nominal X/Z increment while preserving tangent
+    // braking; current Hip arms both retain it. V041360 B supplies a reference
+    // stopping-distance minimumY; null retains the original one-step floor law.
     // No pose clamp, body write, leg IK or guarantee of a ground-feasible foot.
     internal static class SupportNormalReference
     {
         internal static Vector3 RaiseCandidate(Vector3 position, Vector3 velocity, Vector3 candidate,
-            float floorY, float dt, float maxV, float maxA)
+            float floorY, float dt, float maxV, float maxA, float? minimumY = null)
         {
             if (!V(position) || !V(velocity) || !V(candidate) || !F(floorY) ||
                 !F(dt) || dt <= 0f || !F(maxV) || maxV <= 0f || !F(maxA) || maxA <= 0f)
                 throw new InvalidOperationException("SUPPORT_REFERENCE_INPUT_INVALID");
-            float requiredY = (floorY - position.y) / dt;
+            float requiredY = minimumY ?? (floorY - position.y) / dt;
             if (!F(requiredY)) throw new InvalidOperationException("SUPPORT_REFERENCE_REQUIRED_V_INVALID");
             if (requiredY <= candidate.y) return candidate;
             float dx = candidate.x - velocity.x, dz = candidate.z - velocity.z;
@@ -35,11 +36,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         // existing X/Z velocity is not scaled. Retain nominal tangential braking.
         // The receiver still applies its original deficit/braking feedback afterwards.
         internal static Vector3 AllocateNormalPriority(Vector3 position, Vector3 velocity, Vector3 candidate,
-            float floorY, float dt, float maxV, float maxA, out bool tangentBrakingPreserved)
+            float floorY, float dt, float maxV, float maxA, out bool tangentBrakingPreserved, float? minimumY = null)
         {
             tangentBrakingPreserved = false;
-            Vector3 remainder = RaiseCandidate(position, velocity, candidate, floorY, dt, maxV, maxA);
-            float requiredY = (floorY - position.y) / dt;
+            Vector3 remainder = RaiseCandidate(position, velocity, candidate, floorY, dt, maxV, maxA, minimumY);
+            float requiredY = minimumY ?? (floorY - position.y) / dt;
             if (requiredY <= remainder.y) return remainder;
 
             double dx = (double)candidate.x - velocity.x, dz = (double)candidate.z - velocity.z;

@@ -417,11 +417,17 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (DynamicContactSelected && !DynamicContactReady)
                 throw new InvalidOperationException("DYNAMIC_CONTACT_CONTRACT_LOST:" + DynamicContactIssue);
 
-            _primary.FixedUpdate(step, parent);
-            _secondary?.FixedUpdate(step, parent);
+            using (LandingObservationTiming.Run.Measure(LandingObservationTiming.Stage.LegPrepare))
+            {
+                _primary.FixedUpdate(step, parent);
+                _secondary?.FixedUpdate(step, parent);
+            }
             if (_primary != null && PelvisRunScopes.HasHipCoupling(_primary.DynamicScope) && DriveEnabled && !AnyDriveAborted)
             {
-                if (!_primary.CommitBilateralHipPairs(step, _secondary))
+                bool pairsApplied;
+                using (LandingObservationTiming.Run.Measure(LandingObservationTiming.Stage.HipPair))
+                    pairsApplied = _primary.CommitBilateralHipPairs(step, _secondary);
+                if (!pairsApplied)
                     FailCloseStanceContactIsolation("HIP_BILATERAL_FORCE_COMPLETION_FAILED:" +
                         (_primary.HipAnchorPair.Issue ?? (_secondary?.HipAnchorPair.Issue) ?? "INPUT_OR_CLOCK"));
                 else if (!_torso.CompleteHipTranslationReaction(step, _primary.HipAnchorPair, _secondary.HipAnchorPair))
@@ -435,10 +441,16 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     // and cannot become a second owner or a readiness/safety prerequisite.
                     _primary.CompleteHipPointResponse(step, _secondary.HipAnchorPair);
                     _secondary.CompleteHipPointResponse(step, _primary.HipAnchorPair);
-                    if (string.Equals(PrimarySide, "LEFT", StringComparison.OrdinalIgnoreCase))
-                        _primary.ObserveHipAllocation(step, _secondary);
-                    else
-                        _secondary.ObserveHipAllocation(step, _primary);
+                    bool primaryLeft = string.Equals(PrimarySide, "LEFT", StringComparison.OrdinalIgnoreCase);
+                    var left = primaryLeft ? _primary : _secondary;
+                    var right = primaryLeft ? _secondary : _primary;
+                    left.ObserveHipAllocation(step, right);
+                    if (LandingObservationTiming.Run.LeftReleaseProbe) left.CompleteLeftShinForecast(step);
+                    if (LandingObservationTiming.Run.EarlyProbe)
+                    {
+                        left.ObserveParentHeight(step, right);
+                        right.ObserveRightThighTracking(step, left);
+                    }
                 }
             }
             if (_traceEnabled)
@@ -452,6 +464,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             // Observe first so an asymmetric abort/drive transition is preserved in the read-only parity evidence.
             if (_traceEnabled && _bilateralEnabled && _secondary != null)
             {
+                using var evidenceTime = LandingObservationTiming.Run.Measure(LandingObservationTiming.Stage.BilateralEvidence);
                 _diagnostics.Observe(_report, _primary.Report, _secondary.Report);
                 // v0.3.12 minimal hard-safety context ring retained after the v0.3.10 timing study closed.
                 _kneeSafety.ObserveFixedStep(_kneeSafetyReport, _primary, _secondary);
@@ -1442,9 +1455,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             }
             _report.TraceEnabled = _traceEnabled;
         }
-
-        public string Rollback(string reason)
-            => RollbackWithReceipt(reason).Summary;
 
         internal CleanupReceipt RollbackWithReceipt(string reason)
         {

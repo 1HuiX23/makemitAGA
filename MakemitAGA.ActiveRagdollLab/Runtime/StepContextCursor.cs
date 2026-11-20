@@ -20,7 +20,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
 
         internal void AcceptFixed(PhysicsStepContext step)
         {
-            if (!step.Valid || (Fixed.Valid && (step.Epoch != Fixed.Epoch || step.Sequence != Fixed.Sequence + 1 || step.FixedTime < Fixed.FixedTime)) ||
+            if (!step.Valid || (Fixed.Valid && (step.Epoch != Fixed.Epoch || step.Sequence != Fixed.Sequence + 1 || step.FixedTime < Fixed.FixedTime || step.UnscaledTime < Fixed.UnscaledTime)) ||
                 (Source.Valid && !SourceMatches(step)))
                 throw new InvalidOperationException("PHYSICS_CONTEXT_INVALID_REUSED_SKIPPED_OR_SOURCE_MISMATCH");
             Fixed = step;

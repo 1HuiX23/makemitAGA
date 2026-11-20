@@ -11,6 +11,7 @@ namespace ARL.Contracts
         {
             Check.Run("foot observed/evaluated/completed domains", SampleDomains);
             Check.Run("foot trace-end value capture and restart", Capture);
+            Check.Run("trace restart preserves only a matching completed native control receipt", CurrentCompletion);
         }
         private static FootFixedStepEvidence Observed(int sequence, bool valid, float anchor, float tracking) =>
             new FootFixedStepEvidence
@@ -22,6 +23,24 @@ namespace ARL.Contracts
                 LowerAngularVelocityWorld = new Vector3(7f, 8f, sequence),
                 FootAngularVelocityWorld = new Vector3(10f, 11f, sequence)
             };
+
+        private static void CurrentCompletion()
+        {
+            var state = new FootControlEvidenceState();
+            var report = new FootAnkleFoundationReport();
+            state.Reset();
+            state.Observe(true, Observed(12, true, .003f, 5f));
+            state.CompleteController(12);
+            state.Reset(12);
+            state.Publish(report);
+            Check.That(state.LastCompletedControlFixedSequence == 12 &&
+                report.ControlEvidence.FootControllerLastCompletedFixedSequence == 12 &&
+                report.ControlEvidence.TraceObservedFixedSamples == 0, "same step kept, new observation counts start at zero");
+            state.Reset(13);
+            Check.That(state.LastCompletedControlFixedSequence == 0, "a stale step cannot be published as current");
+            state.Reset(14);
+            Check.That(state.LastCompletedControlFixedSequence == 0, "a pending controller cannot gain a receipt");
+        }
 
         private static void SampleDomains()
         {

@@ -5,11 +5,20 @@ using UnityEngine;
 namespace MakemitAGA.ActiveRagdollLab.Physics
 {
     // One allocation contract shared by solve, pair precommit and receiver completion.
-    // Eligibility uses CURRENT receiver control inputs. v128 records it for optional
-    // candidates only; both actual arms retain the uniform target.
+    // Eligibility uses CURRENT receiver control inputs. Both Hip arms retain Y;
+    // both may reduce the separate Upper angular scale under the fixed cap.
     // Support is a previous completed stance/approach witness, never contact authority.
     internal static class HipSystemAllocation
     {
+        internal const float MaxAngularTradeFraction = .10f;
+        // q continues to own base SYSTEM XZ/Y; angularScale owns ONLY net Upper
+        // torque and its relative reaction. Neither may be inferred from the other.
+        internal static bool AngularValid(PelvisHipCommandFrame baseline, float q, float angularScale, float extraY) =>
+            Valid(baseline, q, extraY) && HipPointPairMobility.F(angularScale) && angularScale >= 0f && angularScale <= q &&
+            (angularScale == q || (baseline.BoundedTradeSelected && baseline.UpwardRetentionSelected &&
+                baseline.UpwardRetentionEligible && baseline.JointTorqueReaction && q > 0f && q < 1f && extraY > 0f &&
+                angularScale >= q * (1f - MaxAngularTradeFraction)));
+
         internal static bool Eligible(bool selected, PhysicsStepContext step, PhysicsStepContext referenceStep,
             PelvisComReferencePlanner.ComPlan reference, float errorY, Vector3 request) =>
             selected && referenceStep.Matches(step) && reference.ArrivalEnabled &&

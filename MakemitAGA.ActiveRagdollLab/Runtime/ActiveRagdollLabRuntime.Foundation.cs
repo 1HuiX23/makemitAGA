@@ -36,7 +36,11 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             bool pending = FoundationSetupPending;
             _completeFoundationSetup = null; _foundationPoseQualified = false;
             _foundationWindow.Cancel(reason);
-            if (pending) _logger?.LogInfo("[ARL][FOUNDATION_SETUP][CANCELLED] reason=" + reason);
+            if (pending)
+            {
+                try { _logger?.LogInfo("[ARL][FOUNDATION_SETUP][CANCELLED] reason=" + reason); }
+                catch { } // Continue physical rollback even if the notice sink is already disposed.
+            }
         }
         private static void CaptureFoundationBone(int index, Transform bone)
         {

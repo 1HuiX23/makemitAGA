@@ -11,10 +11,9 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         internal const float TotalTorqueLimit = 8f;
         internal bool Valid, Committed, Clamped;
         internal PelvisHipCommandFrame Baseline;
-        internal float MotionScale, UpwardExtraAcceleration;
+        internal float MotionScale, UpperAngularScale, UpwardExtraAcceleration;
         internal Vector3 CommonAcceleration, HipForce;
         internal Vector3 TargetSystemAcceleration => HipSystemAllocation.Target(Baseline, MotionScale, UpwardExtraAcceleration);
-        internal Vector3 PredictedSystemAcceleration => CommonAcceleration + HipForce / Baseline.Response.TotalMass;
         internal Vector3 EffectiveHipTorque, RequestedTorque, AppliedTorque, CorrectionTorque, ResidualTorque;
         internal Vector3 AngularReaction, ExternalRequestedTorque;
 
@@ -33,7 +32,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
             Vector3 correction = applied - baseline.ReceiverTorque;
             Vector3 residual = applied + h - baseline.ReceiverTorque;
             if (!V(applied) || !V(correction) || !V(residual)) return false;
-            command = new PelvisHipAttitudeCommand { Valid = true, Baseline = baseline, MotionScale = 1f, CommonAcceleration = baseline.Acceleration, HipForce = hipForce,
+            command = new PelvisHipAttitudeCommand { Valid = true, Baseline = baseline, MotionScale = 1f, UpperAngularScale = 1f, CommonAcceleration = baseline.Acceleration, HipForce = hipForce,
                 EffectiveHipTorque = h, ExternalRequestedTorque = requested, RequestedTorque = requested, AppliedTorque = applied,
                 CorrectionTorque = correction, ResidualTorque = residual, Clamped = requested.magnitude > TotalTorqueLimit };
             return true;
@@ -61,7 +60,8 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         // Arithmetic closure has a roundoff tolerance; identity/clock/receipt copies
         // remain exact. TryPlan above plans attitude only. Completion must supply the
         // allocated actuator input and pass this check BEFORE any receiver delta write.
-        internal bool AllocationMatches() => Valid && HipSystemAllocation.Matches(Baseline, MotionScale,
+        internal bool AllocationMatches() => Valid && HipSystemAllocation.AngularValid(Baseline, MotionScale, UpperAngularScale,
+            UpwardExtraAcceleration) && HipSystemAllocation.Matches(Baseline, MotionScale,
             UpwardExtraAcceleration, CommonAcceleration, HipForce);
         internal bool Matches(PelvisHipCommandFrame baseline) => Valid && Committed && Baseline.SameAs(baseline) &&
             V(EffectiveHipTorque) && V(RequestedTorque) && V(AppliedTorque) && V(CorrectionTorque) && V(ResidualTorque) &&

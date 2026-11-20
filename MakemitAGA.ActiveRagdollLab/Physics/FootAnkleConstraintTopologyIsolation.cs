@@ -29,7 +29,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal const float TetherPositionSpring = 400f;
         internal const float TetherVelocityDamper = 40f;
         internal const float TetherMaxAcceleration = 60f;
-        internal const float AnchorValidityMeters = 0.030f;
+        internal const float AnchorValidityMeters = FootContactGeometryLimits.AnchorValidityMeters;
 
         // v0.3.57's 30/25/15 values remain a read-only reference envelope. With no native angular limiter in B,
         // use a broader emergency-only fail-close envelope derived from the observed v0.3.58-v0.3.62 excursion range.
@@ -81,6 +81,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         internal string Arm => _armB ? ArmB : ArmA;
         internal bool CharacterJointArm => !_armB;
+        internal RightAnkleLandingSequence.Tether CurrentSequenceTether => _armB && _currentDynamic && !_stancePlanarDamping.CurrentActive
+            ? new RightAnkleLandingSequence.Tether { Raw=_currentRawAccelerationWorld,
+                SelectedCap=_predictiveTailCapture.CurrentFinalSelectedMaxAcceleration, BaseCap=TetherMaxAcceleration,
+                Kp=TetherPositionSpring, Kd=TetherVelocityDamper, HardGap=AnchorValidityMeters } : default;
         internal bool IsProductionSelectorArm => _armB;
         internal string CaptureAuthorityArm => _captureAuthority.Arm;
         internal bool CaptureAuthorityProduction => _captureAuthority.IsProductionPolicy;

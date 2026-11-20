@@ -18,7 +18,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal bool DynamicContactSelected => PelvisRunScopes.IsContact(_dynamicScope);
         internal DynamicContactBoundaryIssue DynamicContactIssue = DynamicContactBoundaryIssue.None;
         internal bool ContactEntryContinuous, ContactEntryRecovery, StanceLoadAdmissionSelected;
-        internal bool GroundReferenceEnabled, GroundReferenceApplied, GroundReferencePartial;
+        internal bool GroundReferenceEnabled, GroundReferenceApplied, GroundReferencePartial, FootGroundTrajectorySelected, FootKneeProgressSelected;
         internal object FootContactShadowCollider = new object();
 
         internal static SingleLegShadowChain ContactBoundaryFixture(bool b, PelvisRunScope scope)
@@ -29,6 +29,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (!hip) leg.DisableKneeReferencePreserveTrace();
             leg.ContactEntryContinuous = leg.ContactEntryRecovery = leg.StanceLoadAdmissionSelected = hip;
             leg.GroundReferenceEnabled = leg.GroundReferenceApplied = leg.GroundReferencePartial = hip;
+            leg.FootGroundTrajectorySelected = hip;
+            leg.FootKneeProgressSelected = hip;
             return leg;
         }
 
@@ -41,7 +43,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             l => l.GroundReferenceEnabled = false,
             l => l.GroundReferenceApplied = false,
             l => l.GroundReferencePartial = false,
+            l => l.FootGroundTrajectorySelected = !l.FootGroundTrajectorySelected,
+            l => l.FootKneeProgressSelected = !l.FootKneeProgressSelected,
             l => l._kneeGroundTargetSelected = false,
+            l => l._kneeGroundExtensionSelected = !l._kneeGroundExtensionSelected,
+            l => l._hipLandingPreparationSelected = !l._hipLandingPreparationSelected,
+            l => l._kneeLandingPreparationSelected = !l._kneeLandingPreparationSelected,
             l => l._kneeReference.DisablePreserveTrace(),
             l => l._kneePlannedFeedforwardSelected = false
         };
@@ -99,6 +106,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             var pair = BoundaryFixture(b);
             Check.That(pair._primary.KneeGroundTargetSelected && pair._secondary.KneeGroundTargetSelected,
                 "both Knee owners actually select the common v126 joint input");
+            Check.That(pair._primary.KneeGroundExtensionSelected && pair._secondary.KneeGroundExtensionSelected,
+                "bounded extension is selected by both current Knee owners");
             Check.That(pair._primary.DynamicContactIssue == DynamicContactBoundaryIssue.None &&
                 pair._secondary.DynamicContactIssue == DynamicContactBoundaryIssue.None,
                 "logged fixture: no child boundary failure");

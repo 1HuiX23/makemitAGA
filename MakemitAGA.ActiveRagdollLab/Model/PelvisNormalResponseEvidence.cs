@@ -10,6 +10,8 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         internal bool Valid, Enhanced, SourceFresh, LinearClamped;
         internal bool UpwardSelected, UpwardEligible;
         internal float UpwardExtra;
+        internal bool RecoveryCaptured, RecoverySelected, RecoveryEligible;
+        internal float RecoveryExtraY;
         internal PhysicsStepContext Input, Settled;
         internal int Fixed, PelvisId, ChestId;
         internal string SourcePhase;
@@ -25,6 +27,9 @@ namespace MakemitAGA.ActiveRagdollLab.Model
             Finite(P) && Finite(D) && Finite(Feedforward) && Finite(Request) && Finite(Actuator) &&
             Finite(UpwardExtra) && UpwardExtra >= 0f &&
             (UpwardExtra == 0f || (UpwardSelected && UpwardEligible && Request > 0f && UpwardExtra <= (1f - Q) * Request)) &&
+            (!RecoveryCaptured || (Finite(RecoveryExtraY) && RecoveryExtraY >= 0f &&
+                RecoveryExtraY <= 2f * PelvisHipCommandFrame.MaxMagnitude + .002f &&
+                (!RecoveryEligible || RecoverySelected) && (RecoveryExtraY == 0f || RecoveryEligible))) &&
             Finite(Allocated) && Finite(Q) && Q >= 0f && Q <= 1f &&
             System.Math.Abs(Allocated - (Request * Q + UpwardExtra)) <= .0001f * (1f + System.Math.Abs(Allocated)) &&
             Finite(Observed) && Finite(PreV) && Finite(PostV);
@@ -41,7 +46,8 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                 F(Request) + "|" + F(Actuator) + "|" + F(Allocated) + "|" + F(Observed) +
                 "/normalQ-linearClamped=" + F(Q) + "|" + LinearClamped +
                 "/normalUpwardRetention(selected-eligible-extraA)=" + UpwardSelected + "|" + UpwardEligible + "|" + F(UpwardExtra) +
-                "/normalV(pre-post)=" + F(PreV) + "|" + F(PostV);
+                "/normalV(pre-post)=" + F(PreV) + "|" + F(PostV) +
+                "/normalRecoveryV041370(captured-selected-eligible-extraY)=" + RecoveryCaptured + "|" + RecoverySelected + "|" + RecoveryEligible + "|" + F(RecoveryExtraY);
         }
         private static bool Finite(float x) => !float.IsNaN(x) && !float.IsInfinity(x);
         private static string F(float x) => x.ToString("G9", CultureInfo.InvariantCulture);

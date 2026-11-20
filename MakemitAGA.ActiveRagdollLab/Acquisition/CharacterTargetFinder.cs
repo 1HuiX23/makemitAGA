@@ -22,6 +22,7 @@ namespace MakemitAGA.ActiveRagdollLab.Acquisition
                 return null;
             }
 
+            string expectedName = targetName.Trim();
             Vector3 reference = Vector3.zero;
             bool hasReference = false;
             try
@@ -30,7 +31,7 @@ namespace MakemitAGA.ActiveRagdollLab.Acquisition
                 if (main != null && main.transform != null)
                 {
                     reference = main.transform.position;
-                    hasReference = true;
+                    hasReference = float.IsFinite(reference.x) && float.IsFinite(reference.y) && float.IsFinite(reference.z);
                 }
             }
             catch
@@ -64,11 +65,12 @@ namespace MakemitAGA.ActiveRagdollLab.Acquisition
                 string name = candidate.name ?? string.Empty;
                 if (name.StartsWith("ARL_", StringComparison.Ordinal))
                     continue;
-                if (!name.Equals(targetName.Trim(), StringComparison.OrdinalIgnoreCase))
+                if (!name.Equals(expectedName, StringComparison.OrdinalIgnoreCase))
                     continue;
 
                 exactMatches++;
                 float distance = hasReference ? Vector3.Distance(reference, candidate.transform.position) : 0f;
+                if (hasReference && !float.IsFinite(distance)) continue;
                 string path = GetPath(candidate.transform);
                 bool better = best == null;
                 if (!better && hasReference)

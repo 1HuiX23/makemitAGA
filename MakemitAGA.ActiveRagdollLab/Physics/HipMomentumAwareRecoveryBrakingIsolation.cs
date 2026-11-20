@@ -209,7 +209,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 "/maxA=" + F(_currentProductionMaxA) + "->" + F(_currentEffectiveMaxA) +
                 "/origin=" + _currentOrigin;
             CopyToReport(report);
-            Plugin.Logger?.LogWarning("[ARL][HIP_MOMENTUM_RECOVERY_BRAKING_ABORT_EVIDENCE] " + _abortEvidence);
+            Plugin.TryLogWarning("[ARL][HIP_MOMENTUM_RECOVERY_BRAKING_ABORT_EVIDENCE] " + _abortEvidence);
         }
 
         internal void CopyToReport(SingleLegChainReport report)

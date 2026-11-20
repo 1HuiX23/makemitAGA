@@ -44,7 +44,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
                 SourceSequence = _sourceSequence, FixedTime = fixedTime, Dt = dt, UnscaledTime = unscaledTime };
             // The integer sequence is the identity. Long-lived Unity float timestamps
             // may round adjacent steps to the same value; equal time is not a reused step.
-            if (!next.Valid || (LastFixed.Valid && fixedTime < LastFixed.FixedTime))
+            if (!next.Valid || (LastFixed.Valid && (fixedTime < LastFixed.FixedTime || unscaledTime < LastFixed.UnscaledTime)))
                 throw new InvalidOperationException("RUNTIME_FIXED_CLOCK_INVALID_OR_BACKWARD");
             _fixedSequence++; LastFixed = next; return next;
         }

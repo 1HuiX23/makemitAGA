@@ -64,11 +64,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 Mathf.Min(_profile.LegAngularAccelerationFeedforwardMaxAcceleration, _profile.LegHipMaxAngularAcceleration),
                 _profile.LegHipAngularSpring / _profile.LegHipAngularDamper, receiverReference)) return false;
             if (!_hipNormalReference.Current.Applied) return true;
-            _controlTargetHipRelative = Quaternion.Inverse(parentR) * _hipNormalReference.Rotation;
-            _controlTargetHipRelativeAngularVelocityLocal = Quaternion.Inverse(parentR) * (_hipNormalReference.W - parentW);
-            // Source and V04810 non-source recovery start the WORLD absorber from the
-            // last consumed goal. Local/raw health histories are never rebased.
-            return _hipCompositeReferenceShockAbsorber.RecordAppliedNormalGoal(_hipNormalReference.Rotation, _hipNormalReference.W);
+            _hipPublicationStep = _runtimeStep; _hipPublicationParentR = parentR; _hipPublicationParentW = parentW;
+            return PublishHipNormalReference(parentR, parentW);
         }
     }
 }

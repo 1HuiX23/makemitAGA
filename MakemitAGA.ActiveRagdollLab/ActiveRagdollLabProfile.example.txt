@@ -1,6 +1,6 @@
-﻿# MakemitAGA Active Ragdoll Lab 0.4.125 - Bounded Knee Ground Target A/B
+# MakemitAGA Active Ragdoll Lab 0.4.166 - Left Foot Horizontal Lead
 # 保存后执行：arl_profile_reload
-# 当前主线：arl_pelvis_hip_test(a|b)，各自重启。同用124 B法向COM反馈40/12.727922及匹配缺口回算，原参考/施力预算和承重门不变。A_V041250_RAW_KNEE_GROUND_TARGET只观察膝部候选，B_V041250_BOUNDED_KNEE_GROUND_TARGET在新鲜强落脚/支撑见证下选用≤5度的合法屈曲几何输入，再由原Knee参考生成R/W/A；不改源动画/刚体姿态，不授予接触权限。kneeGroundTarget双侧A=False:False、B=True:True。R2启动准备raw/control/actual最低点≥-3mm；2至3mm区间只允许无接触、无载荷准备，普通接触2mm与受限恢复3mm不变。arl_test_setup等待SETUP_READY后再drive/PCA；WAIT_INITIAL_GEOMETRY等待预计姿态稳定，WAIT_SETTLED_GEOMETRY等待实际刚体安静稳定，看到STARTED后才计时。Torso重量、Foot-tether reciprocal及GSP仍OFF。
+# A、B 右脚均采用 163 B。B 在左脚抬起时试算足部水平跟进，并核对连续三拍的高度、踝距、膝距及实际首次落脚。revision=V041660_LEFT_FOOT_HORIZONTAL_LEAD_20261120。正式流程见 arl_help。
 # 本文件只保留仍由活动运行时消费的配置；历史实验参数与 A/B 细节请查长期版本记录或旧版本 ZIP。
 
 # --- 目标与 Two-Body 几何 ---

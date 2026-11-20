@@ -5,7 +5,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 {
     internal static partial class HipBilateralForceSolver
     {
-        // Value-only constraint vectors shared by the real interval and optional audit.
+        // Value-only constraint vectors shared by the uniform, same-q and bounded-trade intervals.
         // Original order, arithmetic and limits are retained; no per-step arrays.
         private struct BudgetBall
         {
@@ -61,28 +61,18 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             return true;
         }
 
-        // Independent one-ball intervals identify all tied upper cuts. Not the first
-        // short-circuit failure and not a histogram of actual physical saturation.
-        private static bool AuditCuts(BudgetLine line, out int fullOver, out int upperCuts, out float lo, out float hi)
+        // Preserve the v129 candidate's independent intersections (including positive
+        // lower bounds), then validate the final expression with BudgetInterval.
+        private static bool IndependentBudgetInterval(BudgetLine line, out float lo, out float hi)
         {
-            fullOver = upperCuts = 0; lo = 0f; hi = 1f; bool feasible = true;
+            lo = 0f; hi = 1f; bool feasible = true;
             for (int i = 0; i < line.Count; i++)
             {
                 BudgetBall ball = line.At(i); float a = 0f, b = 1f;
-                if (ball.End.magnitude > ball.Cap) fullOver |= 1 << i;
                 if (!BallInterval(ball.Start, ball.End, ball.Cap, ref a, ref b)) { feasible = false; continue; }
-                lo = Mathf.Max(lo, a);
-                hi = Mathf.Min(hi, b); // Tie tolerance must never widen the feasible interval.
+                lo = Mathf.Max(lo, a); hi = Mathf.Min(hi, b);
             }
-            if (!feasible || lo > hi) return false;
-            if (hi < 1f)
-                for (int i = 0; i < line.Count; i++)
-                {
-                    BudgetBall ball = line.At(i); float a = 0f, b = 1f;
-                    if (BallInterval(ball.Start, ball.End, ball.Cap, ref a, ref b) && b < 1f && Mathf.Abs(b - hi) <= .000001f)
-                        upperCuts |= 1 << i;
-                }
-            return true;
+            return feasible && lo <= hi;
         }
     }
 }

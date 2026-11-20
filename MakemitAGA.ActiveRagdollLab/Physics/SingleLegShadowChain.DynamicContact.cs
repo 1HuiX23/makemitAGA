@@ -20,12 +20,14 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal bool ContactEntryRecovery => _footFoundation != null && _footFoundation.ContactEntryRecovery;
         internal bool GroundReferenceEnabled => _footFoundation != null && _footFoundation.GroundReferenceEnabled;
         internal bool GroundReferenceApplied => _footFoundation != null && _footFoundation.GroundReferenceApplied;
+        internal bool FootGroundTrajectorySelected => _footFoundation != null && _footFoundation.FootGroundTrajectorySelected;
+        internal bool FootKneeProgressSelected => _footFoundation != null && _footFoundation.FootKneeProgressSelected;
         internal bool GroundReferencePartial => _footFoundation != null && _footFoundation.GroundReferencePartial;
-        internal void SelectContactEntryContinuous(bool enabled, bool recovery = false, bool groundReference = false, bool partialGround = false, bool loadAdmission = false)
+        internal void SelectContactEntryContinuous(bool enabled, bool recovery = false, bool groundReference = false, bool partialGround = false, bool loadAdmission = false, bool footTrajectory = false, bool footKneeProgress = false, RightFootPrecontact.Mode precontact = RightFootPrecontact.Mode.Off)
         {
             if (_footFoundation == null || _traceEnabled || _dynamicScope != PelvisRunScope.DynamicLegFreeSpace)
                 throw new InvalidOperationException("CONTACT_ENTRY_SELECTION_OUTSIDE_PREPARATION");
-            _footFoundation.SelectContactEntryContinuous(enabled, recovery, groundReference, partialGround, loadAdmission);
+            _footFoundation.SelectContactEntryContinuous(enabled, recovery, groundReference, partialGround, loadAdmission, footTrajectory, footKneeProgress, precontact);
         }
         internal bool DynamicContactSelected => PelvisRunScopes.IsContact(_dynamicScope);
         internal DynamicContactBoundaryIssue DynamicContactIssue => GetDynamicContactIssue(_dynamicScope);

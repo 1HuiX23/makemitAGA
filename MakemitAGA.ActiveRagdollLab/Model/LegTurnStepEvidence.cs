@@ -8,9 +8,18 @@ namespace MakemitAGA.ActiveRagdollLab.Model
     internal struct LegTurnStepEvidence
     {
         internal PhysicsStepContext Step;
+        internal LandingPreparationCommand LandingPreparation;
         internal SourceStepContext Source;
-        internal int Fixed, Modes;
+        internal int Fixed, Modes, CommittedUpperId;
         internal LegLandingReferenceInput LandingInput; // Optional; never part of Matches or a control gate.
+        internal bool KneeHeightsValid;
+        internal Vector3 KneeHeights, UpperLocalSpan; // Held animation, selected pose on receiver reference, and settled lower-side knee anchor.
+        // The Upper-side anchors were read by mechanical reporting in this same PRE_N.
+        internal bool UpperAnchorsValid;
+        internal LegMeasuredAnchors MeasuredAnchors;
+        internal Vector3 PhysicalUpperHip => MeasuredAnchors.UpperHip;
+        internal Vector3 PhysicalUpperKnee => MeasuredAnchors.UpperKnee;
+        internal Vector3 PhysicalLowerKnee => MeasuredAnchors.LowerKnee;
         internal string SourcePhase; // Current existing torso source classifier; window selection only.
         internal HipGoalPathEvidence HipGoalPath; // Optional; deliberately excluded from Matches.
         internal PelvisNormalResponseEvidence ReceiverNormalResponse; // Solved N-1 -> PRE_N; optional, never a gate.
@@ -35,6 +44,25 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         internal string KneeFeedforwardReason;
         internal float KneeFeedforwardInputSigned, KneeFeedforwardSelectedSigned;
         internal float KneeFeedbackSigned, KneeFeedforwardAllocatedSigned, KneeFlexionFinalSigned;
+
+        internal void CaptureKneeHeights(PhysicsStepContext step, int localFixed,
+            Vector3 physicalUpperHip, Vector3 physicalUpperKnee, Vector3 physicalLowerKnee)
+        {
+            UpperAnchorsValid = KneeHeightsValid = false;
+            MeasuredAnchors = LegMeasuredAnchors.Capture(HipCommitted && KneeCommitted, Step, Fixed,
+                step, localFixed, physicalUpperHip, physicalUpperKnee, physicalLowerKnee);
+            if (!MeasuredAnchors.Valid || LandingInput.Fixed != localFixed || !LandingInput.Step.Matches(step) ||
+                !LandingInput.Source.Matches(Source) || !LandingInput.Parent.Matches(step, Source) ||
+                !PelvisParentFrame.Q(UpperR) || !PelvisParentFrame.Q(RawUpperR) || !PelvisParentFrame.Q(HipTargetR)) return;
+
+            // The two upper-side points are from this pre-solve. Keep the actual lower-side joint gap.
+            Vector3 span = Quaternion.Inverse(UpperR) * (physicalUpperKnee - physicalUpperHip);
+            KneeHeights = new Vector3((LandingInput.RawHip + RawUpperR * span).y,
+                (LandingInput.Parent.ReferencePoint + HipTargetR * span).y, physicalLowerKnee.y);
+            UpperLocalSpan = span;
+            KneeHeightsValid = PelvisParentFrame.V(KneeHeights);
+            UpperAnchorsValid = KneeHeightsValid && PelvisParentFrame.V(physicalUpperHip) && PelvisParentFrame.V(physicalUpperKnee);
+        }
 
         internal bool Matches(PhysicsStepContext step, int localFixed) =>
             HipCommitted && KneeCommitted && Step.Matches(step) && Fixed == localFixed &&

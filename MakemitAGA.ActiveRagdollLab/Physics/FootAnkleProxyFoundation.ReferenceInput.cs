@@ -12,17 +12,18 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private void ObserveFootReference(SourceStepContext source, Quaternion raw, Vector3 rawW, float dt,
             KneeFootGroundInput input)
         {
-            PrepareGroundReferenceInput(source, raw, rawW, dt, input, out Quaternion goal, out Vector3 goalW);
-            _relativeReference.ObserveRender(_traceEnabled, source, goal, goalW, dt);
+            PrepareGroundReferenceInput(source, raw, rawW, dt, input, out Quaternion goal, out Vector3 goalW, out FootGroundTrajectory.Input ground);
+            _relativeReference.ObserveRender(_traceEnabled, source, goal, goalW, dt, ground);
+            _groundReference.ValidateKneeProgressPublication(source, _relativeReference.Current);
             PublishKneeFootGroundPacket(source);
         }
 
         // One input per genuine shared Render packet, then the existing planner owns R/W/A.
         // Read current native Lower pose in this Render sample; no cached Fixed pose is labelled current.
         private void PrepareGroundReferenceInput(SourceStepContext source, Quaternion raw, Vector3 rawW, float dt,
-            KneeFootGroundInput kneeFootInput, out Quaternion goal, out Vector3 goalW)
+            KneeFootGroundInput kneeFootInput, out Quaternion goal, out Vector3 goalW, out FootGroundTrajectory.Input trajectory)
         {
-            goal = raw; goalW = rawW;
+            goal = raw; goalW = rawW; trajectory = default;
             if (!_groundReference.Enabled || !_ankleDrive.DynamicActive || !_relativeReference.Active)
             { ClearKneeFootGroundPacket(); return; }
             if (_groundReference.TryHold(source, raw, rawW, out goal, out goalW)) return;
@@ -48,14 +49,30 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                         {
                             candidate = _kneeFootGroundPacket.Sample.Foot;
                             candidate.JointChain = true;
+                            var packet = _kneeFootGroundPacket;
+                            trajectory = new FootGroundTrajectory.Input { Source = source, GeometryStep = packet.Input.CompletedStep,
+                                ParentId = packet.Input.ParentId, UpperId = packet.Input.UpperId, LowerId = packet.Input.LowerId,
+                                SupportId = packet.SupportId, Geometry = packet.Geometry, KneeGoal = packet.Sample.Goal,
+                                NativeAnkle = ankle, NativeLower = lower };
                         }
                     }
                 }
             }
-            catch (Exception) { ClearKneeFootGroundPacket(); candidate.Reason = "NATIVE_GEOMETRY_UNAVAILABLE"; }
+            catch (Exception)
+            {
+                trajectory = default; ClearKneeFootGroundPacket();
+                // A native read can fail AFTER Evaluate populated a valid candidate.
+                // Discard that partial transaction, including Valid/Feasible/Goal;
+                // changing only Reason would still let ResolveInput select its goal.
+                candidate = new FootGroundReference.GroundSample { Reason = "NATIVE_GEOMETRY_UNAVAILABLE", Goal = raw };
+            }
             // Unavailable geometry only removes the optional goal. The existing native support,
             // body and clock contracts still independently fail-close before physical writes.
+            _groundReference.ChooseKneeProgress(_traceEnabled, source, raw, rawW, dt,
+                _kneeFootGroundPacket, _relativeReference, ref candidate, ref trajectory);
             _groundReference.ObserveRender(_traceEnabled, source, raw, rawW, dt, candidate, out goal, out goalW);
+            if (!_groundReference.Finite || !_groundReference.Current.Source.Matches(source) || !_groundReference.Current.JointChain)
+                trajectory = default;
         }
     }
 }

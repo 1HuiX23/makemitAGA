@@ -10,7 +10,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     // extrapolates sample age. These policy labels differ from current run arms:
     // both V041080 Hip runs select the no-age-prediction policy.
     // No body/time reads, source differentiation, new force owner, catch-up loop or observer ring.
-    internal sealed class HipNormalReference
+    internal sealed partial class HipNormalReference
     {
         internal const string ArmOff = "RENDER_HELD_HIP_NORMAL_V04780";
         internal const string ArmA = "COHERENT_HIP_NORMAL_AGE_PREDICTED_V04800";
@@ -38,7 +38,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _rotation = _seeded ? Normalize(rotation) : Quaternion.identity;
             _w = _seeded ? w : Vector3.zero;
             _last = new PhysicsStepContext(); _source = new SourceStepContext();
-            Current = new HipNormalReferenceState(); Issue = null; ResetTrace();
+            LandingPreparation = default; Current = new HipNormalReferenceState(); Issue = null; ResetTrace();
         }
         internal void ResetTrace()
         {
@@ -46,8 +46,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _traceSampleAgePrediction = _selected && _sampleAgePrediction;
             _steps = _applied = _held = _alphaLimited = _speedLimited = _receiverParentSteps = 0;
             _peakGap = _peakA = _peakW = 0f;
+            _peakBeforeStepGap = _peakBeforeStepW = _peakBeforeStepA = 0f;
+            _hipLandingTrace.Reset(false);
         }
-        internal void DisablePreserveTrace() { _selected = _seeded = _sampleAgePrediction = false; Current = new HipNormalReferenceState(); }
+        internal void DisablePreserveTrace() { _selected = _seeded = _sampleAgePrediction = false; LandingPreparation = default; Current = new HipNormalReferenceState(); }
 
         // One eligibility predicate for the planner and its input adapter. Protected
         // and stale bypasses must seed from the old stack's actual output, even in B.
@@ -59,6 +61,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             Quaternion inputWorldR, Vector3 inputWorldW, Quaternion parentR, Vector3 relativeW,
             float age, float maxAge, float maxW, float maxA, float arrivalRate, bool receiverParentReference = false)
         {
+            _landingPreparationVisited = false; LandingPreparation = default;
+            _peakBeforeStepGap = _peakGap; _peakBeforeStepW = _peakW; _peakBeforeStepA = _peakA;
             Current = new HipNormalReferenceState { Step = step, Selected = _selected, SampleAgePrediction = _sampleAgePrediction, Reason = "BASELINE" };
             if (!_selected) return true; // Non-dynamic legacy path remains an exact bypass.
             if (!_seeded || !step.Valid || !source.Valid || step.Epoch != source.Epoch || step.SourceSequence != source.Sequence ||
@@ -130,7 +134,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             "/peak(inputGapDeg-W-A)=" + S(_peakGap * Mathf.Rad2Deg) + "/" + S(_peakW) + "/" + S(_peakA) +
             "/issue=" + (Issue ?? "<none>") + "/domain=ONE_SHARED_FIXED_STEP_WORLD_TRAJECTORY/receiverParentStepsV041080=" + _receiverParentSteps +
             "/bounds=HIP_NORMAL_MAX_A_OVER_KD_AND_EXISTING_FF_BOUND/notHumanLimits=True" +
-            "/FF=PLANNED_WORLD_A_BEFORE_ORIGINAL_GATE_SUM_AND_CAP/traceReset=STATISTICS_ONLY";
+            "/FF=PLANNED_WORLD_A_BEFORE_ORIGINAL_GATE_SUM_AND_CAP/traceReset=STATISTICS_ONLY\n" + _hipLandingTrace.Summary();
 
         private bool Invalid(string issue) { Issue = issue; return false; }
         private static Quaternion Advance(Quaternion q, Vector3 w, float dt)

@@ -366,7 +366,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             // A completed audit has been quiesced. A live snapshot may legally show the current stance load.
             return !completed && foot != null && leg.StanceLowerNativeGravityEnabled && leg.StanceLowerNativeGravityFinite &&
                 leg.FixedUpdateSequence > 0 && leg.StanceLowerNativeGravityCurrentScheduledFixed == leg.FixedUpdateSequence &&
-                foot.FixedUpdateSequence == leg.FixedUpdateSequence && foot.ContactShadowCurrentContactActive &&
+                foot.FixedUpdateSequence == leg.FixedUpdateSequence && foot.FormalStanceColliderActive && foot.ContactShadowCurrentContactActive &&
                 foot.StanceContactLifecycleEnabled && foot.StanceContactLifecycleFinite &&
                 foot.StanceContactLifecycleAuthorizedColliderInstanceId != 0 &&
                 string.Equals(foot.GameNativeGaitPhaseState, "STANCE", StringComparison.Ordinal) &&

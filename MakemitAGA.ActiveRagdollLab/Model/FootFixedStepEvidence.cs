@@ -8,6 +8,11 @@ namespace MakemitAGA.ActiveRagdollLab.Model
     {
         public int FixedSequence;
         public bool Valid;
+        // V140 optional diagnostic position; never changes the original Valid gate.
+        internal bool PreparationPoseValid;
+        internal int PreparationSupportId;
+        internal Vector3 FootAnchorWorld;
+        internal Vector3 LowerAnchorWorld; // V141 copies the same pre-lifecycle ankle readback.
         public bool ContactActiveBeforeLifecycle;
         public float AnchorErrorMeters;
         public float TrackingErrorDegrees;

@@ -85,7 +85,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             return result;
         }
         internal bool LandingReferenceCaptureRequested => _traceEnabled && _stanceContactLifecycle.ContinuousEntry &&
-            !_contactShadow.Active && _stanceContactLifecycle.EntryHistoryAvailable;
+            !FormalStanceContactActive;
+
+        internal bool FullLandingReferenceRequested(bool adopted) => LandingReferenceCaptureRequested &&
+            LandingReferenceCapturePolicy.NeedsFull(LandingObservationTiming.Run.Compact,
+                _stanceContactLifecycle.EntryHistoryAvailable, adopted);
 
         private FootLandingReferenceEvidence.LandingPath CaptureLandingReference(PhysicsStepContext step,
             int fixedSequence, LegTurnStepEvidence leg, Quaternion lowerRotation)

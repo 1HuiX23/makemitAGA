@@ -47,7 +47,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (PelvisRunScopes.HasHipCoupling(scope) && !settledHipPreparation)
                 throw new RunPreparationRejectedException("HIP_CONTACT_PREPARATION_RECEIPT_REQUIRED");
             // Synchronous, after join/settled preparation and before formal trace/next solve.
-            // No collider is enabled by this setup; stance owns later OFF->ON transitions.
+            // The foot lifecycle owns the common right-foot window and B's conditional extension.
             if (PelvisRunScopes.HasKneeCoupling(scope))
             {
                 _primary.PrepareDynamicKneeCoupling(scope, step, settledHipPreparation);
@@ -69,9 +69,14 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             bool continuousEntry = PelvisRunScopes.HasHipCoupling(scope);
             bool recoveryEntry = continuousEntry;
             bool partialGround = continuousEntry;
+            bool footTrajectory = continuousEntry && _torso != null &&
+                (_torso.PelvisReceiverControl.Arm == PelvisDynamicReceiverIsolation.DynamicHipArmA ||
+                 _torso.PelvisReceiverControl.Arm == PelvisDynamicReceiverIsolation.DynamicHipArmB);
+            bool footKneeProgress = footTrajectory; // Both current arms retain v135 B.
             bool loadAdmission = continuousEntry; // V041200: both arms retain v119 B admission.
-            _primary.SelectContactEntryContinuous(continuousEntry, recoveryEntry, continuousEntry, partialGround, loadAdmission);
-            _secondary.SelectContactEntryContinuous(continuousEntry, recoveryEntry, continuousEntry, partialGround, loadAdmission);
+            var precontact = footTrajectory ? RightFootPrecontact.ForArm(_torso.PelvisReceiverControl.Arm) : RightFootPrecontact.Mode.Off;
+            _primary.SelectContactEntryContinuous(continuousEntry, recoveryEntry, continuousEntry, partialGround, loadAdmission, footTrajectory, footKneeProgress, precontact);
+            _secondary.SelectContactEntryContinuous(continuousEntry, recoveryEntry, continuousEntry, partialGround, loadAdmission, footTrajectory, footKneeProgress, precontact);
             SetStanceOnlyContactQualification(true);
             // Select the existing gravity owner while native gravity is still OFF; only its post-controller
             // scheduler may enable Foot gravity for a subsequent exact-authorized stance solve.
@@ -87,10 +92,17 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         }
 
         internal string DynamicContactBoundarySummary() => "dynamicContactBoundary=V04870/selected=" + DynamicContactSelected +
+            "/supportReferenceBraking=" + (_torso != null && PelvisDynamicReceiverIsolation.UsesSupportBraking(_torso.PelvisReceiverControl.Arm)) +
+            "/supportNormalRecovery=" + (_torso != null && PelvisDynamicReceiverIsolation.UsesSupportNormalRecovery(_torso.PelvisReceiverControl.Arm)) +
             "/initialGeometry=" + _initialGeometryStatus +
+            "/hipLandingPreparation(primary-secondary)=" + (_primary?.HipLandingPreparationSelected ?? false) + ":" + (_secondary?.HipLandingPreparationSelected ?? false) +
+            "/kneeLandingPreparation(primary-secondary)=" + (_primary?.KneeLandingPreparationSelected ?? false) + ":" + (_secondary?.KneeLandingPreparationSelected ?? false) +
             "/kneeReference(primary-secondary)=" + (_primary?.KneeReferenceSelected ?? false) + ":" + (_secondary?.KneeReferenceSelected ?? false) +
             "/kneePlannedFF(primary-secondary)=" + (_primary?.KneePlannedFeedforwardSelected ?? false) + ":" + (_secondary?.KneePlannedFeedforwardSelected ?? false) +
             "/kneeGroundTarget(primary-secondary)=" + (_primary?.KneeGroundTargetSelected ?? false) + ":" + (_secondary?.KneeGroundTargetSelected ?? false) +
+            "/footTrajectory(primary-secondary)=" + (_primary?.FootGroundTrajectorySelected ?? false) + ":" + (_secondary?.FootGroundTrajectorySelected ?? false) +
+            "/footKneeProgress(primary-secondary)=" + (_primary?.FootKneeProgressSelected ?? false) + ":" + (_secondary?.FootKneeProgressSelected ?? false) +
+            "/kneeExtension(primary-secondary)=" + (_primary?.KneeGroundExtensionSelected ?? false) + ":" + (_secondary?.KneeGroundExtensionSelected ?? false) +
             "/loadAdmission(primary-secondary)=" + (_primary?.StanceLoadAdmissionSelected ?? false) + ":" + (_secondary?.StanceLoadAdmissionSelected ?? false) +
             "/scope(primary-secondary)=" + (_primary?.DynamicScope.ToString() ?? "MISSING") + ":" + (_secondary?.DynamicScope.ToString() ?? "MISSING") +
             "/issue=" + DynamicContactIssue + "/primary=" + (_primary?.DynamicContactIssue ?? DynamicContactBoundaryIssue.MissingFoundation) +

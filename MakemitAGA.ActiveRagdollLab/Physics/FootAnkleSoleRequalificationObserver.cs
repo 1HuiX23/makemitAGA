@@ -273,6 +273,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             Vector3 sampledFootLinearVelocityWorld,
             FootAnkleFoundationReport report)
         {
+            using var probeTime = Runtime.LandingObservationTiming.Run.Measure(Runtime.LandingObservationTiming.Stage.FootProbe);
             _finite = true;
             _invalidReason = null;
 
@@ -287,8 +288,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             referenceUp.Normalize();
 
             Vector3 ankleToToe = sourceToe.position - sourceFoot.position;
-            Vector3 soleForward = footBody.rotation * Vector3.forward;
-            Vector3 soleUp = footBody.rotation * Vector3.up;
+            Quaternion footRotation = footBody.rotation;
+            Vector3 soleForward = footRotation * Vector3.forward;
+            Vector3 soleUp = footRotation * Vector3.up;
             if (!FiniteVector(ankleToToe) || ankleToToe.sqrMagnitude < 0.000001f ||
                 !FiniteVector(soleForward) || soleForward.sqrMagnitude < 0.000001f ||
                 !FiniteVector(soleUp) || soleUp.sqrMagnitude < 0.000001f)
@@ -474,11 +476,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             float x = size.x * 0.40f;
             float z = size.z * 0.40f;
 
-            GroundHit centerHit = ProbePoint(footBody.transform.TransformPoint(new Vector3(center.x, bottomY, center.z)), referenceUp, sourceFoot, targetRoot, ownerRoot);
-            GroundHit toeHit = ProbePoint(footBody.transform.TransformPoint(new Vector3(center.x, bottomY, center.z + z)), referenceUp, sourceFoot, targetRoot, ownerRoot);
-            GroundHit heelHit = ProbePoint(footBody.transform.TransformPoint(new Vector3(center.x, bottomY, center.z - z)), referenceUp, sourceFoot, targetRoot, ownerRoot);
-            GroundHit leftHit = ProbePoint(footBody.transform.TransformPoint(new Vector3(center.x - x, bottomY, center.z)), referenceUp, sourceFoot, targetRoot, ownerRoot);
-            GroundHit rightHit = ProbePoint(footBody.transform.TransformPoint(new Vector3(center.x + x, bottomY, center.z)), referenceUp, sourceFoot, targetRoot, ownerRoot);
+            Transform pose = footBody.transform;
+            GroundHit centerHit = ProbePoint(pose.TransformPoint(new Vector3(center.x, bottomY, center.z)), referenceUp, sourceFoot, targetRoot, ownerRoot);
+            GroundHit toeHit = ProbePoint(pose.TransformPoint(new Vector3(center.x, bottomY, center.z + z)), referenceUp, sourceFoot, targetRoot, ownerRoot);
+            GroundHit heelHit = ProbePoint(pose.TransformPoint(new Vector3(center.x, bottomY, center.z - z)), referenceUp, sourceFoot, targetRoot, ownerRoot);
+            GroundHit leftHit = ProbePoint(pose.TransformPoint(new Vector3(center.x - x, bottomY, center.z)), referenceUp, sourceFoot, targetRoot, ownerRoot);
+            GroundHit rightHit = ProbePoint(pose.TransformPoint(new Vector3(center.x + x, bottomY, center.z)), referenceUp, sourceFoot, targetRoot, ownerRoot);
 
             _currentCenterHit = centerHit.Valid; _currentCenterClearance = centerHit.Clearance; _currentCenterCollider = centerHit.Collider;
             _currentToeHit = toeHit.Valid; _currentToeClearance = toeHit.Clearance; _currentToeCollider = toeHit.Collider;

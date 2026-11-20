@@ -255,7 +255,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         public int ForceSafeState()
         {
             _previousReferenceSupport = default;
-            _groundReference.DisablePreserveTrace(); ClearKneeFootGroundPacket();
+            _groundReference.DisablePreserveTrace(); _relativeReference.DisableGroundTrajectoryPreserveTrace(); ClearKneeFootGroundPacket();
             _loadAdmission.DisablePreserveTrace();
             int failures = 0;
             // Stop-time failures must not skip independent native shutdown attempts. Keep
@@ -333,7 +333,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         public bool SetDriveState(bool enabled, bool physicalParent = false)
         {
             _previousReferenceSupport = default;
-            if (!enabled) { _groundReference.DisablePreserveTrace(); ClearKneeFootGroundPacket(); _loadAdmission.DisablePreserveTrace(); }
+            if (!enabled) { _groundReference.DisablePreserveTrace(); _relativeReference.DisableGroundTrajectoryPreserveTrace(); ClearKneeFootGroundPacket(); _loadAdmission.DisablePreserveTrace(); }
             if (!IsBuilt) return false;
             try
             {
@@ -407,8 +407,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _body.position = ankleWorld;
                 _body.rotation = physicalParent ? _lowerBody.rotation * _sampledSourceRelative : _sampledFootRotation;
                 _body.useGravity = false;
-                _contactShadow.DisablePreserveTrace(_report);
-                if (_collider != null) _collider.enabled = false;
+                if (_contactShadow.DisablePreserveTrace(_report) != 0)
+                    throw new InvalidOperationException("FOOT_ACTIVATION_CONTACT_TEARDOWN_FAILED");
+                if (_collider != null)
+                {
+                    _collider.enabled = false;
+                    if (_collider.enabled) throw new InvalidOperationException("FOOT_ACTIVATION_COLLIDER_STILL_ENABLED");
+                }
                 Vector3 ankleVelocity = _lowerBody.velocity + Vector3.Cross(_lowerBody.angularVelocity, ankleWorld - _lowerBody.worldCenterOfMass);
                 _body.isKinematic = false;
                 _body.velocity = IsFinite(ankleVelocity) ? ankleVelocity : Vector3.zero;
@@ -445,9 +450,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 return false;
             }
         }
-
-        public int Rollback()
-            => RollbackWithReceipt().FailureCount.Value;
 
         internal CleanupReceipt RollbackWithReceipt()
         {

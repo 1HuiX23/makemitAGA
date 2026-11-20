@@ -56,18 +56,34 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             peer != null && HipAnchorTranslationPair.CommitBilateral(step, _hipAnchorPair, peer._hipAnchorPair);
         internal void ObserveHipAllocation(PhysicsStepContext step, SingleLegShadowChain peer)
         {
-            if (!_traceEnabled || peer == null || _torso == null || !_torso.PelvisReceiver.TraceRunning ||
-                _torso.PelvisReceiverControl.Arm != PelvisDynamicReceiverIsolation.DynamicHipArmB) return;
-            var audit = _torso.PelvisReceiver.AllocationAudit;
+            if (!_traceEnabled || peer == null || _torso == null || !_torso.PelvisReceiver.TraceRunning) return;
+            var allocation = _torso.PelvisReceiver.Allocation;
             try
             {
-                if (_hipAnchorPair.TryReadCommittedInput(step, out var left) &&
-                    peer._hipAnchorPair.TryReadCommittedInput(step, out var right))
-                    audit.Observe(true, left, right, _hipAnchorPair.Report.Current, peer._hipAnchorPair.Report.Current,
+                if (_hipAnchorPair.Report.CurrentApplied && peer._hipAnchorPair.Report.CurrentApplied &&
+                    _hipAnchorPair.Report.Current.Step.Matches(step) && peer._hipAnchorPair.Report.Current.Step.Matches(step))
+                    allocation.Observe(true, _hipAnchorPair.Report.Current, peer._hipAnchorPair.Report.Current,
                         _torso.HipAttitudeCommand);
-                else audit.NoteMissing();
+                else allocation.NoteMissing();
             }
-            catch { audit.NoteMissing(); }
+            catch { allocation.NoteMissing(); }
+        }
+        internal void ObserveRightThighTracking(PhysicsStepContext step, SingleLegShadowChain left)
+        {
+            _footFoundation?.CompleteRightThigh(step, _legTurnCurrent, _upperBody,
+                _kneeParentAngularTransport.Enabled, left?._hipAnchorPair, _hipAnchorPair);
+            _footFoundation?.CompleteRightFootForecast(step, _legTurnCurrent, _upperBody,
+                _kneeParentAngularTransport.Enabled, _hipAnchorPair);
+        }
+
+        internal void ObserveParentHeight(PhysicsStepContext step, SingleLegShadowChain peer)
+        {
+            if (_footFoundation==null || !_footFoundation.HasParentHeightTrial(step,out var trial)) return;
+            // Anatomical left is selected by the coordinator even when primary is right.
+            // Both foot lifecycles and the common receiver have completed N; physics has not advanced.
+            _footFoundation.CompleteParentHeight(trial,_torso.LandingHeightInput,
+                _physicalParent,_rawHipConnectedAnchorLocal,peer._footFoundation,
+                peer._physicalParent,peer._rawHipConnectedAnchorLocal,_hipAnchorPair,peer._hipAnchorPair);
         }
         internal void CompleteHipPointResponse(PhysicsStepContext step, HipAnchorPairReport peer)
         {
@@ -362,10 +378,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 !_hipAnchorPair.Report.CurrentApplied || !_hipAnchorPair.Report.Current.Step.Matches(step) ||
                 !_torso.HipAttitudeCommand.Matches(_parentCommand.HipCommand)) return false;
             _hipContinuationPending = false;
+            // Use the torque actually allocated (including CAP10); SYSTEM MotionScale
+            // cannot reconstruct this alpha when angular scale/gyro differ.
             _lastHipAppliedAngularAccelerationWorld = _hipAnchorPair.Report.Current.AllocatedHipAlpha;
             if (_traceEnabled)
             {
                 _legTurnCurrent.HipFinalA = _lastHipAppliedAngularAccelerationWorld;
+                _legTurnCurrent.CommittedUpperId = _hipAnchorPair.Report.Current.ChildId;
                 _legTurnCurrent.HipCommitted = true;
                 HipGoalPathEvidence path = _legTurnCurrent.HipGoalPath;
                 path.Committed = true; _legTurnCurrent.HipGoalPath = path;
@@ -889,10 +908,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             }
             catch (Exception e)
             {
-                Plugin.Logger?.LogError(
-                    "[ARL][LEG_FIXED_UPDATE_EXCEPTION] type=" + e.GetType().Name +
-                    " | message=" + e.Message + " | " + e);
-                AbortDrive("FIXED_UPDATE_EXCEPTION:" + e.GetType().Name);
+                AbortAfterFixedException(e);
             }
         }
 
@@ -900,7 +916,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             try
             {
-                ApplyKneePd();
+                using (LandingObservationTiming.Run.Measure(LandingObservationTiming.Stage.KneePd))
+                    ApplyKneePd();
                 if (!_driveEnabled) return;
                 UpdateReport();
                 UpdateAttributionMetrics();
@@ -925,7 +942,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                         footAttributionKneeAxisWorld,
                         _kneeResponseRelativeCommandWorld,
                         _stanceLowerNativeGravity.Enabled && _stanceFootLowerReciprocal.Enabled &&
-                        _stanceLowerSelfWeightTransfer.Enabled, _legTurnCurrent);
+                        _stanceLowerSelfWeightTransfer.Enabled, _legTurnCurrent,
+                        new SwingKneeCandidate.Controller(_kneeReference, _kneeFlexionAxisLowerLocal, _kneeGroundExtensionSelected,
+                            _softKneeAuthority.CurrentMaxAngularAcceleration, _kneeFlexionAllocation.Enabled));
                     if (!footFinite)
                     {
                         if (!_footFoundation.ContactShadowFinite)
@@ -1032,7 +1051,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                         _report.StanceLowerSelfWeightTransferCurrentApplied,
                         _report.StanceLowerSelfWeightTransferCurrentFootLoadAcceleration,
                         _report, _kneeCharacterJointResponseIsolation.CurrentAppliedAccelerationWorld,
-                        _torso.Report.MotionPhase, _dynamicParentActive ? _physicalParent : default, _legTurnCurrent, _dynamicScope))
+                        _torso.Report.MotionPhase, _dynamicParentActive ? _physicalParent : default, _legTurnCurrent, _dynamicScope,
+                        _upperBody, _upperSelfWeightTransfer.Report.CurrentApplied))
                     {
                         AbortDrive("FOOT_VELOCITY_SOLVER_PRE_SOLVE_INVALID:" + (_footFoundation.CurrentInvalidReason ?? "UNKNOWN"));
                         return;
@@ -1056,10 +1076,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             }
             catch (Exception e)
             {
-                Plugin.Logger?.LogError(
-                    "[ARL][LEG_FIXED_UPDATE_EXCEPTION] type=" + e.GetType().Name +
-                    " | message=" + e.Message + " | " + e);
-                AbortDrive("FIXED_UPDATE_EXCEPTION:" + e.GetType().Name);
+                AbortAfterFixedException(e);
             }
         }
 

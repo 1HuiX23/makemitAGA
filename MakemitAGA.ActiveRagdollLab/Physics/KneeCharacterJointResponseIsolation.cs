@@ -72,6 +72,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal string Arm => _enabled ? ExperimentalArm : ProductionArm;
         internal bool CurrentAnchorValid => !_enabled || _currentAnchorError <= TetherAnchorValidityMeters;
         internal Vector3 CurrentPositionErrorWorld => _currentPositionErrorWorld;
+        internal Vector3 CurrentVelocityErrorWorld => _currentVelocityErrorWorld;
         internal Vector3 CurrentParentAnchorFeedforwardWorld => _currentParentAnchorFeedforwardWorld;
         internal Vector3 CurrentRawAccelerationWorld => _currentRawAccelerationWorld;
         internal Vector3 CurrentAppliedAccelerationWorld => _currentAppliedAccelerationWorld;

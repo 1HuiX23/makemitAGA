@@ -1,5 +1,6 @@
 using System;
 using MakemitAGA.ActiveRagdollLab.Model;
+using MakemitAGA.ActiveRagdollLab.Runtime;
 using UnityEngine;
 
 namespace MakemitAGA.ActiveRagdollLab.Physics
@@ -13,13 +14,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal const float ContinuousIdentityHoldSeconds = FootGameNativeLocomotionPhaseObserver.PhaseConfirmSeconds;
         internal const float MaxEntryPenetrationMeters = FootContactGeometryLimits.OrdinaryPenetrationMeters;
         internal const float MaxEntryGapMeters = FootContactGeometryLimits.RecoveryMaxGapMeters;
-        internal const float RecoveryMaxPenetrationMeters = FootContactGeometryLimits.RecoveryPenetrationMeters;
         internal const float RecoveryHoldSeconds = FootContactGeometryLimits.RecoveryHoldSeconds;
-        internal const float RecoveryMaxCornerNormalSpeed = FootContactGeometryLimits.RecoveryMaxCornerNormalSpeed;
-        internal const float RecoveryMaxPlanarSpeed = FootContactGeometryLimits.RecoveryMaxPlanarSpeed;
-        internal const float RecoveryMaxAngularSpeed = FootContactGeometryLimits.RecoveryMaxAngularSpeed;
-        internal const float RecoveryMaxAnchorGapMeters = FootContactGeometryLimits.RecoveryMaxAnchorGapMeters;
-        internal const float RecoveryMaxSourceAgeSeconds = FootContactGeometryLimits.RecoveryMaxSourceAgeSeconds;
         private const int MaxMissedEntryLogs = 8;
         private bool _continuousEntry, _entryRecovery;
         private bool _entryWindowMissed, _entryMissCounted, _entryTraceContinuous, _entryTraceRecovery;
@@ -33,6 +28,15 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private int _entryGeometryFixed;
         private bool _entryGeometryAtEnable;
 
+        // Read-only event markers. Keep the first depth violation even when stance confirmation arrives later.
+        internal bool FirstMissThisStep { get; private set; }
+        private int _depthLatchFixed;
+        internal int FirstMissDepthFixed => FirstMissThisStep ? _depthLatchFixed : 0;
+        internal bool MissInProgress => _entryMissCounted;
+        internal bool OrdinaryEnabledThisStep { get; private set; }
+        internal bool RecoveryEnabledThisStep { get; private set; }
+        internal bool EntryHistoryAvailable => _entryHistoryLogs < MaxEntryHistoryLogs;
+        internal EntryGeometry DiagnosticEntryGeometry { get; private set; }
         internal bool ContinuousEntry => _continuousEntry;
         internal bool EntryRecovery => _entryRecovery;
         internal string EntryPolicy => EntryPolicyName(_continuousEntry, _entryRecovery);
@@ -51,25 +55,28 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         private void ResetEntryTrace()
         {
-            _entryWindowMissed = _entryMissCounted = false;
             _entryTraceContinuous = _continuousEntry;
             _entryTraceRecovery = _entryRecovery;
             _entryRecoveredStances = _entryRecoveryRejectSamples = 0;
-            ResetEntryRecoveryHold();
             ResetEntryHistory();
-            _entryMissedStances = _entryGeometryInvalidSamples = _entryGeometryRejectSamples = 0;
+            // A still-unresolved miss can recover during the new trace without another first-miss event.
+            _entryMissedStances = _enabled && _entryMissCounted && _state != StateActive ? 1 : 0;
+            _entryGeometryInvalidSamples = _entryGeometryRejectSamples = 0;
             _entryEvaluatedActivations = _entryMissedLogs = 0;
             _entryPenetrationPeak = _entryEnabledPenetrationPeak = 0f;
-            _entryGeometry = new EntryGeometry();
-            _entryGeometryFixed = 0;
-            _entryGeometryAtEnable = false;
         }
 
         internal struct EntryGeometry
         {
+            internal float SourceAnkleY;
             internal string SourcePhase;
             internal bool SourceFresh;
             internal int SourceHeldDepth;
+            internal int SupportId;
+            internal Vector3 FloorCenter, FloorHalf;
+            internal Vector3 LocalBoxCenter, LocalBoxSize, BoxScale;
+            internal bool LowestMotionValid, DiagnosticSelectedBox;
+            internal float LowestCornerNormalVelocity;
             internal float SourceDt;
             internal bool Valid, FullFootprint, MotionValid, ReferencesValid;
             internal float MinClearance, PredictedMinClearance, MaxCornerNormalSpeed;
@@ -90,11 +97,14 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         internal struct EntryContext
         {
+            internal float SourceAnkleY;
             internal string SourcePhase;
             internal bool SourceFresh;
             internal int SourceHeldDepth;
             internal float SourceDt;
             internal int FixedSequence;
+            internal bool FootAnchorYValid, CurrentGait;
+            internal float FootAnchorY;
             internal bool MotionValid, ReferencesValid;
             internal Vector3 Center, Velocity, AngularVelocity, SourceOrigin, ControlOrigin;
             internal Quaternion SourceRotation, ControlRotation;
@@ -108,7 +118,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         }
 
         // Read actual COM kinematics once; the same eight corners supply motion and signed clearance.
-        // Reference poses are diagnostic only. They cannot grant contact or alter the controller target.
+        // The existing control pose also scores precontact expiry. Formal stance uses actual geometry.
         internal static EntryContext CaptureEntryContext(int fixedSequence, Rigidbody body, Vector3 lowerAnkleWorld,
             Vector3 footAnchorLocal, Quaternion controlRotation, Vector3 sourceOrigin, Quaternion sourceRotation,
             float anchorGap, float sourceAge, Quaternion sourceRelativeRotation = default, Quaternion physicalLowerRotation = default)
@@ -127,10 +137,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 c.SourceOrigin = sourceOrigin;
                 c.SourceRotation = sourceRotation;
                 c.ControlRotation = controlRotation;
-                c.ControlOrigin = lowerAnkleWorld - controlRotation * Vector3.Scale(footAnchorLocal, scale);
+                Vector3 scaledAnchor = Vector3.Scale(footAnchorLocal, scale);
+                Vector3 sourceAnchorOffset = sourceRotation * scaledAnchor;
+                c.SourceAnkleY = sourceOrigin.y + sourceAnchorOffset.y;
+                c.ControlOrigin = lowerAnkleWorld - controlRotation * scaledAnchor;
                 c.ReferencesValid = FiniteVector(scale) && scale.x > 0f && scale.y > 0f && scale.z > 0f &&
                     FiniteVector(sourceOrigin) && FiniteVector(c.ControlOrigin) && FiniteRotation(sourceRotation) && FiniteRotation(controlRotation);
-                CaptureEntryReferenceContext(ref c, lowerAnkleWorld, Vector3.Scale(footAnchorLocal, scale), sourceRelativeRotation, physicalLowerRotation);
+                CaptureEntryReferenceContext(ref c, lowerAnkleWorld, sourceAnchorOffset, scaledAnchor, sourceRelativeRotation, physicalLowerRotation);
             }
             catch (Exception) { c.MotionValid = c.ReferencesValid = false; }
             return c;
@@ -148,7 +161,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             try
             {
                 if (foot != null && support != null && support.TryGetEntryBox(identity, out Vector3 center, out Vector3 half))
-                    return CaptureEntryGeometryAt(foot, center, half, context, dt);
+                {
+                    var geometry = CaptureEntryGeometryAt(foot, center, half, context, dt);
+                    geometry.SupportId = identity;
+                    return geometry;
+                }
                 return rejected;
             }
             catch (Exception e) { rejected.Issue = "ENTRY_GEOMETRY_READ:" + e.GetType().Name; return rejected; }
@@ -156,7 +173,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         private static EntryGeometry EntryGeometryContext(EntryContext context) => new EntryGeometry
         {
-            Issue = "CONTROLLED_BOX_REQUIRED", LandingGoal = context.LandingGoal, LandingPath = context.LandingPath,
+            Issue = "CONTROLLED_BOX_REQUIRED", SourceAnkleY = context.SourceAnkleY, LandingGoal = context.LandingGoal, LandingPath = context.LandingPath,
             SourcePhase = context.SourcePhase, SourceFresh = context.SourceFresh,
             ReceiverNormalResponse = context.ReceiverNormalResponse,
             SourceHeldDepth = context.SourceHeldDepth, SourceDt = context.SourceDt
@@ -171,6 +188,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             try
             {
                 if (foot == null || !FiniteVector(center) || !FiniteVector(half) || half.x <= 0f || half.y <= 0f || half.z <= 0f) return g;
+                g.FloorCenter = center; g.FloorHalf = half;
                 g.LandingPath.SupportTop = center.y + half.y;
                 g.LandingPath.Valid &= IsFinite(g.LandingPath.SupportTop);
                 Vector3 size = foot.size, localCenter = foot.center;
@@ -180,9 +198,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 Vector3 scale = transform.lossyScale;
                 if (!FiniteVector(scale) || scale.x <= 0f || scale.y <= 0f || scale.z <= 0f)
                 { g.Issue = "FOOT_SCALE_INVALID"; return g; }
+                // Retain the values already read for all eight PRE_N corners.
+                g.LocalBoxCenter = localCenter; g.LocalBoxSize = size; g.BoxScale = scale;
                 float min = float.PositiveInfinity;
                 float predicted = float.PositiveInfinity, sourceMin = float.PositiveInfinity, controlMin = float.PositiveInfinity;
                 float maxNormalSpeed = 0f;
+                FootLowestCornerMotion lowestMotion = default;
                 bool motion = context.MotionValid && IsFinite(dt) && dt > 0f;
                 bool inside = true;
                 EntryReferenceGeometry path = BeginEntryReferenceGeometry(context.DecompositionValid);
@@ -199,6 +220,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                             if (motion)
                             {
                                 Vector3 v = context.Velocity + Vector3.Cross(context.AngularVelocity, p - context.Center);
+                                lowestMotion.Add(p.y - (center.y + half.y), v.y);
                                 maxNormalSpeed = Mathf.Max(maxNormalSpeed, Mathf.Abs(v.y));
                                 predicted = Mathf.Min(predicted, p.y + v.y * dt - (center.y + half.y));
                             }
@@ -222,6 +244,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 g.MotionValid = motion && IsFinite(predicted) && IsFinite(maxNormalSpeed);
                 g.PredictedMinClearance = predicted;
                 g.MaxCornerNormalSpeed = maxNormalSpeed;
+                g.LowestMotionValid = motion && lowestMotion.Valid;
+                g.LowestCornerNormalVelocity = lowestMotion.Velocity;
                 g.PlanarSpeed = new Vector3(context.Velocity.x, 0f, context.Velocity.z).magnitude;
                 g.AngularSpeed = context.AngularVelocity.magnitude;
                 g.AnchorGap = context.AnchorGap;
@@ -252,11 +276,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (_entryGeometry.MinClearance < -MaxEntryPenetrationMeters && !_entryWindowMissed)
             {
                 _entryWindowMissed = true;
+                _depthLatchFixed = fixedSequence;
             }
             if (confirmedStance && _entryWindowMissed && !_entryMissCounted)
             {
                 _entryMissCounted = true;
                 _entryMissedStances++;
+                FirstMissThisStep = true;
                 if (_entryMissedLogs < MaxMissedEntryLogs)
                 {
                     _entryMissedLogs++;
@@ -321,31 +347,30 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         private void CommitEntryActivation()
         {
-            // Called only after EnablePreparedArmB succeeds. A native failure cannot count as recovered.
-            if (_entryRecoveryPending && _entryMissCounted) _entryRecoveredStances++;
+            // The native pair was enabled or handed over in place before this formal event.
+            if (_entryRecoveryPending && _entryMissCounted)
+            {
+                _entryRecoveredStances++;
+                RecoveryEnabledThisStep = true;
+            }
+            else OrdinaryEnabledThisStep = true;
         }
 
         private void CopyEntryToReport(FootAnkleFoundationReport report)
         {
             report.ContactEntryEvidenceReady = !_entryTraceContinuous || (_finite && _entryMissedStances == _entryRecoveredStances &&
                 _entryGeometryInvalidSamples == 0 && _entryEvaluatedActivations == _contactActivations && _contactActivations > 0);
-            report.ContactEntrySummary = "tracePolicy=" + EntryPolicyName(_entryTraceContinuous, _entryTraceRecovery) + "/livePolicy=" + EntryPolicy + "/entryEvidenceReady=" + report.ContactEntryEvidenceReady +
-                "/geometrySampleFixed=" + _entryGeometryFixed + "/geometrySampleRole=" + (_entryGeometryFixed == 0 ? "NONE" : (_entryGeometryAtEnable ? "ENABLE_PRE_CONTROL" : "INACTIVE_PRE_CONTROL")) +
-                "/boxValid=" + _entryGeometry.Valid + "/fullFootprint=" + _entryGeometry.FullFootprint +
-                "/boxMinMm=" + (_entryGeometry.Valid ? F(_entryGeometry.MinClearance * 1000f) : "NA") +
-                "/geometryIssue=" + Clean(_entryGeometry.Issue) + "/missedStances=" + _entryMissedStances +
-                "/recovered-unrecovered=" + _entryRecoveredStances + "-" + (_entryMissedStances - _entryRecoveredStances) +
-                "/recoveryHoldSec=" + F(_entryRecoverySeconds) + "/recoveryRejected=" + _entryRecoveryRejectSamples +
-                "/history(logs-sourceMotionCovered)=" + _entryHistoryLogs + "|" + _entryHistoryMotionLogged +
-                "/reject-invalid=" + _entryGeometryRejectSamples + "-" + _entryGeometryInvalidSamples +
-                "/evaluatedActivations=" + _entryEvaluatedActivations + "/penetrationPeakMm=" + F(_entryPenetrationPeak * 1000f) +
-                "/enabledPenetrationPeakMm=" + F(_entryEnabledPenetrationPeak * 1000f) +
-                "/traceIdentityHoldSec=" + F(_entryTraceContinuous ? ContinuousIdentityHoldSeconds : MinQualifiedStanceHoldSeconds) +
-                "/maxPenetration-gapMm=" + F(MaxEntryPenetrationMeters * 1000f) + "-" + F(MaxEntryGapMeters * 1000f) +
-                "/recoveryLimits(mm-sec-cornerV-planarV-W-anchorMm-ageSec)=" + F(RecoveryMaxPenetrationMeters * 1000f) + "-" +
-                F(RecoveryHoldSeconds) + "-" + F(RecoveryMaxCornerNormalSpeed) + "-" + F(RecoveryMaxPlanarSpeed) + "-" +
-                F(RecoveryMaxAngularSpeed) + "-" + F(RecoveryMaxAnchorGapMeters * 1000f) + "-" + F(RecoveryMaxSourceAgeSeconds) +
-                "/geometrySample=" + EntryGeometryText(_entryGeometry);
+            report.PublishEntrySummary(new FootContactEntrySnapshot
+            {
+                TracePolicy = EntryPolicyName(_entryTraceContinuous, _entryTraceRecovery), LivePolicy = EntryPolicy,
+                Ready = report.ContactEntryEvidenceReady, Fixed = _entryGeometryFixed, AtEnable = _entryGeometryAtEnable,
+                Geometry = GeometrySummary(_entryGeometry), Missed = _entryMissedStances, Recovered = _entryRecoveredStances,
+                HoldSeconds = _entryRecoverySeconds, RecoveryReject = _entryRecoveryRejectSamples,
+                HistoryCount = _entryHistoryLogs, HistoryMotion = _entryHistoryMotionLogged,
+                GeometryReject = _entryGeometryRejectSamples, GeometryInvalid = _entryGeometryInvalidSamples,
+                Evaluated = _entryEvaluatedActivations, Peak = _entryPenetrationPeak, EnabledPeak = _entryEnabledPenetrationPeak,
+                IdentityHold = _entryTraceContinuous ? ContinuousIdentityHoldSeconds : MinQualifiedStanceHoldSeconds
+            }, LandingObservationTiming.Run.Compact);
         }
 
         private static void LogEvent(string text)

@@ -5,7 +5,7 @@ using UnityEngine;
 
 namespace MakemitAGA.ActiveRagdollLab.Physics
 {
-    // Pure ordered geometric substitutions, stored only in the existing nine-row entry ring.
+    // Pure ordered geometric substitutions: entry ring and V141 preparation evidence share these values.
     // PRE_N bodies + FOR_N selected rotations + held Render source; no advance or feedback.
     internal static class FootLandingReferenceEvidence
     {
@@ -77,9 +77,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             p.ParentRaw = input.RawHip;
             p.ParentBoundRaw = f.RawP + f.RawR * f.LocalAnchor;
             p.ParentReferenceP = f.ReferenceP + f.RawR * f.LocalAnchor;
-            p.ParentReference = f.ReferenceP + f.ReferenceR * f.LocalAnchor;
+            p.ParentReference = f.ReferencePoint;
             p.ParentResponseP = f.ActualP + f.ReferenceR * f.LocalAnchor;
-            p.ParentActual = f.ActualP + f.ActualR * f.LocalAnchor;
+            p.ParentActual = f.ActualPoint;
             p.ParentTotal = input.ParentHip - input.RawHip;
             p.ParentPlacementValid = PelvisParentFrame.V(p.ParentBoundRaw) && PelvisParentFrame.V(p.ParentReferenceP) &&
                 PelvisParentFrame.V(p.ParentReference) && PelvisParentFrame.V(p.ParentResponseP) &&
@@ -185,7 +185,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 "/kneeReferenceR(previous-input-final)=" + Quat(r.PreviousR) + "|" + Quat(r.InputR) + "|" + Quat(r.R) +
                 "/kneeReferenceW(previous-raw-final)=" + Vec(r.PreviousW) + "|" + Vec(r.InputW) + "|" + Vec(r.W) +
                 "/kneeReferenceA(raw-final)=" + Vec(p.Knee.RawSourceA) + "|" + Vec(r.A) +
-                "/kneeReferenceLimits(W-A)=" + S(r.MaxW) + "|" + S(r.MaxA);
+                "/kneeReferenceLimits(W-A)=" + S(r.MaxW) + "|" + S(r.MaxA) + "/" + r.GroundTrajectory.Text();
         }
         private static string S(float x) => x.ToString("G9", CultureInfo.InvariantCulture);
         private static string Vec(Vector3 v) => "(" + S(v.x) + "," + S(v.y) + "," + S(v.z) + ")";

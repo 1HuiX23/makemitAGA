@@ -38,6 +38,8 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                 { _normalMissing++; return; }
                 float mass = f.PelvisMass + f.ChestMass;
                 bool enhanced = m.ComReference.EnhancedNormalFeedback;
+                bool recoveryCaptured = m.SupportRecovery.Step.Matches(m.Step) &&
+                    PelvisChestPointResponse.Same(m.SupportRecovery.Request, f.HipAttitude.Baseline.Acceleration);
                 var s = new PelvisNormalResponseEvidence
                 {
                     Valid = true, Input = m.Step, Settled = f.MotionNextStep, Fixed = f.Fixed,
@@ -51,6 +53,9 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                     UpwardSelected = f.HipAttitude.Baseline.UpwardRetentionSelected,
                     UpwardEligible = f.HipAttitude.Baseline.UpwardRetentionEligible, UpwardExtra = f.HipAttitude.UpwardExtraAcceleration,
                     Q = f.HipAttitude.MotionScale, Observed = m.ObservedA.y, LinearClamped = m.LinearClamped,
+                    RecoveryCaptured = recoveryCaptured,
+                    RecoverySelected = recoveryCaptured && m.SupportRecovery.Selected, RecoveryEligible = recoveryCaptured && m.SupportRecovery.Eligible,
+                    RecoveryExtraY = recoveryCaptured ? m.SupportRecovery.ExtraY : 0f,
                     PreV = (f.PelvisMass * f.PrePelvisV.y + f.ChestMass * f.PreChestV.y) / mass,
                     PostV = (f.PelvisMass * f.PostPelvisV.y + f.ChestMass * f.PostChestV.y) / mass
                 };

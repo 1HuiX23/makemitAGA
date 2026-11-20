@@ -4,6 +4,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     // confirmed strong stance, exact identity, hold or load-admission checks.
     internal static class FootContactGeometryLimits
     {
+        internal const float AnchorValidityMeters = .030f;
         internal const float OrdinaryPenetrationMeters = .002f;
         internal const float RecoveryPenetrationMeters = .003f;
         internal const float RecoveryHoldSeconds = .15f;

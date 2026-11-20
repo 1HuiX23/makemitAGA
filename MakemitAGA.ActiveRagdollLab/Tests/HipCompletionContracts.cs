@@ -41,7 +41,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             var c = new HipAnchorPairReport.Command
             {
                 Step = parent.Step, Fixed = fixedStep, ChildId = left ? 201 : 202, ParentId = parent.BodyId, ParentInput = parent,
-                JointSolved = true, FullFeedbackFeasible = true, MotionScale = 1f, Scale = 1f, Angular = angular,
+                JointSolved = true, FullFeedbackFeasible = true, MotionScale = 1f, UpperAngularScale = 1f, Scale = 1f, Angular = angular,
                 ParentAngularReaction = -.1f * Vector3.up, BilateralAngularReaction = -.2f * Vector3.up,
                 Force = force, PeerForce = (left ? .6f : .4f) * Vector3.right, CommonAcceleration = 1.1f * Vector3.right,
                 ParentTorque = Vector3.zero, ChildTorque = Vector3.zero, GeometryMoment = Vector3.zero,

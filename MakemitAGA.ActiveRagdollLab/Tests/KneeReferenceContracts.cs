@@ -18,6 +18,23 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             Check.Run("both allocation arms consume joint ground input; legacy raw bypass remains", GroundAndLegacy);
             Check.Run("parent frame fixture validates point velocity and complete identity", ParentFrameContract);
             Check.Run("joint Render capture uses current native geometry and explicit completed identity", RenderInputSnapshot);
+            Check.Run("v135 capture preserves completed controller Knee reference identity without relabeling it as Render", CompletedKneeSnapshot);
+        }
+
+        private static void CompletedKneeSnapshot()
+        {
+            foreach(bool b in new[]{false,true}) {
+                var leg=Joined(b);leg._dynamicScope=PelvisRunScope.DynamicLegHipAnchorCouplingContact;
+                leg.ExpectStep("complete real Knee step before Render");var completed=leg._kneeReference.Current;
+                leg._runtimeSource.Sequence++;
+                leg._runtimeSource.Time=leg._runtimeStep.UnscaledTime+1f/60f;
+                var input=leg.CaptureKneeFootGroundInput();
+                Check.That(input.HasCurrentKneeReference && input.PreferKneeProgress,"both arms capture the matching old reference and retain v135 B policy");
+                Check.That(input.CompletedKneeReference.Equals(completed) && input.CompletedKneeReference.Source.Sequence < input.Source.Sequence,
+                    "RWA and old source identity remain exact values, not a current-render receipt");
+                leg._kneeReference.ResetTrace();var after=leg.CaptureKneeFootGroundInput();
+                Check.That(after.CompletedKneeReference.Equals(completed),"trace reset cannot change captured controller state");
+            }
         }
 
         private static PhysicsStepContext Context(int offset, int hz = 60) => new PhysicsStepContext
@@ -115,7 +132,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 }
                 string trace = leg._kneeReference.GetSummary();
                 leg.DisableKneeReferencePreserveTrace();
-                Check.That(!leg.KneeReferenceSelected && !leg.KneePlannedFeedforwardSelected && !leg.KneeGroundTargetSelected &&
+                Check.That(!leg.KneeReferenceSelected && !leg.KneePlannedFeedforwardSelected && !leg.KneeGroundTargetSelected && !leg.KneeGroundExtensionSelected &&
                     !leg._kneeReference.Current.Valid, "stop removes live selection and current receipt");
                 Check.That(leg._kneeReference.GetSummary().Contains("/steps-held-stale-alphaLimited-speedLimited=3|") &&
                     trace.Contains("/steps-held-stale-alphaLimited-speedLimited=3|"), "stop retains only formal trace statistics");
@@ -139,6 +156,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 l => l._dynamicScope = PelvisRunScope.DynamicLegUnloadedContact,
                 l => l._joinStep = default, l => l._joinStep.Epoch++, l => l._runtimeStep = l._joinStep,
                 l => l._driveEnabled = false, l => l._dynamicJoinPending = true,
+                l => l._kneeGroundExtensionSelected = !l._kneeGroundExtensionSelected,
                 l => l._kneePlannedFeedforwardSelected = false, l => l._kneeGroundTargetSelected = !l._kneeGroundTargetSelected,
                 l => l._torso.PelvisReceiverControl.Arm = "LEGACY", l => l._runtimeStep.SourceSequence--
             };
@@ -201,11 +219,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 var observed = leg._runtimeStep; observed.Sequence--; observed.SourceSequence--;
                 observed.UnscaledTime = leg._runtimeSource.Time - 1f / 60f;
                 observed.FixedTime -= 1f / 60f;
-                var input = new KneeFootGroundInput { Enabled = true, Apply = true, Source = leg._runtimeSource,
+                var input = new KneeFootGroundInput { Enabled = true, Apply = true, AllowExtension = true, Source = leg._runtimeSource,
                     CompletedStep = observed, ParentId = 11, UpperId = 12, LowerId = 13,
                     Hip = g.Hip, Upper = g.Upper, UpperSpan = g.UpperSpan,
                     RawKnee = leg._sampledTargetKneeRelative, Axis = Vector3.right, LowerKneeAnchor = Vector3.zero };
-                var sample = KneeGroundTarget.Evaluate(g, input.RawKnee, input.Axis);
+                var sample = KneeGroundTarget.Evaluate(g, input.RawKnee, input.Axis, input.AllowExtension);
                 sample.Source = input.Source; sample.GeometryStep = observed;
                 sample.Applied = sample.Candidate; sample.PlannedFoot = KneeGroundTarget.SelectedFoot(g, sample.Foot);
                 leg._footFoundation.Packet = new KneeFootGroundPacket

@@ -28,10 +28,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 !Same(c.ChildTorque, Vector3.Cross(c.ChildPoint - c.ChildCom, c.Force)) ||
                 !Same(c.ParentTorque, Vector3.Cross(c.ParentPoint - c.ParentCom, -c.Force)) ||
                 !Same(c.UpperCorrectionTorque, -c.ChildTorque) || !Same(c.UpperActuatorTorque, c.NetHipTorque + c.UpperCorrectionTorque) ||
-                !HipSystemAllocation.Valid(c.ParentInput, c.MotionScale, c.UpwardExtraAcceleration) ||
-                (!c.FullFeedbackFeasible && c.UpwardExtraAcceleration != 0f) ||
-                !Same(c.NetHipTorque, c.PureHipTorque * c.MotionScale) || !c.Angular.SameAs(_input.Angular) ||
-                !Same(c.ParentAngularReaction, c.ParentInput.JointTorqueReaction ? -c.MotionScale * c.Angular.RelativeTorque : Vector3.zero) ||
+                !HipSystemAllocation.AngularValid(c.ParentInput, c.MotionScale, c.UpperAngularScale, c.UpwardExtraAcceleration) ||
+                (!c.FullFeedbackFeasible && (c.UpwardExtraAcceleration != 0f || c.UpperAngularScale != c.MotionScale)) ||
+                !Same(c.NetHipTorque, c.PureHipTorque * c.UpperAngularScale) || !c.Angular.SameAs(_input.Angular) ||
+                !Same(c.ParentAngularReaction, c.ParentInput.JointTorqueReaction ? -c.UpperAngularScale * c.Angular.RelativeTorque : Vector3.zero) ||
                 !V(c.BilateralAngularReaction) || (!c.ParentInput.JointTorqueReaction && !Same(c.BilateralAngularReaction, Vector3.zero)) ||
                 !V(c.CommonAcceleration) || c.CommonAcceleration.magnitude > PelvisHipCommandFrame.MaxMagnitude + 0.0001f ||
                 !V(c.PeerForce) || !V(c.AllocatedHipAlpha) ||

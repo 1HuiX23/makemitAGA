@@ -185,6 +185,8 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
                 " | legReferenceBound=" + (_proxy != null && _proxy.LegParentReferenceBound) +
                 " | legsJoined=" + (_pelvisWithLegs && _legChain != null && _legChain.DynamicParentsActive) +
                 " | footStepAttribution=READ_ONLY_V04710" +
+                " | kneeLandingPreparationArm=" + PelvisDynamicReceiverIsolation.UsesKneeLandingPreparation(_proxy == null ? null : _proxy.PelvisReceiverControl.Arm) +
+                " | hipLandingPreparationArm=" + PelvisDynamicReceiverIsolation.UsesHipLandingPreparation(_proxy == null ? null : _proxy.PelvisReceiverControl.Arm) +
                 " | footRelativeReference=" + (_pelvisWithLegs ? FootRelativeReference.ArmB : "NOT_BUILT") +
                 " | footReferenceBilateralMatched=" + (_legChain != null && _legChain.FootRelativeReferenceMatches(true)) +
                 " | torsoRecoveryPolicy=" + (_proxy != null && _proxy.ControlPolicy.UseDynamicTorsoRecovery ? DynamicTorsoRecoveryGate.DynamicPolicy : DynamicTorsoRecoveryGate.LegacyPolicy) +

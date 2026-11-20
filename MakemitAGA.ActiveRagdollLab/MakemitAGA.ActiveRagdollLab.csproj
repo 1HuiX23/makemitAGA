@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- ARL v0.4.128: Both arms execute v127 A uniform allocation; B adds a bounded read-only same-input budget audit.
-       Foot Render and Knee Fixed planners keep their original continuous R/W/A ownership.
+  <!-- ARL v0.4.166 uses v163 B right-foot contact in both arms. B follows a bounded left-foot translation trial across three adjacent solves.
+       Hip/Knee Fixed and Foot Render planners retain their original continuous R/W/A ownership.
        Startup, shared-step Hip completion and first-cause preservation retain the v125 R4 fixes.
        Shared clocks and session ownership; legacy loaded baseline retained. -->
   <!-- Load the user's path before deriving BepInExCore and InteropDir. -->
@@ -14,9 +14,9 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <AssemblyName>MakemitAGA.ActiveRagdollLab</AssemblyName>
     <RootNamespace>MakemitAGA.ActiveRagdollLab</RootNamespace>
-    <Version>0.4.128</Version>
-    <AssemblyVersion>0.4.128</AssemblyVersion>
-    <FileVersion>0.4.128</FileVersion>
+    <Version>0.4.166</Version>
+    <AssemblyVersion>0.4.166</AssemblyVersion>
+    <FileVersion>0.4.166</FileVersion>
     <CodePage>65001</CodePage>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <MiSideRoot Condition="'$(MiSideRoot)' == ''">C:\dpan\jgggggg\steam\steamapps\common\MiSide</MiSideRoot>

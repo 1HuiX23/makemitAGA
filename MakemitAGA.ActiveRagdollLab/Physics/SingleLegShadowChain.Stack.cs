@@ -537,7 +537,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             if (!IsBuilt)
                 return "ARL Knee flexion feedback headroom allocation A/B | built=False";
-            _kneeFlexionAllocation.CopyToReport(_report);
             return _kneeFlexionAllocation.GetStatus(_report);
         }
 

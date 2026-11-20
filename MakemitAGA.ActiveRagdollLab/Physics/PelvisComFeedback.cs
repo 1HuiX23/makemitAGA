@@ -25,7 +25,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal static float Sensitivity(float dt, bool normalEnhanced) =>
             1f + VelocityY(normalEnhanced) * dt + PositionY(normalEnhanced) * dt * dt;
 
-        // Semi-implicit reference p/v make d(commandA)/d(referenceA) diagonal.
+        // Before caps/recovery shaping, semi-implicit reference p/v make the
+        // nominal PD+AFF sensitivity diagonal. This is not the derivative of
+        // the constrained v137 request envelope or a measured plant response.
         // Map the known previous INPUT deficit into reference-acceleration space.
         // It is not an observed-force estimate and never divides by motion scale q.
         internal static Vector3 ReferenceDeficit(Vector3 deficit, float dt, bool enhanced)

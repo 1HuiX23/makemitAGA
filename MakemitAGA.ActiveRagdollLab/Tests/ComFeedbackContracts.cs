@@ -98,6 +98,16 @@ namespace ARL.Contracts
                 "populated optional response evidence reaches the report");
             invalid = s; invalid.SourceAge = -.01f;
             Check.That(!invalid.Matches(Step(11)), "negative observation age rejected");
+            var recovered = s; recovered.RecoveryCaptured = recovered.RecoverySelected = recovered.RecoveryEligible = true;
+            recovered.RecoveryExtraY = .5f;
+            Check.That(recovered.Matches(Step(11)) && recovered.Text().Contains("/normalRecoveryV041370(captured-selected-eligible-extraY)=True|True|True|0.5"),
+                "bounded recovery request is distinguished from later allocation retention");
+            invalid = recovered; invalid.RecoverySelected = false;
+            Check.That(!invalid.Matches(Step(11)), "unselected recovery cannot claim a positive request change");
+            invalid = recovered; invalid.RecoveryExtraY = float.NaN;
+            Check.That(!invalid.Matches(Step(11)), "nonfinite recovery evidence rejected");
+            invalid = recovered; invalid.RecoveryExtraY = 25f;
+            Check.That(!invalid.Matches(Step(11)), "change cannot exceed opposite ends of the original request sphere");
             var retained = s;
             retained.UpwardSelected = retained.UpwardEligible = true;
             retained.UpwardExtra = .4f; retained.Allocated = 1.4f;

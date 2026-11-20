@@ -8,12 +8,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     // forces. Let aS=q*baselineA + upwardExtra*Y, F act on Upper, and u drive BOTH P/C COMs:
     //   aSystem=u-(FL+FR)/M; Fi=mi*(feedback_i-pointBias_i+aS).
     // Thus u=aS+(FL+FR)/M. This is known same-step input, not measured-A feedback
-    // or an inverse-q gain. With joint reaction enabled, -q*relativeTorque enters parent pointBias and
-    // is NOT cancelled by the external point-force compensation. q scales requested
-    // the baseline SYSTEM motion and net Upper torque. The retained v127 path can
-    // add upward SYSTEM input at that SAME q under all the same budgets.
-    // v128 publishes uniform actual inputs; the old path serves a value-only candidate;
-    // the final actuator u has its own unchanged 12m/s² bound in the same interval.
+    // or an inverse-q gain. With joint reaction enabled, -angularScale*relativeTorque enters parent pointBias and
+    // is NOT cancelled by the external point-force compensation. q scales baseline
+    // SYSTEM motion; angularScale separately scales Upper net torque/reaction.
+    // Both current arms retain Y and may select the v129 CAP10 path only
+    // if it improves on that same-q result. All point/common/torque budgets remain.
+    // The final actuator u has its own unchanged 12m/s² bound.
     // If no full-feedback q is feasible, q=0 and scale forces AND their common
     // compensation together. Flag the lost feedback; do not reset source/reference.
     internal static partial class HipBilateralForceSolver
@@ -62,9 +62,14 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             bool feasible = BudgetInterval(left, right, 0f, 1f, lf0, rf0, lf, rf, common0, common1, ref lo, ref hi);
             float motion = feasible ? hi : 0f;
             if (!MotionRequest(left, right, motion, out lf, out rf, out Vector3 common)) return false;
-            float upwardExtra = 0f;
+            Vector3 uniformL = lf, uniformR = rf, uniformCommon = common;
+            float upwardExtra = 0f, angularScale = motion;
             if (feasible && baseline.UpwardRetentionEligible)
                 RetainUpward(left, right, motion, ref lf, ref rf, ref common, out upwardExtra);
+            var decision = new HipAllocationDecision { SameQExtra = upwardExtra };
+            if (feasible && baseline.BoundedTradeSelected && baseline.UpwardRetentionEligible && motion > 0f && motion < 1f)
+                SelectBoundedTrade(left, right, motion, uniformL, uniformR, uniformCommon,
+                    ref lf, ref rf, ref common, ref angularScale, ref upwardExtra, ref decision);
             float scale = 1f;
             if (!feasible)
             {
@@ -89,11 +94,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             common *= scale;
             moment = Vector3.Cross(left.Seed.ParentPoint - left.Seed.ParentCom, -actualL) +
                 Vector3.Cross(right.Seed.ParentPoint - right.Seed.ParentCom, -actualR);
-            if (!PelvisHipAttitudeCommand.TryPlanWithReaction(baseline, -actualL - actualR, moment, Reaction(left, right, motion), out PelvisHipAttitudeCommand final) || final.Clamped) return false;
-            final.MotionScale = motion; final.CommonAcceleration = common; final.UpwardExtraAcceleration = upwardExtra;
+            if (!PelvisHipAttitudeCommand.TryPlanWithReaction(baseline, -actualL - actualR, moment, Reaction(left, right, angularScale), out PelvisHipAttitudeCommand final) || final.Clamped) return false;
+            final.MotionScale = motion; final.UpperAngularScale = angularScale; final.CommonAcceleration = common; final.UpwardExtraAcceleration = upwardExtra;
             if (!final.AllocationMatches()) return false;
-            lc = Compose(left, lf, rf, actualL, actualR, ldf * scale, common, scale, pointScale, correctionScale, actuatorScale, receiverScale, commonScale, dampingPower, motion, upwardExtra, feasible, Reaction(left, right, motion));
-            rc = Compose(right, rf, lf, actualR, actualL, rdf * scale, common, scale, pointScale, correctionScale, actuatorScale, receiverScale, commonScale, dampingPower, motion, upwardExtra, feasible, Reaction(left, right, motion));
+            lc = Compose(left, lf, rf, actualL, actualR, ldf * scale, common, scale, pointScale, correctionScale, actuatorScale, receiverScale, commonScale, dampingPower, motion, angularScale, upwardExtra, feasible, Reaction(left, right, angularScale));
+            rc = Compose(right, rf, lf, actualR, actualL, rdf * scale, common, scale, pointScale, correctionScale, actuatorScale, receiverScale, commonScale, dampingPower, motion, angularScale, upwardExtra, feasible, Reaction(left, right, angularScale));
+            lc.AllocationDecision = rc.AllocationDecision = decision;
             float le = lc.FeedbackResidualA.magnitude, re = rc.FeedbackResidualA.magnitude;
             return V(lc.PredictedNetA) && V(rc.PredictedNetA) && V(lc.UpperActuatorTorque) && V(rc.UpperActuatorTorque) &&
                 V(lc.AllocatedHipAlpha) && V(rc.AllocatedHipAlpha) && F(le) && F(re) &&
@@ -185,25 +191,25 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             return Vector3.Cross(pureAlpha, input.Seed.ChildPoint - input.Seed.ChildCom) - parentA;
         }
         private static HipAnchorPairReport.Command Compose(HipAnchorPairInput input, Vector3 raw, Vector3 rawPeer, Vector3 force, Vector3 peer,
-            Vector3 damping, Vector3 common, float scale, float pointScale, float correctionScale, float actuatorScale, float receiverScale, float commonScale, float totalPower, float motion, float upwardExtra, bool feasible, Vector3 reaction)
+            Vector3 damping, Vector3 common, float scale, float pointScale, float correctionScale, float actuatorScale, float receiverScale, float commonScale, float totalPower, float motion, float angularScale, float upwardExtra, bool feasible, Vector3 reaction)
         {
             HipAnchorPairReport.Command c = input.Seed;
             c.Angular = input.Angular;
-            c.ParentAngularReaction = c.ParentInput.JointTorqueReaction ? -motion * input.Angular.RelativeTorque : Vector3.zero;
+            c.ParentAngularReaction = c.ParentInput.JointTorqueReaction ? -angularScale * input.Angular.RelativeTorque : Vector3.zero;
             c.BilateralAngularReaction = reaction;
             c.JointSolved = true; c.Force = force; c.UnboundedForce = raw; c.PeerForce = peer; c.PureHipTorque = input.PureTorque;
             c.Scale = scale; c.PointBudgetRatio = pointScale; c.UpperCorrectionBudgetRatio = correctionScale; c.UpperActuatorBudgetRatio = actuatorScale; c.ReceiverBudgetRatio = receiverScale;
             c.CommonBudgetRatio = commonScale;
             c.ChildTorque = Vector3.Cross(c.ChildPoint - c.ChildCom, force); c.ParentTorque = Vector3.Cross(c.ParentPoint - c.ParentCom, -force);
-            c.UpperCorrectionTorque = -c.ChildTorque; c.NetHipTorque = motion * input.PureTorque; c.CommonAcceleration = common;
-            c.MotionScale = motion; c.UpwardExtraAcceleration = upwardExtra; c.FullFeedbackFeasible = feasible;
+            c.UpperCorrectionTorque = -c.ChildTorque; c.NetHipTorque = angularScale * input.PureTorque; c.CommonAcceleration = common;
+            c.MotionScale = motion; c.UpperAngularScale = angularScale; c.UpwardExtraAcceleration = upwardExtra; c.FullFeedbackFeasible = feasible;
             c.AllocatedHipAlpha = input.DesiredAlpha + HipPointPairMobility.InverseTensor(input.ChildInertia, input.ChildPrincipal, c.NetHipTorque - input.PureTorque);
             c.UpperActuatorTorque = c.NetHipTorque + c.UpperCorrectionTorque;
             c.UpperCorrectionAlpha = HipPointPairMobility.InverseTensor(input.ChildInertia, input.ChildPrincipal, c.UpperCorrectionTorque);
             c.UpperActuatorLimitNm = ActuatorLimit(input.PureTorque);
             c.GeometryMoment = Vector3.Cross(c.ChildPoint - c.ParentPoint, force); c.ParentResponseAlpha = ParentAlpha(input, force);
             c.DesiredA = ForceResponse(input, raw, rawPeer); c.AppliedA = ForceResponse(input, force, peer);
-            c.KnownBiasA = PointBias(input, motion, reaction) - common;
+            c.KnownBiasA = PointBias(input, angularScale, reaction) - common;
             c.PredictedNetA = c.AppliedA + c.KnownBiasA;
             c.FeedbackResidualA = c.PredictedNetA - c.FeedbackA;
             c.DampingPower = Vector3.Dot(damping, -c.VelocityError); c.BilateralDampingPower = totalPower;

@@ -24,7 +24,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private bool _expectHipCompletion = false, _bodyMatches = true;
         private bool ReadyForRun => _bodyMatches && Report.Finite;
         private bool BodyStateMatch() => _bodyMatches;
-        private static bool IsDynamicHipArm(string arm) => arm == DynamicHipArmA || arm == DynamicHipArmB;
         private static bool F(float v) => float.IsFinite(v);
         private static bool V(Vector3 v) => PelvisParentFrame.V(v);
         private bool Invalid(string reason)
@@ -95,12 +94,12 @@ namespace MakemitAGA.ActiveRagdollLab.Model
 {
     // Only the report surface consumed by the linked production methods. These
     // are observation sinks, not substitutes for any eligibility or solver math.
-    internal sealed class PelvisReceiverReport
+    internal sealed partial class PelvisReceiverReport
     {
         internal bool TraceRunning = true, TraceHipTranslation = true, Finite = true;
         internal string Issue = null;
         internal int CurrentTraceFixed = 0, Samples = 0, IdleSamples = 0, MotionSamples = 0;
-        internal int Next = 0, Count = 0, FaultEvents = 0, HipReactionRecords = 0, HipAttitudeClamps = 0;
+        internal int Next = 0, Count = 0, FaultEvents = 0, HipReactionRecords = 0;
         internal int Resolved = 0, Censored = 0;
         internal float HipAttitudeRequestedPeak = 0f, HipAttitudeAppliedPeak = 0f, HipAttitudeResidualPeak = 0f, SystemResidualPeak = 0f;
         internal Vector3 CommonA = Vector3.zero, PelvisTorque = Vector3.zero;

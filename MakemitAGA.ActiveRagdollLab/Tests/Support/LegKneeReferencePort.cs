@@ -10,11 +10,6 @@ using UnityEngine;
 
 namespace MakemitAGA.ActiveRagdollLab.Physics
 {
-    internal sealed partial class PelvisDynamicReceiverIsolation
-    {
-        internal const string DynamicHipArmA = "A_V041280_UNIFORM_BASELINE";
-        internal const string DynamicHipArmB = "B_V041280_SAME_INPUT_BUDGET_AUDIT";
-    }
     internal readonly struct TorsoControlPhase
     {
         internal bool SourceTurnEventActive { get; }
@@ -28,6 +23,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private SourceStepContext _runtimeSource;
         private PelvisRunScope _dynamicScope = PelvisRunScope.DynamicLegFreeSpace;
         private PelvisParentFrame _physicalParent;
+        private readonly HipCompositeReferenceShockAbsorberIsolation _hipCompositeReferenceShockAbsorber = new HipCompositeReferenceShockAbsorberIsolation();
+        private Vector3 _controlTargetHipRelativeAngularVelocityLocal;
         private Quaternion _controlTargetHipRelative = Quaternion.identity;
         private Quaternion _controlTargetKneeRelative = Quaternion.identity, _sampledTargetKneeRelative = Quaternion.identity;
         private Vector3 _controlTargetKneeRelativeAngularVelocityLocal = Vector3.zero;
@@ -46,7 +43,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private readonly GroundPort _footFoundation = new GroundPort();
         private readonly RecoveryPort _hipAuthority = new RecoveryPort(), _softKneeAuthority = new RecoveryPort();
         private readonly FramePort _hipControlFrame = new FramePort();
-        private readonly HipReferencePort _hipNormalReference = new HipReferencePort();
+        private readonly HipNormalReference _hipNormalReference = new HipNormalReference();
         private bool _testSelectorsOff = true, _testNativeOff = true, _testGoalBridge = false;
         private int _testFeedforwardCalls;
         private bool DynamicParentActive => _dynamicParentActive && _driveEnabled;
@@ -82,11 +79,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private sealed class TimingPort { internal float AgeSeconds = 0f; }
         private sealed class RecoveryPort { internal bool PhysicalRecoveryPending = false; }
         private sealed class FramePort { internal bool Active = false; }
-        private sealed class HipReferencePort
-        {
-            internal readonly HipSample Current = new HipSample();
-            internal sealed class HipSample { internal bool Applied = false; internal Vector3 A = Vector3.zero; }
-        }
         private sealed class BodyPort
         {
             internal readonly PosePort transform = new PosePort();

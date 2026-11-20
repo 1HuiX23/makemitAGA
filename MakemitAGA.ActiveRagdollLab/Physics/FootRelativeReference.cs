@@ -9,7 +9,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     // Raw animation/conditioner history remains owned by Foundation. No body, force, clock or observer loop here.
     // v113: rawRotation/rawW/RawGap refer to this planner's input (possibly a ground-compatible goal),
     // not necessarily raw animation. Foundation keeps raw diagnostics separate.
-    internal sealed class FootRelativeReference
+    internal sealed partial class FootRelativeReference
     {
         internal const string ArmA = "RAW_FOOT_REFERENCE_V04730", ArmB = "COHERENT_FOOT_REFERENCE_V04730";
         internal const float MaxA = FootAnkleSourceDrivenRelativePdIsolation.MaxTargetAccelerationFeedforward;
@@ -25,6 +25,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal struct Sample
         {
             internal SourceStepContext Source;
+            internal FootGroundTrajectory.Result GroundTrajectory;
             internal Quaternion Rotation;
             internal Vector3 W, A;
             internal float Dt, RawGap, SourceElapsed, DiscardedElapsed;
@@ -53,6 +54,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         internal void Select(bool enabled)
         {
+            _groundSelected = false;
             _selected = enabled; _active = false; _finite = true; _issue = null;
             _current = new Sample();
             _inputRotation = Quaternion.identity; _inputW = Vector3.zero;
@@ -71,7 +73,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             return true;
         }
 
-        internal void ObserveRender(bool trace, SourceStepContext source, Quaternion rawRotation, Vector3 rawW, float dt)
+        internal void ObserveRender(bool trace, SourceStepContext source, Quaternion rawRotation, Vector3 rawW, float dt, FootGroundTrajectory.Input ground = default)
         {
             if (!_selected || !_active || !_finite) return;
             _lastInput = source; _lastSourceDt = dt; _lastPlanDt = 0f;
@@ -96,6 +98,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 // reference pose/W and approach the new pose with a zero source-speed hint.
                 // The following ordinary Render packet uses fresh raw history again.
                 Sample next = Build(_current.Rotation, _current.W, rawRotation, recovery ? Vector3.zero : rawW, planDt);
+                ChooseGroundStep(trace, source, ground, rawRotation, recovery ? Vector3.zero : rawW, recovery, ref next);
                 next.Source = source;
                 next.SourceElapsed = dt; next.GapRecovery = recovery;
                 next.DiscardedElapsed = recovery ? dt - planDt : 0f;
@@ -119,6 +122,24 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 }
             }
             catch { Invalid("REFERENCE_PLAN_INVALID"); }
+        }
+
+        internal bool TryPreviewRender(SourceStepContext source, Quaternion goal, Vector3 goalW,
+            float dt, FootGroundTrajectory.Input ground, out Sample next)
+        {
+            next = default;
+            if (!_selected || !_active || !_finite || !source.Valid || !Q(goal) || !V(goalW) ||
+                source.Epoch != _current.Source.Epoch || source.Sequence <= _current.Source.Sequence ||
+                !F(dt) || dt <= .0001f || dt >= .1f || source.Time <= _current.Source.Time ||
+                Mathf.Abs(source.Time - _current.Source.Time - dt) > .00001f) return false;
+            try
+            {
+                next = Build(_current.Rotation, _current.W, goal, goalW, dt);
+                PlanGroundStep(source, ground, goal, goalW, false, ref next);
+                next.Source = source; next.SourceElapsed = dt;
+                return true;
+            }
+            catch { next = default; return false; }
         }
 
         internal static Sample Build(Quaternion rotation, Vector3 w, Quaternion rawRotation, Vector3 rawW, float dt)
@@ -147,10 +168,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 InheritedOverSpeed = w.magnitude > MaxW + 0.0001f };
         }
 
-        internal void DisablePreserveTrace() { _selected = _active = false; }
+        internal void DisablePreserveTrace() { _selected = _active = _groundSelected = false; }
         internal void ResetTrace()
         {
-            _traceArm = Arm;
+            _traceArm = Arm; ResetGroundTrace();
             _renderSamples = _alphaLimited = _speedLimited = _inheritedOverSpeed = 0;
             _peakGap = _peakW = _peakA = 0f;
             _gapRecoveries = 0; _peakSourceGap = 0f; _discardedSeconds = 0d;
@@ -164,7 +185,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             "/lastInput(epoch-seq-time-sourceDt-planDt)=" + _lastInput.Epoch + "/" + _lastInput.Sequence + "/" + S(_lastInput.Time) + "/" + S(_lastSourceDt) + "/" + S(_lastPlanDt) +
             "/limits(W-A-arrivalRate)=" + S(MaxW) + "/" + S(MaxA) + "/" + S(ArrivalRate) +
             "/traceFFInput=" + (_traceArm == ArmB ? "COHERENT_REFERENCE_DERIVATIVE_BOUND20" : "RAW_RENDER_PERSISTENCE_CONDITIONED_BOUND20") +
-            "/domain=TRUE_RENDER_ONLY_FIXED_HOLD/closure=POSE_EXP_NEXT_W_PLAN_DT_AND_A_DELTA_W_PLAN_DT/gapPolicy=DISCARD_MISSING_TIME_ONE_STEP_MAX_1_OVER_60_NO_REBASE/stale=ORIGINAL_CONTROLLER_POLICY/noRunRebase=True";
+            "/domain=TRUE_RENDER_ONLY_FIXED_HOLD/closure=POSE_EXP_NEXT_W_PLAN_DT_AND_A_DELTA_W_PLAN_DT/gapPolicy=DISCARD_MISSING_TIME_ONE_STEP_MAX_1_OVER_60_NO_REBASE/stale=ORIGINAL_CONTROLLER_POLICY/noRunRebase=True" + GroundSummary();
 
         private bool Invalid(string issue) { _finite = false; _issue = issue; return false; }
         internal static Quaternion Advance(Quaternion q, Vector3 w, float dt)

@@ -516,10 +516,13 @@ namespace MakemitAGA.ActiveRagdollLab.Configuration
 
         private static float ParseFloat(string value, float fallback)
         {
-            return float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out float parsed)
+            return TryFiniteFloat(value, out float parsed)
                 ? parsed
                 : fallback;
         }
+
+        private static bool TryFiniteFloat(string value, out float parsed) =>
+            float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed) && float.IsFinite(parsed);
 
         private static bool ParseBool(string value, bool fallback)
         {
@@ -537,9 +540,9 @@ namespace MakemitAGA.ActiveRagdollLab.Configuration
             string[] parts = (value ?? string.Empty).Split(',');
             if (parts.Length != 3)
                 return fallback;
-            if (!float.TryParse(parts[0].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out float x) ||
-                !float.TryParse(parts[1].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out float y) ||
-                !float.TryParse(parts[2].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out float z))
+            if (!TryFiniteFloat(parts[0], out float x) ||
+                !TryFiniteFloat(parts[1], out float y) ||
+                !TryFiniteFloat(parts[2], out float z))
                 return fallback;
             return new Vector3(x, y, z);
         }

@@ -124,14 +124,10 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public Vector3 SourceAnkleRenderStepDegrees;
         public int TraceSourceRenderStepSamples => _controlEvidence.TraceSourceRenderStepSamples;
         public float TraceSourceRenderStepAngleMaxDegrees => _controlEvidence.TraceSourceRenderStepAngleMaxDegrees;
-        public FootFixedStepEvidence PreviousObservedStep => _controlEvidence.PreviousObservedStep;
         public FootFixedStepEvidence CurrentObservedStep => _controlEvidence.CurrentObservedStep;
-        public int AnkleConstraintLastEvaluatedFixedSequence => _controlEvidence.AnkleConstraintLastEvaluatedFixedSequence;
-        public int AnkleDriveLastEvaluatedFixedSequence => _controlEvidence.AnkleDriveLastEvaluatedFixedSequence;
         public int FootControllerLastCompletedFixedSequence => _controlEvidence.FootControllerLastCompletedFixedSequence;
         public int TraceObservedFixedSamples => _controlEvidence.TraceObservedFixedSamples;
         public float TraceObservedAnchorErrorMaxMeters => _controlEvidence.TraceObservedAnchorErrorMaxMeters;
-        public float TraceObservedTrackingErrorMaxDegrees => _controlEvidence.TraceObservedTrackingErrorMaxDegrees;
         public Vector3 SourceAnkleFromBindRotationVectorDegrees;
         public float SourceAnkleFromBindAngleDegrees;
         public Vector3 SourceAnkleRelativeAngularVelocityLocal;
@@ -199,6 +195,8 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public int ContactShadowMinRaycastMatchSamples, ContactShadowMinMatchedCallbacks;
         public bool ContactShadowPrepared;
         public bool ContactShadowActive;
+        internal bool PrecontactColliderActive;
+        internal bool FormalStanceColliderActive => ContactShadowActive && !PrecontactColliderActive;
         public int ContactShadowAuthorizedColliderInstanceId;
         public string ContactShadowAuthorizedColliderPath;
         public int ContactShadowSceneColliderCount;
@@ -272,7 +270,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         public int StanceContactLifecycleLastReleaseFixed;
         public bool StanceContactLifecycleTraceQualified;
         public bool ContactEntryEvidenceReady = true; // legacy scopes have no new entry-policy qualification
-        public string ContactEntrySummary;
+        public string LandingOpportunitySummary;
         public string StanceLoadAdmissionSummary;
 
         // v0.4.8 causal isolation of stance-contact friction/yaw constraint. Both arms keep the same
@@ -800,6 +798,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                 sb.AppendLine("stanceContactLifecycleFinite=" + StanceContactLifecycleFinite + "/reason=" + (StanceContactLifecycleInvalidReason ?? "<none>"));
                 sb.AppendLine("stanceContactLifecycleCurrent=" + (StanceContactLifecycleCurrentSummary ?? "<none>"));
                 sb.AppendLine("contactEntryV041180=" + (ContactEntrySummary ?? "<none>"));
+                sb.AppendLine(LandingOpportunitySummary ?? "LANDING_OPPORTUNITY_V041420=NOT_CAPTURED");
                 sb.AppendLine(StanceLoadAdmissionSummary ?? "STANCE_LOAD_ADMISSION_V041190/PENDING_TRACE_FINALIZE");
                 sb.AppendLine("stanceContactLifecycleTrace=" + (StanceContactLifecycleTraceSummary ?? "<none>"));
                 sb.AppendLine("stanceContactFrictionIsolation=" + (StanceContactFrictionIsolationSummary ?? "<none>"));

@@ -11,7 +11,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
     /// 文本只读取已复制的托管值；控制就绪仍由各 owner 的 typed contract 判断。
     /// 历史实验的完整实现留在归档源码，无消费者的镜像字段不进入活动报告。
     /// </summary>
-    internal sealed class SingleLegChainReport
+    internal sealed partial class SingleLegChainReport
     {
         public bool Built;
         public bool DriveEnabled;
@@ -660,35 +660,6 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         // diagnostics and unchanged hard safety remain the only retained discontinuity boundary.
         // v0.2.78 Knee flexion feedback-headroom allocation causal A/B. Parent angular transport is NOT part of
         // this ceiling; the tested shared scalar ceiling is only (P+D feedback) + Knee A-FF -> existing +/-40 clamp.
-        public string KneeFlexionAllocationMode;
-        public string KneeFlexionAllocationArm;
-        public bool KneeFlexionAllocationEnabled;
-        public int KneeFlexionAllocationSteps;
-        public int KneeFlexionAllocationActiveSteps;
-        public int KneeFlexionAllocationInvalidSteps;
-        public int KneeFlexionAllocationOpposingSteps;
-        public int KneeFlexionAllocationSuppressedOpposingFfSteps;
-        public int KneeFlexionAllocationSameDirectionSteps;
-        public int KneeFlexionAllocationOriginalWouldClampSteps;
-        public int KneeFlexionAllocationFinalClampSteps;
-        public float KneeFlexionAllocationCurrentPd;
-        public float KneeFlexionAllocationCurrentInputFf;
-        public float KneeFlexionAllocationCurrentEffectiveFf;
-        public float KneeFlexionAllocationCurrentOriginalRaw;
-        public float KneeFlexionAllocationCurrentAllocatedRaw;
-        public float KneeFlexionAllocationCurrentApplied;
-        public float KneeFlexionAllocationCurrentMaxA;
-        public bool KneeFlexionAllocationCurrentOpposing;
-        public bool KneeFlexionAllocationCurrentOriginalWouldClamp;
-        public bool KneeFlexionAllocationCurrentFinalClamped;
-        public float KneeFlexionAllocationPeakPdAbs;
-        public float KneeFlexionAllocationPeakInputFfAbs;
-        public float KneeFlexionAllocationPeakOriginalRawAbs;
-        public float KneeFlexionAllocationPeakAllocatedRawAbs;
-        public float KneeFlexionAllocationPeakAppliedAbs;
-        public float KneeFlexionAllocationSuppressedFfAbsMean;
-        public string KneeFlexionAllocationLastEvidence;
-        public string KneeFlexionAllocationKey;
 
         // v0.2.79 Hip positional parent-anchor acceleration feedforward causal A/B. B consumes the upcoming
         // source-Hip anchor command acceleration for the already-kinematic mechanical parent before the unchanged

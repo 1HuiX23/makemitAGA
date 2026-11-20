@@ -14,6 +14,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             internal SupportReferenceContext SupportInput;
             internal bool SupportFloorSelected;
             internal bool SupportNormalPrioritySelected, SupportTangentBrakingPreserved;
+            internal bool SupportBrakingSelected;
+            internal float SupportBrakingMinimumY, SupportBrakingExtraY, SupportBrakingBaselineResidual, SupportBrakingFinalResidual;
             internal float SupportFloorY, NominalCandidateY, SupportCandidateDeltaY, SupportRemainingUnderY;
             internal float SupportPriorityExtraY, SupportTangentDeltaV, SupportCandidateUnderY;
             internal bool ArrivalEnabled, FeedbackEnabled, FeedbackAvailable, SpeedLimited, AccelerationLimited, PhysicalBrakeProtected;
@@ -26,7 +28,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         internal static ComPlan Build(Vector3 position, Vector3 velocity, Vector3 goal, Vector3 goalV,
             float dt, bool arrival, bool feedback, Vector3 previousRequest, Vector3 previousAllocated, Vector3 settledV, bool feedbackEnabled, SupportReferenceContext support = default,
-            bool supportFloor = false, float supportFloorY = 0f, bool supportNormalPriority = false, bool enhancedNormalFeedback = false)
+            bool supportFloor = false, float supportFloorY = 0f, bool supportNormalPriority = false, bool enhancedNormalFeedback = false,
+            bool supportBraking = false)
         {
             if (!F(dt) || dt <= 0f || !V(position) || !V(velocity) || !V(goal) || !V(goalV) ||
                 velocity.magnitude > MaxV + 0.001f || (arrival && !V(settledV)) ||
@@ -54,13 +57,27 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             float nominalCandidateY = candidateV.y;
             float priorityExtraY = 0f, tangentDeltaV = 0f;
             bool tangentBrakingPreserved = false;
+            float brakingMinimumY = 0f, brakingExtraY = 0f, brakingBaselineResidual = 0f;
             if (supportFloor)
             {
                 if (!arrival || !support.Matches(support.ForStep) || support.ForStep.Dt != dt)
                     throw new InvalidOperationException("SUPPORT_REFERENCE_CONTEXT_INVALID");
+                Vector3 unshaped = candidateV;
                 Vector3 remainder = SupportNormalReference.RaiseCandidate(position, velocity, candidateV, supportFloorY, dt, MaxV, MaxA);
                 candidateV = supportNormalPriority ? SupportNormalReference.AllocateNormalPriority(position, velocity, candidateV,
                     supportFloorY, dt, MaxV, MaxA, out tangentBrakingPreserved) : remainder;
+                brakingMinimumY = SupportNormalBraking.MinimumVelocity(position.y, supportFloorY, dt, MaxA);
+                brakingBaselineResidual = SupportNormalBraking.Residual(position.y + candidateV.y * dt, candidateV.y, supportFloorY, MaxA);
+                if (supportBraking)
+                {
+                    // Compare the new candidate with the unchanged one-step floor
+                    // candidate from this SAME input. Both still precede feedback.
+                    Vector3 original = candidateV;
+                    remainder = SupportNormalReference.RaiseCandidate(position, velocity, unshaped, supportFloorY, dt, MaxV, MaxA, brakingMinimumY);
+                    candidateV = supportNormalPriority ? SupportNormalReference.AllocateNormalPriority(position, velocity, unshaped,
+                        supportFloorY, dt, MaxV, MaxA, out tangentBrakingPreserved, brakingMinimumY) : remainder;
+                    brakingExtraY = candidateV.y - original.y;
+                }
                 priorityExtraY = candidateV.y - remainder.y;
                 tangentDeltaV = new Vector3(candidateV.x - remainder.x, 0f, candidateV.z - remainder.z).magnitude;
             }
@@ -92,9 +109,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     float referenceDeficitMagnitude = magnitude / sensitivity;
                     if (enhancedNormalFeedback)
                     {
-                        // B has a different normal sensitivity. Invert it per axis
-                        // BEFORE the original direction/braking tests and bounded removal.
-                        // A retains the original arithmetic and all other scopes stay A.
+                        // Current Hip arms share the v124 enhanced normal sensitivity.
+                        // This is the nominal PD+AFF input back-calculation; request
+                        // saturation and the v137 recovery envelope are nonlinear.
+                        // Keep actual receipt deficits and the original bounded removal.
                         Vector3 referenceDeficit = PelvisComFeedback.ReferenceDeficit(deficit, dt, true);
                         referenceDeficitMagnitude = referenceDeficit.magnitude;
                         if (!V(referenceDeficit) || !F(referenceDeficitMagnitude) || referenceDeficitMagnitude <= 0f)
@@ -117,6 +135,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             // Receipt validity and feedback selection remain separate. Current Hip
             // arms both retain feedback; support shaping never bypasses that policy.
             return new ComPlan { EnhancedNormalFeedback = enhancedNormalFeedback, SupportInput = support, SupportFloorSelected = supportFloor,
+                SupportBrakingSelected = supportFloor && supportBraking, SupportBrakingMinimumY = brakingMinimumY,
+                SupportBrakingExtraY = brakingExtraY, SupportBrakingBaselineResidual = brakingBaselineResidual,
+                SupportBrakingFinalResidual = supportFloor ? SupportNormalBraking.Residual(nextPosition.y, nextV.y, supportFloorY, MaxA) : 0f,
                 SupportNormalPrioritySelected = supportFloor && supportNormalPriority, SupportTangentBrakingPreserved = tangentBrakingPreserved,
                 SupportFloorY = supportFloorY, NominalCandidateY = nominalCandidateY,
                 SupportCandidateDeltaY = supportCandidateDeltaY,

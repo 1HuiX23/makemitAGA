@@ -89,15 +89,24 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private int _stanceSurfaceSwitches;
         private bool _currentStrongStanceSample;
 
+        internal int CurrentPhaseFixed { get; private set; }
         internal string State => _state;
         internal bool CurrentStrongStanceSample => _currentStrongStanceSample;
 
-        internal void ResetTrace(FootAnkleFoundationReport report)
+        internal void ResetPhase()
         {
             _finite = true;
             _invalidReason = null;
             _state = StateUnknown;
             _lastReason = "<none>";
+            ClearCandidate();
+            CurrentPhaseFixed = 0;
+            _currentStrongStanceSample = false;
+        }
+
+        internal void ResetTrace(FootAnkleFoundationReport report, bool preserveLivePhase = false)
+        {
+            if (!preserveLivePhase) ResetPhase();
             _traceSamples = 0;
             _eligibleSamples = 0;
             _stanceSamples = 0;
@@ -115,8 +124,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _firstStanceFixed = 0;
             _firstSwingFixed = 0;
             _lastTransitionFixed = 0;
-            _candidateSeconds = 0f;
-            _candidateTarget = StateUnknown;
             _stanceTangentialSpeedSum = 0f;
             _stanceTangentialSpeedMax = 0f;
             _swingTangentialSpeedSum = 0f;
@@ -131,7 +138,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _swingClearanceAbsMax = 0f;
             _stanceSurfaceId = 0;
             _stanceSurfaceSwitches = 0;
-            _currentStrongStanceSample = false;
             CopyToReport(report, false);
         }
 
@@ -148,29 +154,36 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             int groundColliderInstanceId,
             float groundMaxAbsClearanceMeters,
             Vector3 groundAverageNormalWorld,
-            FootAnkleFoundationReport report)
+            FootAnkleFoundationReport report,
+            bool controlActive = false)
         {
-            if (!traceEnabled)
+            if (CurrentPhaseFixed == 0 || fixedSequence != CurrentPhaseFixed + 1)
             {
-                _currentStrongStanceSample = false;
+                _state = StateUnknown;
+                ClearCandidate();
+            }
+            CurrentPhaseFixed = 0;
+            _currentStrongStanceSample = false;
+            if (!traceEnabled && !controlActive)
+            {
                 CopyToReport(report, false);
                 return;
             }
 
-            _traceSamples++;
+            if (traceEnabled) _traceSamples++;
+            qualificationSampleEligible &= traceEnabled;
             // v0.4.7 reuses the frozen classifier online while a confirmed STANCE may have contact enabled.
             // Phase state must keep updating so the first strong swing sample can release contact immediately.
             // Only contact-free samples contribute to the historical v0.4.5 qualification counters.
             if (!phaseTrackingEligible)
             {
-                _currentStrongStanceSample = false;
                 _lastReason = "PHASE_TRACKING_NOT_ELIGIBLE";
                 CopyToReport(report, TraceQualified());
                 return;
             }
 
-            float dt = IsFinite(fixedDeltaTime) && fixedDeltaTime > 0f ? fixedDeltaTime : 0.02f;
-            if (!IsFinite(sourceFootLinearVelocityWorld) || !IsFinite(referenceUpWorld) || !IsFinite(groundMaxAbsClearanceMeters))
+            float dt = fixedDeltaTime;
+            if (fixedSequence <= 0 || !IsFinite(dt) || dt <= 0f || !IsFinite(sourceFootLinearVelocityWorld) || !IsFinite(referenceUpWorld) || !IsFinite(groundMaxAbsClearanceMeters))
             {
                 Invalidate("NON_FINITE_GAIT_PHASE_SAMPLE");
                 CopyToReport(report, false);
@@ -196,6 +209,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 return;
             }
 
+            CurrentPhaseFixed = fixedSequence;
             if (qualificationSampleEligible)
             {
                 _eligibleSamples++;
@@ -224,9 +238,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _currentStrongStanceSample = strongStance;
 
             if (strongStance)
-                HandleStanceEvidence(fixedSequence, dt, tangentialSpeed, normalSpeedAbs, clearanceAbs, groundColliderInstanceId, qualificationSampleEligible, report);
+                HandleStanceEvidence(fixedSequence, dt, tangentialSpeed, normalSpeedAbs, clearanceAbs, groundColliderInstanceId, qualificationSampleEligible, report, traceEnabled);
             else if (strongSwing)
-                HandleSwingEvidence(fixedSequence, dt, tangentialSpeed, normalSpeedAbs, clearanceAbs, qualificationSampleEligible, report);
+                HandleSwingEvidence(fixedSequence, dt, tangentialSpeed, normalSpeedAbs, clearanceAbs, qualificationSampleEligible, report, traceEnabled);
             else
                 HandleTransitionEvidence(qualificationSampleEligible);
 
@@ -242,7 +256,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             CopyToReport(report, qualified);
         }
 
-        private void HandleStanceEvidence(int fixedSequence, float dt, float tangentialSpeed, float normalSpeedAbs, float clearanceAbs, int surfaceId, bool qualificationSampleEligible, FootAnkleFoundationReport report)
+        private void HandleStanceEvidence(int fixedSequence, float dt, float tangentialSpeed, float normalSpeedAbs, float clearanceAbs, int surfaceId, bool qualificationSampleEligible, FootAnkleFoundationReport report, bool logTransition)
         {
             if (_state == StateStance)
             {
@@ -276,7 +290,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                         if (fromSwing) _swingToStanceTransitions++;
                         AccumulateStance(tangentialSpeed, normalSpeedAbs, clearanceAbs, surfaceId);
                     }
-                    Plugin.Logger?.LogInfo("[ARL][GAIT_PHASE_V0450] side=" + Clean(report != null ? report.Side : null) +
+                    if (logTransition) Plugin.Logger?.LogInfo("[ARL][GAIT_PHASE_V0450] side=" + Clean(report != null ? report.Side : null) +
                                            " | enter=STANCE | fixed=" + fixedSequence +
                                            " | tangential=" + F(tangentialSpeed) +
                                            " | normalAbs=" + F(normalSpeedAbs) +
@@ -289,7 +303,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             }
         }
 
-        private void HandleSwingEvidence(int fixedSequence, float dt, float tangentialSpeed, float normalSpeedAbs, float clearanceAbs, bool qualificationSampleEligible, FootAnkleFoundationReport report)
+        private void HandleSwingEvidence(int fixedSequence, float dt, float tangentialSpeed, float normalSpeedAbs, float clearanceAbs, bool qualificationSampleEligible, FootAnkleFoundationReport report, bool logTransition)
         {
             if (_state == StateSwing)
             {
@@ -323,7 +337,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                         if (fromStance) _stanceToSwingTransitions++;
                         AccumulateSwing(tangentialSpeed, normalSpeedAbs, clearanceAbs);
                     }
-                    Plugin.Logger?.LogInfo("[ARL][GAIT_PHASE_V0450] side=" + Clean(report != null ? report.Side : null) +
+                    if (logTransition) Plugin.Logger?.LogInfo("[ARL][GAIT_PHASE_V0450] side=" + Clean(report != null ? report.Side : null) +
                                            " | enter=SWING | fixed=" + fixedSequence +
                                            " | tangential=" + F(tangentialSpeed) +
                                            " | normalAbs=" + F(normalSpeedAbs) +

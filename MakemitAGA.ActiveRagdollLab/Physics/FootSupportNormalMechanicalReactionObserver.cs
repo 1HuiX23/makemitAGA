@@ -215,6 +215,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal float LastSignedNormalImpulse => _lastSignedNormalImpulse;
         internal float LastTangentImpulse => _lastTangentImpulse;
         internal bool LastProjectionValidThisCallback => _lastProjectionValidThisCallback;
+        internal Vector3? PreSolveAngularVelocity(int local) =>
+            _preValid && _preFixedSequence == local ? _preAngularVelocity : null;
         internal int LastCollisionPreFixedSequence => _lastCollisionPreFixedSequence;
         internal string LastPhase => _lastPhase;
 

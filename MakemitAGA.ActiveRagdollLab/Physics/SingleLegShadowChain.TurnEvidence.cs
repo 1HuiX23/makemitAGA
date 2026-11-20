@@ -93,6 +93,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 // Read the actual first-match reason; do not create a second decision tree from the bits.
                 TwoBodyProxyReport torso = _torso.Report;
                 _legTurnCurrent.HipNormalReference = _hipNormalReference.Current;
+                _legTurnCurrent.LandingPreparation = _landingPreparationCommand;
                 _legTurnCurrent.HipNormalRecoveryHandoffStarted = _hipCompositeReferenceShockAbsorber.NormalRecoveryStartedThisStep;
                 _legTurnCurrent.HipNormalRecoveryHandoffActive = _hipCompositeReferenceShockAbsorber.NormalRecoveryHandoffActive;
                 _legTurnCurrent.HipFeedforwardEnabled = _legAngularAccelerationFeedforward.Enabled;
@@ -176,13 +177,29 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private void CaptureLandingReferenceInput()
         {
             if (!_traceEnabled || !_dynamicParentActive || _footFoundation == null ||
-                !_footFoundation.LandingReferenceCaptureRequested) return;
+                (!_footFoundation.LandingReferenceCaptureRequested && !_landingPreparationCommand.Applied)) return;
+            bool full = _landingPreparationCommand.Applied || _footFoundation.FullLandingReferenceRequested(false);
+            using var measurement = LandingObservationTiming.Run.Measure(full
+                ? LandingObservationTiming.Stage.LegFullCapture : LandingObservationTiming.Stage.LegParentCapture);
+            // Adopted-command capture also runs on active feet.
+            // This reuses the committed-state capture for adopted preparation commands,
+            // including contact-active steps outside the old entry-history quota.
             // Capture only a committed dynamic, joint-free chain. No diagnostic state can
             // become a dependency of native writes. Zero is the actual Hip child anchor here.
             try
             {
                 if (!_legTurnCurrent.HipCommitted || !_legTurnCurrent.KneeCommitted ||
                     _hipJoint != null || _kneeJoint != null || !_physicalParent.Matches(_runtimeStep)) return;
+                if (!full)
+                {
+                    // Prepared stays false: full-path consumers can never accept this partial input.
+                    _legTurnCurrent.LandingInput = new LegLandingReferenceInput
+                    {
+                        Step = _runtimeStep, Source = _runtimeSource, Fixed = _fixedUpdateSequence,
+                        RawHip = _sampledUpperPosition, Parent = CaptureLandingParentInput()
+                    };
+                    return;
+                }
                 Vector3 upperScale = _upperBody.transform.lossyScale, lowerScale = _lowerBody.transform.lossyScale;
                 if (!IsFinite(upperScale) || !IsFinite(lowerScale) ||
                     upperScale.x <= 0f || upperScale.y <= 0f || upperScale.z <= 0f ||
@@ -206,7 +223,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         private LandingParentPlacementInput CaptureLandingParentInput()
         {
-            // Called only inside the existing inactive-entry window quota. Failure
+            // Called for inactive contact opportunity evidence or an adopted preparation command. Failure
             // leaves the original ankle path and the independent Knee receipt intact.
             try
             {

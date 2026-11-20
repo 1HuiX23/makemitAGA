@@ -10,7 +10,9 @@ namespace ARL.Contracts
     {
         internal static void Run()
         {
+            Check.Run("output faults cannot stop healthy runs or strand completed sessions", OutputFaults);
             Check.Run("pelvis readiness, capture order and idempotence", PelvisLifecycle);
+            Check.Run("formal landing timing begins only at STARTED and seals on automatic stop", LandingTimingLifecycle);
             Check.Run("pelvis fault finalization and timeout", PelvisFaults);
             Check.Run("pelvis initial geometry rejection is not a running safety abort", PelvisPreparationRejection);
             Check.Run("pelvis stable join has a separate waiting dependency", PelvisStableJoin);
@@ -19,6 +21,59 @@ namespace ARL.Contracts
             Check.Run("ankle fault finalization and clock", AnkleFaults);
         }
 
+        private static void OutputFaults()
+        {
+            foreach (bool reportsFail in new[] { false, true })
+            foreach (int fault in new[] { 0, 1, 2 }) // Logger, notice, then both, independently of report IO.
+            {
+                var p = new PelvisPort { ReadyValue = true, EmitFails = fault != 1, NoticeFails = fault != 0, WriteFails = reportsFail };
+                var c = new PelvisTestCoordinator(p); c.Start("b");
+                Check.That(c.Session.Started && c.Session.Active && p.Restores == 0, "logger failure cannot stop a healthy pelvis start");
+                c.OnFixed(RuntimeContracts.Step(1)); c.Stop("USER_STOP");
+                Check.That(c.Session.Phase == RunPhase.Completed && p.Restores == 1 &&
+                    (c.Session.CompletedSnapshot.Contains("NOTICE_SNAPSHOT_EXCEPTION") == (fault != 0)), "pelvis stop finalizes despite notice/logger/report failure");
+                c.Stop("USER_STOP"); Check.That(p.Restores == 1, "output failure never repeats native restoration");
+                c.Start("b"); Check.That(c.Session.Started && c.Session.RunId == 2, "failed output cannot strand pelvis in stopping");
+                c.OnFixed(RuntimeContracts.Step(1)); c.OnFixed(RuntimeContracts.Step(3));
+                Check.That(c.Session.Phase == RunPhase.Completed && c.Session.StopReason == "AUTO_SESSION_CLOCK_DISCONTINUITY" && p.Restores == 2,
+                    "real clock safety still stops with a failed logger");
+
+                var a = new AnklePort { EmitFails = fault != 1, NoticeFails = fault != 0, WriteFails = reportsFail };
+                var b = new AnkleTestCoordinator(a); b.Start("b");
+                Check.That(b.Session.Started && b.Session.Active && a.Restores == 0, "logger failure cannot stop a healthy ankle start");
+                b.Stop("USER_STOP");
+                Check.That(b.Session.Phase == RunPhase.Completed && a.Restores == 1 &&
+                    (b.Session.CompletedSnapshot.Contains("NOTICE_SNAPSHOT_EXCEPTION") == (fault != 0)), "ankle stop finalizes despite notice/logger/report failure");
+                b.Stop("USER_STOP"); Check.That(a.Restores == 1, "ankle no-op remains harmless with failed output");
+                b.Start("b"); Check.That(b.Session.Started && b.Session.RunId == 2, "failed output cannot strand ankle in stopping");
+                b.OnFixed(RuntimeContracts.Step(1)); b.OnFixed(RuntimeContracts.Step(3));
+                Check.That(b.Session.Phase == RunPhase.Completed && b.Session.StopReason == "AUTO_SESSION_CLOCK_DISCONTINUITY" && a.Restores == 2,
+                    "ankle physical safety survives optional output failures");
+            }
+        }
+
+        private static void LandingTimingLifecycle()
+        {
+            var timing = LandingObservationTiming.Run;
+            var port = new PelvisPort { FormalHip = true };
+            var session = new PelvisTestCoordinator(port);
+            session.Start("b");
+            Check.That(!timing.Running && session.Session.Pending, "pending geometry excluded");
+            port.ReadyValue = true;
+            session.OnFixed(RuntimeContracts.Step(1));
+            Check.That(timing.Running && timing.Compact && timing.History && !timing.SwingProbe && !timing.EarlyProbe && port.LastStatus.Contains("landingObservation=COMPACT | eventHistory=True"), "actual resolved arm readback");
+            using (timing.Measure(LandingObservationTiming.Stage.FixedLoop)) { }
+            session.OnFixed(RuntimeContracts.Step(3));
+            Check.That(!timing.Running && !timing.Compact && port.Restores == 1 &&
+                session.Session.CompletedSnapshot.Contains("LANDING_COST_V041430/mode=COMPACT") &&
+                session.Session.CompletedSnapshot.Contains("stage=FixedLoop/calls-totalMs-meanMs-maxMs=1|"), "automatic stop freezes the right trace");
+            session.Start("a");
+            Check.That(timing.Running && timing.Compact && timing.History && !timing.SwingProbe && !timing.EarlyProbe, "A and B restart the same event history without retired comparison work");
+            session.Stop("USER_STOP");
+            Check.That(session.Session.CompletedSnapshot.Contains("LANDING_COST_V041430/mode=COMPACT/eventHistory=True/swingKneeProbe=False/earlyLandingProbe=False") &&
+                session.Session.CompletedSnapshot.Contains("stage=FixedLoop/calls-totalMs-meanMs-maxMs=0|") && port.Restores == 2,
+                "user stop publishes an independent run");
+        }
         private static bool Ordered(List<string> calls, string first, string second)
         {
             int firstIndex = calls.IndexOf(first), secondIndex = calls.IndexOf(second);
@@ -158,6 +213,8 @@ namespace ARL.Contracts
             internal bool CaptureFails { get; set; }
             internal bool RestoreFails { get; set; }
             internal bool WriteFails { get; set; }
+            internal bool EmitFails { get; set; }
+            internal bool NoticeFails { get; set; }
             internal bool GeometryRejects { get; set; }
             internal string HealthFailure { get; set; }
             internal string LastStatus;
@@ -168,7 +225,11 @@ namespace ARL.Contracts
             public string Scope => "CONTRACT";
             public string StopInstruction => "stop";
             public bool CleanupPending => CleanupPendingValue;
-            public string ResolveArm(string arm) => arm == "b" ? "B" : null;
+            internal bool FormalHip { get; set; }
+            public string ResolveArm(string arm) => FormalHip && arm == "a"
+                ? MakemitAGA.ActiveRagdollLab.Physics.PelvisDynamicReceiverIsolation.DynamicHipArmA
+                : FormalHip && arm == "b" ? MakemitAGA.ActiveRagdollLab.Physics.PelvisDynamicReceiverIsolation.DynamicHipArmB
+                : arm == "b" ? "B" : null;
             public string Preflight() => null;
             public void Prepare(string arm) { Calls.Add("prepare"); if (PrepareFails) throw new InvalidOperationException("prepare"); }
             public void AdvancePreparation(PhysicsStepContext step)
@@ -184,10 +245,10 @@ namespace ARL.Contracts
             public bool Restore(StringBuilder cleanup)
             { Calls.Add("restore"); Restores++; if (RestoreFails) throw new InvalidOperationException("restore"); return true; }
             public string LiveDetails() => "live";
-            public string Notice() => "notice";
+            public string Notice() { if (NoticeFails) throw new IOException("notice"); return "notice"; }
             public void BeginNoticeSession(string stopCommand) { }
             public void AutomaticStop(string reason) { Calls.Add("notice"); AutomaticNotices++; }
-            public void Emit(string text, bool warning, bool deferred) { }
+            public void Emit(string text, bool warning, bool deferred) { if (EmitFails) throw new IOException("logger"); }
             public void ShowStatus(string text) { LastStatus = text; }
             public void WriteReports() { if (WriteFails) throw new IOException("report"); }
         }
@@ -198,6 +259,8 @@ namespace ARL.Contracts
             internal bool CaptureFails { get; set; }
             internal bool RestoreFails { get; set; }
             internal bool WriteFails { get; set; }
+            internal bool EmitFails { get; set; }
+            internal bool NoticeFails { get; set; }
             internal bool CleanupPendingValue { get; set; }
             internal string Health { get; set; }
             internal int Restores, AutomaticNotices;
@@ -216,10 +279,10 @@ namespace ARL.Contracts
             public bool Restore(bool started, StringBuilder cleanup)
             { Calls.Add("restore"); Restores++; if (RestoreFails) throw new InvalidOperationException("restore"); return true; }
             public string LiveDetails() => "live";
-            public string Notice() => "notice";
+            public string Notice() { if (NoticeFails) throw new IOException("notice"); return "notice"; }
             public void BeginNoticeSession() { }
             public void AutomaticStop(string reason) { AutomaticNotices++; }
-            public void Emit(string text, bool warning, bool deferred) { }
+            public void Emit(string text, bool warning, bool deferred) { if (EmitFails) throw new IOException("logger"); }
             public void WriteReports() { if (WriteFails) throw new IOException("report"); }
         }
     }

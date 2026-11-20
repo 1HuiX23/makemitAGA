@@ -12,7 +12,6 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         internal bool Succeeded { get; }
         // Null means this owner only had a boolean aggregate, or did no fresh attempt.
         internal int? FailureCount { get; }
-        internal bool RetryRequired => !Succeeded;
         // Managed root/material/child/orphan slots retained by THIS owner. This is not
         // a count of live Unity objects, descendants, or opaque helper resources.
         internal int RetainedOwnerSlots { get; }

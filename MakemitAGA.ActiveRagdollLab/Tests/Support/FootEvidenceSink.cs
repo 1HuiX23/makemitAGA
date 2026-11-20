@@ -2,7 +2,7 @@
 // report formatting/qualification and native lifecycle require separate integration and game verification.
 namespace MakemitAGA.ActiveRagdollLab.Model
 {
-    internal sealed class FootAnkleFoundationReport
+    internal sealed partial class FootAnkleFoundationReport
     {
         internal FootControlEvidenceSnapshot ControlEvidence { get; private set; }
         internal FootEvidenceTracePhase TraceEvidencePhase { get; private set; }

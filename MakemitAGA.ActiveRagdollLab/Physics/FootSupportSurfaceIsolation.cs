@@ -54,6 +54,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal Collider SelectedCollider => _arm == ArmB ? _box : _original;
         internal int SelectedId => _selectedId;
         internal int OriginalId => _originalId;
+        internal bool MainRoomBox => _active && _arm == ArmB && _pinnedMainRoom;
+        private bool _pinnedMainRoom;
         internal bool ExposureReady => _finite && _pairLeft >= MinPairSamples && _pairRight >= MinPairSamples &&
             _probeMatches > 0 && (_arm != ArmB || (_boxLeftCallbacks > 0 && _boxRightCallbacks > 0));
         internal bool TryGetEntryBox(int identity, out Vector3 center, out Vector3 half)
@@ -91,6 +93,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 if (leftReport.GroundColliderInstanceId != _originalId || rightReport.GroundColliderInstanceId != _originalId)
                     return Fail("ORIGINAL_PROBE_ID_MISMATCH", out error);
                 _originalPath = leftReport.GroundColliderPath;
+                // Use the original floor hierarchy; the generated Box has its own name and instance ID.
+                _pinnedMainRoom = original.gameObject.name == "RoomMain" && original.transform.parent != null &&
+                    original.transform.parent.gameObject.name == "Main";
                 _originalType = original.TryCast<BoxCollider>() != null ? "BoxCollider" :
                     (original.TryCast<MeshCollider>() != null ? "MeshCollider" : original.GetType().Name);
                 _originalPosition = original.transform.position; _originalRotation = original.transform.rotation;

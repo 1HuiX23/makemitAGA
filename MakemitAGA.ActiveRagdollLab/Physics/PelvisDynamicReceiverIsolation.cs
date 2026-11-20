@@ -37,6 +37,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         // Bound the pair-COM trajectory directly; keep half the existing 12m/s^2 actuator range as margin.
         private const float ReferenceMaxComV = PelvisComReferencePlanner.MaxV, ReferenceMaxComA = PelvisComReferencePlanner.MaxA;
         private PelvisComReferencePlanner.ComPlan _comReferencePlan;
+        private SupportNormalRecovery.Result _lastSupportRecovery; // committed request evidence; never a control input
         private PhysicsStepContext _comReferenceStep, _comFeedbackStep;
         private Quaternion _referenceRotation = Quaternion.identity;
         private Vector3 _referenceW, _referenceCom, _referenceComV;
@@ -53,6 +54,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal bool ControlErrorsValid { get; private set; }
         internal float ControlComErrorMeters { get; private set; }
         internal float ControlPelvisErrorDegrees { get; private set; }
+        private ParentHeightProbe.Input _landingHeightInput;
+        internal ParentHeightProbe.Input LandingHeightInput => _landingHeightInput;
         internal struct Reference
         {
             internal Vector3 PelvisPosition, PelvisVelocity, PelvisW, ChestPosition, ChestComVelocity;
@@ -111,12 +114,22 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     throw new InvalidOperationException("RECEIVER_COM_REFERENCE_MASS_INVALID");
                 settledV = (mp * _pelvis.velocity + mc * _chest.velocity) / (mp + mc);
             }
-            PelvisComReferencePlanner.ComPlan comPlan = PelvisComReferencePlanner.Build(_referenceCom, _referenceComV,
-                nativeGoalCom, nativeGoalV, dt, comArrival, feedback,
+            PelvisComReferencePlanner.ComPlan comPlan = BuildComReferencePlan(_control.Arm, _referenceCom, _referenceComV,
+                nativeGoalCom, nativeGoalV, dt, step, feedback,
                 feedback ? _hipCommand.Acceleration : Vector3.zero,
-                feedback ? _hipAttitudeCommand.TargetSystemAcceleration : Vector3.zero, settledV, IsDynamicHipArm(_control.Arm), support.Matches(step) ? support : default,
-                IsDynamicHipArm(_control.Arm) && support.Matches(step), sampledPelvisY + offset.y,
-                IsDynamicHipArm(_control.Arm), IsDynamicHipArm(_control.Arm));
+                feedback ? _hipAttitudeCommand.TargetSystemAcceleration : Vector3.zero, settledV, support, sampledPelvisY + offset.y);
+            if (LandingObservationTiming.Run.EarlyProbe && _control.Arm == DynamicHipArmB)
+            {
+                _landingHeightInput = new ParentHeightProbe.Input
+                {
+                    Step=step, Arm=_control.Arm, Position=_referenceCom, Velocity=_referenceComV,
+                    Goal=nativeGoalCom, GoalV=nativeGoalV, Feedback=feedback,
+                    PreviousRequest=feedback ? _hipCommand.Acceleration : Vector3.zero,
+                    PreviousAllocated=feedback ? _hipAttitudeCommand.TargetSystemAcceleration : Vector3.zero,
+                    SettledV=settledV, Support=support, FloorY=sampledPelvisY+offset.y,
+                    CommittedPosition=comPlan.Position, CommittedV=comPlan.Velocity
+                };
+            }
             if (Report.TraceRunning && comArrival) Report.RecordSupportReference(comPlan, step);
             Vector3 nextComV = comPlan.Velocity, nextCom = comPlan.Position;
             Report.LastReferenceSpeedLimited = plan.SpeedLimited;
@@ -178,10 +191,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _referenceCom = (mp * _pelvis.worldCenterOfMass + mc * _chest.worldCenterOfMass) / (mp + mc);
             _referenceComV = _referenceA = _referenceAngularA = Vector3.zero; _referencePending = false; _referenceDt = _referenceStepAlphaCap = 0f;
             _comReferencePlan = new PelvisComReferencePlanner.ComPlan();
+            _lastSupportRecovery = default;
             _comReferenceStep = _comFeedbackStep = new PhysicsStepContext();
         }
         private void ResetReference()
         {
+            _lastSupportRecovery = default;
             ControlErrorsValid = false;
             _referencePending = false; _referenceA = _referenceAngularA = Vector3.zero; _referenceDt = _referenceStepAlphaCap = 0f;
             _referenceSeeded = _comparisonSeeded = false; _referenceRotation = _comparisonRotation = Quaternion.identity;
@@ -276,8 +291,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal const string DynamicFootLoadArm = "B_V04840_DYNAMIC_FOOT_SELF_WEIGHT_CONTACT";
         internal const string DynamicLowerLoadArm = "B_V04860_DYNAMIC_LOWER_SELF_WEIGHT_LEDGER_AUDIT";
         internal const string DynamicKneeCouplingArm = "B_V04870_DYNAMIC_KNEE_NORMAL_COUPLING";
-        internal const string DynamicHipArmA = "A_V041280_UNIFORM_BASELINE";
-        internal const string DynamicHipArmB = "B_V041280_SAME_INPUT_BUDGET_AUDIT";
         // v105 OFF arm did not establish net benefit; only its A physical policy is
         // the current baseline. v105 remains the reproducible comparison artifact.
         internal static string ReferencePreparationName(string arm) => IsDynamicHipArm(arm) ? "EARLY_STRONG_TO_STANCE_OR_CONFIRMED" : "OFF_OTHER_SCOPE";
@@ -285,7 +298,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal static string NormalFeedbackName(string arm) => IsDynamicHipArm(arm) ? "Y_KP40_KD12.727922" : "BASELINE_OTHER_SCOPE";
         internal static string HipReactionName(string arm) => IsDynamicHipArm(arm) ? "RELATIVE_CONTROL_ONLY" : "OFF";
         internal static string HipNormalParentName(string arm) => IsDynamicHipArm(arm) ? "RECEIVER_TARGET_NORMAL_ONLY" : "PHYSICAL_CONTROL_PARENT";
-        internal static bool IsDynamicHipArm(string arm) => arm == DynamicHipArmA || arm == DynamicHipArmB;
         internal const string DynamicUpperLoadArm = "B_V04880_DYNAMIC_UPPER_SELF_WEIGHT";
         internal static bool IsDynamicLegArm(string arm) => IsDynamicHipArm(arm) || arm == DynamicUpperLoadArm || arm == DynamicLegArmA || arm == DynamicLegArmB || arm == DynamicContactArm || arm == DynamicFootLoadArm || arm == DynamicLowerLoadArm || arm == DynamicKneeCouplingArm;
         private static bool UsesBrakingReserve(string arm) => IsDynamicLegArm(arm);
@@ -368,6 +380,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             ResetHipCommands();
             HipCompletionIssue = null;
+            _lastSupportRecovery = default;
             if (!_control.Selected) return true;
             try
             {
@@ -409,6 +422,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _hipCommand = new PelvisHipCommandFrame();
             _hipAttitudeCommand = new PelvisHipAttitudeCommand();
             HipCompletionIssue = null;
+            _lastSupportRecovery = default;
             ControlErrorsValid = false;
             if (!_control.Active || !DynamicSelected) return false;
             try
@@ -463,7 +477,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 // V04530 B is frozen: same governed COM A before the actuator cap.
                 Vector3 feedforwardA = _referenceA;
                 Vector3 rawA = pdA + feedforwardA;
-                Vector3 commonA = Vector3.ClampMagnitude(rawA, PelvisHipCommandFrame.MaxMagnitude);
+                SupportNormalRecovery.Result recovery = BuildCommonAcceleration(_control.Arm, rawA,
+                    actualCom, actualV, step, _comReferencePlan);
+                Vector3 commonA = recovery.Request;
                 Quaternion rotationError = targetPelvisRotation * Quaternion.Inverse(_pelvis.rotation);
                 if (rotationError.w < 0f) rotationError = new Quaternion(-rotationError.x, -rotationError.y, -rotationError.z, -rotationError.w);
                 rotationError.ToAngleAxis(out float angleDeg, out Vector3 axis);
@@ -516,19 +532,27 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     throw;
                 }
                 ControlComErrorMeters = error.magnitude; ControlPelvisErrorDegrees = Mathf.Abs(angleDeg);
+                _lastSupportRecovery = recovery;
                 ControlErrorsValid = F(ControlComErrorMeters) && F(ControlPelvisErrorDegrees);
                 Report.CommonA = commonA; Report.PelvisTorque = torque;
                 if (publishCommon) _hipCommand = new PelvisHipCommandFrame
                     { JointTorqueReaction = IsDynamicHipArm(_control.Arm), Committed = true, Step = step, BodyId = commonBodyId, ChestBodyId = chestBodyId,
                         Acceleration = commonA, ReceiverTorque = torque, ParentW = parentW, Response = parentResponse,
-                        // v128: both arms execute the v127 A allocation. B only captures audit input.
-                        UpwardRetentionSelected = false, UpwardRetentionEligible = false,
-                        AllocationAudit = HipAllocationAuditContext.Capture(_control.Arm == DynamicHipArmB, step,
+                        UpwardRetentionSelected = IsDynamicHipArm(_control.Arm),
+                        UpwardRetentionEligible = HipSystemAllocation.Eligible(IsDynamicHipArm(_control.Arm), step,
                             _comReferenceStep, _comReferencePlan, error.y, commonA),
+                        BoundedTradeSelected = IsDynamicHipArm(_control.Arm),
                         ReferenceRotation = targetPelvisRotation, ReferenceW = targetW };
+                if (publishCommon && LandingObservationTiming.Run.EarlyProbe && _landingHeightInput.Step.Matches(step))
+                {
+                    _landingHeightInput.ReceiverReady=true; _landingHeightInput.ActualCom=actualCom;
+                    _landingHeightInput.PositionError=error; _landingHeightInput.VelocityError=targetComV-actualV;
+                    _landingHeightInput.PositionLimit=positionSafetyMeters;
+                }
                 Report.LastPdA = pdA; Report.LastFeedforwardA = feedforwardA;
                 if (trace)
                 {
+                    if (publishCommon) Report.RecordSupportRecovery(recovery, step);
                     CountStep(phase); Report.ForcePairWrites++; Report.TorqueWrites++;
                     RecordAngularActuation(step, rotationVector * 55f, pdAlpha - rotationVector * 55f, feedforwardAlpha, alpha, inertiaAlpha, gyro,
                         reducedMass, parentLever, orbitalAlpha, orbitalGyro, rawTorque, torque);
@@ -675,6 +699,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             try
             {
                 f.AngularActuation = Report.AngularActuation;
+                if (_lastSupportRecovery.Step.Matches(f.ComReferenceStep)) f.SupportRecovery = _lastSupportRecovery;
                 f.ChildPAlpha = childP; f.ChildDAlpha = childD; f.ChildAppliedAlpha = childAlpha;
                 f.ChildTargetRelativeW = childTargetRelativeW; f.ChildMeasuredRelativeW = childMeasuredRelativeW;
                 f.JointReactionAvailable = jointAvailable; f.JointForce = jointForce; f.JointTorque = jointTorque; f.JointParentLever = jointParentLever;
@@ -697,7 +722,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             Report.TraceReferencePlannerMode = Report.ReferencePlannerMode;
             Report.Samples = Report.IdleSamples = Report.MotionSamples = Report.ForcePairWrites = Report.TorqueWrites = 0;
             Report.TraceHipTranslation = IsDynamicHipArm(_control.Arm); Report.HipReactionRecords = 0;
-            Report.HipAttitudeClamps = 0;
             Report.HipAttitudeRequestedPeak = Report.HipAttitudeAppliedPeak = Report.HipAttitudeResidualPeak = 0f;
             Report.Resolved = Report.Censored = Report.LinearClamps = Report.AngularClamps = Report.TorqueClamps = Report.CurrentTraceFixed = 0;
             Report.PositionErrorPeak = Report.RotationErrorPeak = Report.ForceSumPeak = Report.TorquePeak = Report.SystemResidualPeak = 0f;

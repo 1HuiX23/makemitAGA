@@ -359,9 +359,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             return "ARL leg reset | success=True | restoredDrive=" + wasDrive;
         }
 
-        public string Rollback(string reason)
-            => RollbackWithReceipt(reason).Summary;
-
         internal CleanupReceipt RollbackWithReceipt(string reason)
         {
             // Terminal for control immediately; failed resource owners remain available
@@ -525,6 +522,14 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 LogCleanupFailure("RESTORE_IGNORE_PAIRS", new InvalidOperationException("failures=" + failures));
             return failures;
         }
+        private void AbortAfterFixedException(Exception error)
+        {
+            string type = error.GetType().Name;
+            try { Plugin.Logger?.LogError("[ARL][LEG_FIXED_UPDATE_EXCEPTION] type=" + type + " | message=" + error.Message + " | " + error); }
+            catch { } // A disposed listener must not replace the original Fixed exception.
+            AbortDrive("FIXED_UPDATE_EXCEPTION:" + type);
+        }
+
         private void AbortDrive(string reason)
         {
             // Stop notice is recorded before diagnostic formatting. Detailed Foot windows are already
@@ -533,8 +538,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _report.DriveAbortReason = reason;
             ActiveRagdollLabRuntime.RecordAutomaticStop("LEG/" + (_report.Side ?? "UNKNOWN") + "/fixed=" + _fixedUpdateSequence, reason);
             int safeFailures = ForceDriveOffSafe();
-            Plugin.Logger?.LogError("[ARL][LEG_DRIVE_ABORT] side=" + (_report.Side ?? "<none>") +
-                " | fixed=" + _fixedUpdateSequence + " | reason=" + reason + " | driveOff=True");
+            try
+            {
+                Plugin.Logger?.LogError("[ARL][LEG_DRIVE_ABORT] side=" + (_report.Side ?? "<none>") +
+                    " | fixed=" + _fixedUpdateSequence + " | reason=" + reason + " | driveOff=True");
+            }
+            catch { }
 
             _hipCharacterJointResponseIsolation.CaptureAbort(_report, reason);
             _hipAnchorAccelerationFeedforward.CaptureAbort(_report, reason);
@@ -546,14 +555,15 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _hipVectorCaptureDamping.MarkAbort(reason, _report);
             _hipSourceReferenceShockAbsorber.MarkAbort(reason, _report);
             _hipCompositeReferenceShockAbsorber.MarkAbort(reason, _report);
-            if (_traceEnabled)
-                Plugin.Logger?.LogWarning("[ARL][KNEE_TETHER_SAFETY_ABORT_EVIDENCE] " + _kneeCharacterJointResponseIsolation.GetKey(_report));
-            if (safeFailures > 0)
+            if (safeFailures > 0) _report.DriveAbortReason = reason + "|SAFE_STATE_FAILURES=" + safeFailures;
+            try
             {
-                _report.DriveAbortReason = reason + "|SAFE_STATE_FAILURES=" + safeFailures;
-                Plugin.Logger?.LogError("[ARL][LEG_ABORT_SAFE_STATE_FAILED] side=" + (_report.Side ?? "<none>") + " | failures=" + safeFailures + " | drive remains logically OFF; bilateral/runtime cleanup must retry safe-state/rollback.");
+                if (_traceEnabled)
+                    Plugin.Logger?.LogWarning("[ARL][KNEE_TETHER_SAFETY_ABORT_EVIDENCE] " + _kneeCharacterJointResponseIsolation.GetKey(_report));
+                if (safeFailures > 0)
+                    Plugin.Logger?.LogError("[ARL][LEG_ABORT_SAFE_STATE_FAILED] side=" + (_report.Side ?? "<none>") + " | failures=" + safeFailures + " | drive remains logically OFF; bilateral/runtime cleanup must retry safe-state/rollback.");
             }
-            UpdateReport();
+            catch { }
         }
 
         private int ForceDriveOffSafe()

@@ -18,7 +18,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private readonly BoxPort _collider = new BoxPort();
         private readonly Vector3 _lowerAnkleAnchorLocal = new Vector3(0f, -.45f, 0f);
         private readonly Vector3 _footAnkleAnchorLocal = Vector3.zero;
-        private readonly Quaternion _bindSourceRelative = Quaternion.AngleAxis(30f, Vector3.right);
+        private Quaternion _bindSourceRelative = Quaternion.AngleAxis(30f, Vector3.right);
         private PreviousFootSupport _previousReferenceSupport;
         private bool _traceEnabled = true;
         private static bool IsFinite(Vector3 v) => PelvisParentFrame.V(v);
@@ -30,7 +30,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             internal readonly PosePort transform = new PosePort();
             internal Vector3 position;
             internal Quaternion rotation = Quaternion.AngleAxis(-30f, Vector3.right);
-            internal int GetInstanceID() => 13;
+            internal bool ThrowOnIdentity;
+            internal int GetInstanceID() => ThrowOnIdentity ? throw new System.InvalidOperationException("injected native identity read failure") : 13;
         }
         private sealed class BoxPort
         {
@@ -41,17 +42,19 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             internal int SelectedId = 21;
             internal bool Available = true;
+            internal Vector3 Center = new Vector3(0f, -.05f, 0f), Half = new Vector3(3f, .05f, 3f);
             internal bool TryGetEntryBox(int id, out Vector3 center, out Vector3 half)
-            { center = new Vector3(0f, -.05f, 0f); half = new Vector3(3f, .05f, 3f); return Available && id == SelectedId; }
+            { center = Center; half = Half; return Available && id == SelectedId; }
         }
 
         internal static void RunReferenceInputContracts()
         {
             Check.Run("production Render publishes one bounded Knee Foot packet after Foot RWA", JointPublication);
-            Check.Run("A Foot reference is identical with joint observation enabled or absent", BaselineUnchanged);
+            Check.Run("observe-only Foot reference is identical with joint observation enabled or absent", BaselineUnchanged);
             Check.Run("held Render and held Fixed consumers do not rewrite a joint packet", HeldPacket);
             Check.Run("joint packet rejects unpublished stale owner epoch support and time mismatches", PacketRejection);
             Check.Run("optional geometry loss falls back and invalid Foot reference cannot publish", FallbackAndFailure);
+            Check.Run("native read failure after Foot candidate evaluation discards the partial candidate", PartialNativeFailure);
             Check.Run("joint footprint outside support preserves the independent Foot fallback", OutsideFootprintFallback);
             Check.Run("20 40 60 Hz Render keeps both existing planner clocks and continuous handoff", MultipleRates);
         }
@@ -108,8 +111,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 observed.Render(source, observed.Input(source, false)); original.Render(source, default);
                 var a = observed._relativeReference.Current; var b = original._relativeReference.Current;
                 Check.That(a.Rotation.x == b.Rotation.x && a.Rotation.y == b.Rotation.y && a.Rotation.z == b.Rotation.z && a.Rotation.w == b.Rotation.w &&
-                    (a.W - b.W).sqrMagnitude == 0f && (a.A - b.A).sqrMagnitude == 0f, "A observer changes no Foot R W A bits");
-                Check.That(!observed._kneeFootGroundPacket.Sample.Applied, "A never applies a Knee candidate");
+                    (a.W - b.W).sqrMagnitude == 0f && (a.A - b.A).sqrMagnitude == 0f, "read-only observer changes no Foot R W A bits");
+                Check.That(!observed._kneeFootGroundPacket.Sample.Applied, "read-only input never applies a Knee candidate");
             }
         }
         private static void HeldPacket()
@@ -160,6 +163,21 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             bad.ObserveFootReference(s, default, Vector3.zero, 1f / 60f, bad.Input(s));
             Check.That(!bad._kneeFootGroundPacket.Published && !bad._relativeReference.Finite,
                 "invalid Foot source cannot publish a valid-looking Knee half");
+        }
+        private static void PartialNativeFailure()
+        {
+            var failed = Create(); var unavailable = Create(); var source = Source(201, 1f + 1f / 60f);
+            failed._lowerBody.ThrowOnIdentity = true;
+            unavailable._supportSurface.Available = false;
+            failed.Render(source, failed.Input(source)); unavailable.Render(source, unavailable.Input(source));
+            Check.That(!failed._groundReference.Current.Valid && !failed._groundReference.Current.Selected &&
+                failed._groundReference.Current.Reason == "NATIVE_GEOMETRY_UNAVAILABLE", "partial candidate cannot survive a failed native read");
+            Check.That(!failed._kneeFootGroundPacket.Published && failed._relativeReference.Finite,
+                "no half packet; ordinary bounded Foot fallback remains available");
+            Check.That(failed._relativeReference.Current.Rotation.Equals(unavailable._relativeReference.Current.Rotation) &&
+                failed._relativeReference.Current.W.Equals(unavailable._relativeReference.Current.W) &&
+                failed._relativeReference.Current.A.Equals(unavailable._relativeReference.Current.A),
+                "exception fallback equals the clean unavailable-geometry path");
         }
         private static void OutsideFootprintFallback()
         {

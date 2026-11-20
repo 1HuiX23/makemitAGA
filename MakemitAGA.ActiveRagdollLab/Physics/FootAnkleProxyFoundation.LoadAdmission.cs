@@ -6,8 +6,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     {
         private readonly StanceLoadAdmission _loadAdmission = new StanceLoadAdmission();
         internal bool StanceLoadAdmissionSelected => _loadAdmission.Selected;
-        private bool BaseAuthorizedStanceLoadEligible => _contactShadow.Active &&
-            _report.ContactShadowCurrentContactActive && CurrentAuthorizedSupportNormalValid() && _stanceContactFrictionIsolation.ZeroFriction;
+        private bool BaseAuthorizedStanceLoadEligible => FormalCallbackActive && CurrentAuthorizedSupportNormalValid() && _stanceContactFrictionIsolation.ZeroFriction;
 
         private bool UpdateStanceLoadAdmission(PhysicsStepContext step, int local, float anchorGap, float sourceAge)
         {

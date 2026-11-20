@@ -151,6 +151,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             Vector3 kneeB = _upperBody.transform.TransformPoint(_kneeParentAnchorUpperLocal);
             _report.HipAnchorErrorMeters = Vector3.Distance(hipA, hipB);
             _report.KneeAnchorErrorMeters = Vector3.Distance(kneeA, kneeB);
+            if (Runtime.LandingObservationTiming.Run.History && _insidePhysicsStep && _traceEnabled)
+                _legTurnCurrent.CaptureKneeHeights(_runtimeStep, _fixedUpdateSequence, hipA, kneeB, kneeA);
             // v0.2.8 diagnostic fix: only accumulate active-drive peaks. After a fail-fast abort the kinematic preview
             // may teleport back to source and must not contaminate the mechanical-drive peak anchor statistic.
             if (_driveEnabled)

@@ -92,9 +92,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             int restoreFailures = DisablePreserveTrace(report);
             if (restoreFailures > 0)
             {
-                _arm = ArmA;
-                Invalidate("CONTACT_SHADOW_RESTORE_FAILED:" + restoreFailures, report);
-                CopyToReport(report);
+                // Preserve the previous selector and owner until teardown can verify OFF and restore its pairs.
                 return;
             }
             _arm = ArmA;
@@ -122,8 +120,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (restoreFailures > 0)
             {
                 error = "CONTACT_SHADOW_PREPARE_RESTORE_FAILED:" + restoreFailures;
-                Invalidate(error, report);
-                CopyToReport(report);
                 return false;
             }
             _arm = ArmB;
@@ -216,7 +212,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal bool EnablePreparedArmB(FootAnkleFoundationReport report, out string error)
         {
             error = null;
-            if (!_prepared || _arm != ArmB)
+            if (!_finite || !_prepared || _arm != ArmB)
             {
                 error = "CONTACT_SHADOW_NOT_PREPARED";
                 Invalidate(error, report);
@@ -239,6 +235,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
                 _footCollider.isTrigger = false;
                 _footCollider.enabled = true;
+                if (!_footCollider.enabled || _footCollider.isTrigger)
+                    throw new InvalidOperationException("FOOT_COLLIDER_ENABLE_READBACK_FAILED");
                 _active = true;
                 CopyToReport(report);
                 return true;
@@ -254,8 +252,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         internal void ResetTrace(FootAnkleFoundationReport report)
         {
-            _finite = true;
-            _invalidReason = null;
             _traceFixedSamples = 0;
             _traceRaycastMatchSamples = 0;
             _traceRaycastNoHitSamples = 0;
@@ -269,14 +265,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _sourceCallbackStay = 0;
             _sourceCallbackExit = 0;
             _sourceCallbacksQuarantined = 0;
-            _contactActive = false;
             _lastCallbackPhase = null;
             _lastCallbackColliderId = 0;
             _lastCallbackColliderPath = null;
             CopyToReport(report);
         }
 
-        internal bool ObserveFixed(bool traceEnabled, FootAnkleFoundationReport report)
+        internal bool ObserveFixed(bool traceEnabled, FootAnkleFoundationReport report, bool formalEvidence = true)
         {
             if (_arm != ArmB || !_active)
             {
@@ -287,8 +282,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             string reason;
             if (!ValidateAuthorizedPair(out reason))
             {
-                Invalidate(reason ?? "AUTHORIZED_PAIR_INVALID_DURING_RUN", report);
-                DisableColliderOnly();
+                RejectActivePair(reason ?? "AUTHORIZED_PAIR_INVALID_DURING_RUN", report);
                 return false;
             }
 
@@ -296,8 +290,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             // include-inactive scene scan is throttled and exists only to discover a source proxy instantiated after B prepare.
             if (!AuditRegisteredSourceIsolation(report))
             {
-                Invalidate("SOURCE_COLLIDER_ISOLATION_READBACK_FAILED", report);
-                DisableColliderOnly();
+                RejectActivePair("SOURCE_COLLIDER_ISOLATION_READBACK_FAILED", report);
                 return false;
             }
             _sourceIsolationRescanCountdown--;
@@ -308,40 +301,33 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 catch (Exception e)
                 {
                     _sourceIsolationReadbackFailures++;
-                    Invalidate("SOURCE_COLLIDER_RUNTIME_SCAN_FAILED:" + e.GetType().Name + ":" + e.Message, report);
-                    DisableColliderOnly();
+                    RejectActivePair("SOURCE_COLLIDER_RUNTIME_SCAN_FAILED:" + e.GetType().Name + ":" + e.Message, report);
                     return false;
                 }
             }
 
-            if (traceEnabled)
+            int rayId = report != null ? report.GroundColliderInstanceId : 0;
+            if (traceEnabled && formalEvidence)
             {
                 _traceFixedSamples++;
-                int rayId = report != null ? report.GroundColliderInstanceId : 0;
-                if (rayId == 0)
-                {
-                    _traceRaycastNoHitSamples++;
-                }
-                else if (rayId == _authorizedColliderId)
-                {
-                    _traceRaycastMatchSamples++;
-                }
-                else
-                {
-                    _traceRaycastMismatchSamples++;
-                    Invalidate("RAYCAST_IDENTITY_CHANGED:expected=" + _authorizedColliderId + ":actual=" + rayId, report);
-                    DisableColliderOnly();
-                    return false;
-                }
+                if (rayId == 0) _traceRaycastNoHitSamples++;
+                else if (rayId == _authorizedColliderId) _traceRaycastMatchSamples++;
+            }
+            if (rayId != 0 && rayId != _authorizedColliderId)
+            {
+                if (traceEnabled) _traceRaycastMismatchSamples++;
+                RejectActivePair("RAYCAST_IDENTITY_CHANGED:expected=" + _authorizedColliderId + ":actual=" + rayId, report);
+                return false;
             }
 
             CopyToReport(report);
             return _finite;
         }
 
-        internal bool NotifyCollision(string phase, Collision collision, FootAnkleFoundationReport report)
+        internal bool NotifyCollision(string phase, Collision collision, FootAnkleFoundationReport report, bool formalEvidence = true)
         {
             LastCallbackWasAuthorized = false;
+            if (!_finite) return false;
             if (_arm != ArmB || !_active)
                 return true;
 
@@ -359,11 +345,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (matched)
             {
                 LastCallbackWasAuthorized = true;
-                if (string.Equals(phase, "ENTER", StringComparison.Ordinal)) _traceEnter++;
-                else if (string.Equals(phase, "STAY", StringComparison.Ordinal)) _traceStay++;
-                else if (string.Equals(phase, "EXIT", StringComparison.Ordinal)) _traceExit++;
-
-                _traceMatchedCallbacks++;
+                if (formalEvidence)
+                {
+                    if (phase == "ENTER") _traceEnter++;
+                    else if (phase == "STAY") _traceStay++;
+                    else if (phase == "EXIT") _traceExit++;
+                    _traceMatchedCallbacks++;
+                }
                 if (string.Equals(phase, "EXIT", StringComparison.Ordinal))
                     _contactActive = false;
                 else
@@ -386,8 +374,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 if (!EnsureSourceIsolation(other, report, "CALLBACK_QUARANTINE", wasNew))
                 {
                     _traceUnexpectedCallbacks++;
-                    Invalidate("SOURCE_SELF_CONTACT_QUARANTINE_FAILED:phase=" + phase + ":actual=" + otherId + ":path=" + Clean(otherPath), report);
-                    DisableColliderOnly();
+                    RejectActivePair("SOURCE_SELF_CONTACT_QUARANTINE_FAILED:phase=" + phase + ":actual=" + otherId + ":path=" + Clean(otherPath), report);
                     return false;
                 }
 
@@ -402,8 +389,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             else if (string.Equals(phase, "STAY", StringComparison.Ordinal)) _traceStay++;
             else if (string.Equals(phase, "EXIT", StringComparison.Ordinal)) _traceExit++;
             _traceUnexpectedCallbacks++;
-            Invalidate("UNAUTHORIZED_CONTACT_CALLBACK:phase=" + phase + ":expected=" + _authorizedColliderId + ":actual=" + otherId + ":path=" + Clean(otherPath), report);
-            DisableColliderOnly();
+            RejectActivePair("UNAUTHORIZED_CONTACT_CALLBACK:phase=" + phase + ":expected=" + _authorizedColliderId + ":actual=" + otherId + ":path=" + Clean(otherPath), report);
             return false;
         }
 
@@ -416,39 +402,28 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 return false;
             }
 
-            try
+            if (!TryDisableCollider(out error))
             {
-                if (_footCollider != null)
-                    _footCollider.enabled = false;
-                _active = false;
-                _contactActive = false;
-                LastCallbackWasAuthorized = false;
-                CopyToReport(report);
-                return true;
-            }
-            catch (Exception e)
-            {
-                error = "CONTACT_SHADOW_STANCE_RELEASE_FAILED:" + e.GetType().Name + ":" + e.Message;
-                Invalidate(error, report);
+                Invalidate(error, report, true);
                 return false;
             }
+            CopyToReport(report, false);
+            return true;
         }
 
         internal int DisablePreserveTrace(FootAnkleFoundationReport report)
         {
-            int failures = 0;
-            try
+            if (!TryDisableCollider(out string error))
             {
-                if (_footCollider != null)
-                    _footCollider.enabled = false;
+                // Restoring ignore pairs while the Foot might still be enabled exposes unrelated colliders.
+                _restoreFailures++;
+                Invalidate(error, report, true);
+                return 1;
             }
-            catch { failures++; }
-            _active = false;
             _prepared = false;
-            _contactActive = false;
-            LastCallbackWasAuthorized = false;
-            failures += RestoreOwnedIgnorePairs();
-            CopyToReport(report);
+            int failures = RestoreOwnedIgnorePairs();
+            if (failures != 0) Invalidate("CONTACT_SHADOW_RESTORE_FAILED:" + failures, report, false);
+            else CopyToReport(report, false);
             return failures;
         }
 
@@ -464,7 +439,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             return footCollider == _footCollider && footCollider != null && footCollider.enabled;
         }
 
-        internal void CopyToReport(FootAnkleFoundationReport report)
+        internal void CopyToReport(FootAnkleFoundationReport report, bool? colliderEnabled = null)
         {
             if (report == null) return;
             bool traceQualified = _finite && _arm == ArmB && _authorizedColliderId != 0 &&
@@ -512,7 +487,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             report.ContactShadowLastCallbackColliderInstanceId = _lastCallbackColliderId;
             report.ContactShadowLastCallbackColliderPath = _lastCallbackColliderPath;
             report.ContactShadowTraceQualified = traceQualified;
-            report.ContactShadowFootColliderEnabled = _footCollider != null && _footCollider.enabled;
+            report.ContactShadowFootColliderEnabled = colliderEnabled ?? (_footCollider != null && _footCollider.enabled);
             report.ContactShadowMinRaycastMatchSamples = MinRaycastMatchSamples;
             report.ContactShadowMinMatchedCallbacks = MinMatchedCallbacks;
         }
@@ -781,24 +756,39 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             return failures;
         }
 
-        private void DisableColliderOnly()
+        private bool TryDisableCollider(out string error)
         {
+            _contactActive = false;
+            LastCallbackWasAuthorized = false;
             try
             {
                 if (_footCollider != null)
+                {
                     _footCollider.enabled = false;
+                    if (_footCollider.enabled) throw new InvalidOperationException("FOOT_COLLIDER_DISABLE_READBACK_FAILED");
+                }
+                _active = false;
+                error = null;
+                return true;
             }
-            catch { }
-            _active = false;
-            _contactActive = false;
+            catch (Exception e)
+            {
+                error = "CONTACT_SHADOW_STANCE_RELEASE_FAILED:" + e.GetType().Name + ":" + e.Message;
+                return false;
+            }
         }
 
-        private void Invalidate(string reason, FootAnkleFoundationReport report)
+        private void RejectActivePair(string reason, FootAnkleFoundationReport report)
+        {
+            bool off = TryDisableCollider(out _);
+            Invalidate(reason, report, !off);
+        }
+
+        private void Invalidate(string reason, FootAnkleFoundationReport report, bool? colliderEnabled = null)
         {
             _finite = false;
-            if (string.IsNullOrEmpty(_invalidReason))
-                _invalidReason = reason;
-            CopyToReport(report);
+            if (string.IsNullOrEmpty(_invalidReason)) _invalidReason = reason;
+            CopyToReport(report, colliderEnabled);
         }
 
         private static string ColliderPath(Collider collider)

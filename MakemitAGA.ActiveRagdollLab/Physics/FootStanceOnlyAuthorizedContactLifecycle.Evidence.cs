@@ -20,13 +20,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         }
 
         private static void CaptureEntryReferenceContext(ref EntryContext c, Vector3 lowerAnkleWorld,
-            Vector3 scaledFootAnchor, Quaternion sourceRelativeRotation, Quaternion physicalLowerRotation)
+            Vector3 sourceAnchorOffset, Vector3 scaledFootAnchor, Quaternion sourceRelativeRotation, Quaternion physicalLowerRotation)
         {
             try
             {
                 c.DecompositionValid = c.ReferencesValid && FiniteRotation(sourceRelativeRotation) && FiniteRotation(physicalLowerRotation);
                 if (!c.DecompositionValid) return;
-                c.RawAtLowerOrigin = lowerAnkleWorld - c.SourceRotation * scaledFootAnchor;
+                c.RawAtLowerOrigin = lowerAnkleWorld - sourceAnchorOffset;
                 c.RawAtLowerRotation = physicalLowerRotation * sourceRelativeRotation;
                 c.RawAtLowerRotationOrigin = lowerAnkleWorld - c.RawAtLowerRotation * scaledFootAnchor;
                 c.DecompositionValid = FiniteVector(c.RawAtLowerOrigin) && FiniteVector(c.RawAtLowerRotationOrigin) && FiniteRotation(c.RawAtLowerRotation);
@@ -90,7 +90,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         // History is never read by admission/recovery. No per-Fixed formatting or new report file.
         private const int EntryHistoryCapacity = 9;
         private const int MaxEntryHistoryLogs = 2;
-        internal bool EntryHistoryAvailable => _entryHistoryLogs < MaxEntryHistoryLogs;
         private readonly EntryFrame[] _entryHistory = new EntryFrame[EntryHistoryCapacity];
         private int _entryHistoryNext, _entryHistoryCount, _entryHistoryLastFixed, _entryHistoryLogs;
         private bool _entryHistoryMotionLogged;
@@ -148,6 +147,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 text.Append('/').Append(EntryReferenceGeometryText(frame.Geometry.ReferencePath));
                 text.Append('/').Append(FootGroundReference.SampleText(frame.Geometry.LandingGoal));
                 text.Append('/').Append(FootLandingReferenceEvidence.SampleText(frame.Geometry.LandingPath));
+                var path = frame.Geometry.LandingPath;
+                text.Append('/').Append(KneeGroundFeasibility.ActualComparison(path.Knee.GroundTarget,
+                    path.Step, path.Source, path.Valid && path.KneeControlValid && frame.Geometry.Valid, frame.Geometry.MinClearance));
                 text.Append('/').Append(frame.Geometry.ReceiverNormalResponse.Text());
             }
             LogEvent(text.ToString());
@@ -166,12 +168,14 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             return false;
         }
 
-        private static string EntryGeometryText(EntryGeometry g) =>
-            "valid-full-motion-reference=" + g.Valid + "-" + g.FullFootprint + "-" + g.MotionValid + "-" + g.ReferencesValid +
-            "/minMm=" + (g.Valid ? F(g.MinClearance * 1000f) : "NA") +
-            "/source-controlMinMm=" + (g.ReferencesValid ? F(g.SourceMinClearance * 1000f) + "|" + F(g.ControlMinClearance * 1000f) : "NA") +
-            "/predictedMinMm=" + (g.MotionValid ? F(g.PredictedMinClearance * 1000f) : "NA") +
-            "/cornerV-planarV-W-anchorMm-ageSec=" + (g.MotionValid ? F(g.MaxCornerNormalSpeed) + "|" + F(g.PlanarSpeed) + "|" +
-                F(g.AngularSpeed) + "|" + F(g.AnchorGap * 1000f) + "|" + F(g.SourceAge) : "NA") + "/issue=" + Clean(g.Issue);
+        private static FootContactEntrySnapshot.Box GeometrySummary(in EntryGeometry g) => new FootContactEntrySnapshot.Box
+        {
+            Valid = g.Valid, FullFootprint = g.FullFootprint, MotionValid = g.MotionValid, ReferencesValid = g.ReferencesValid,
+            MinClearance = g.MinClearance, SourceMinClearance = g.SourceMinClearance, ControlMinClearance = g.ControlMinClearance,
+            PredictedMinClearance = g.PredictedMinClearance, MaxCornerNormalSpeed = g.MaxCornerNormalSpeed,
+            PlanarSpeed = g.PlanarSpeed, AngularSpeed = g.AngularSpeed, AnchorGap = g.AnchorGap, SourceAge = g.SourceAge,
+            Issue = g.Issue
+        };
+        private static string EntryGeometryText(in EntryGeometry g) => GeometrySummary(g).Format();
     }
 }

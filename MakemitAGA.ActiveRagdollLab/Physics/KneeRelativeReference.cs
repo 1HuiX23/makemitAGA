@@ -22,6 +22,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private string _traceArm = ArmOff;
         private int _steps, _held, _stale, _alphaLimited, _speedLimited;
         private float _peakGap, _peakW, _peakA;
+        private bool _groundSelected, _traceGroundSelected, _landingSelected;
+        private readonly KneeLandingPreparation.Trace _landingTrace = new KneeLandingPreparation.Trace();
+        private int _groundEvaluated, _groundBelow, _groundEndpointBelow, _groundNoHeadroom, _groundNoBend, _groundNoLegal, _groundBetter, _groundApplied;
+        private double _groundGainSum;
+        private float _groundGainPeak, _groundDeltaPeak;
         internal bool Selected => _selected;
         internal KneeReferenceState Current { get; private set; }
         internal string Issue { get; private set; }
@@ -29,6 +34,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal void Reset(bool selected, Quaternion rotation, Vector3 w)
         {
             _selected = selected;
+            _groundSelected = _landingSelected = false;
             _seeded = PelvisParentFrame.Q(rotation) && PelvisParentFrame.V(w);
             _rotation = _seeded ? Normalize(rotation) : Quaternion.identity;
             _w = _seeded ? w : Vector3.zero;
@@ -38,13 +44,19 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal void ResetTrace()
         {
             _traceArm = _selected ? ArmOn : ArmOff;
+            _landingTrace.Reset(_landingSelected);
             _steps = _held = _stale = _alphaLimited = _speedLimited = 0;
             _peakGap = _peakW = _peakA = 0f;
+            _traceGroundSelected = _groundSelected;
+            _groundEvaluated = _groundBelow = _groundEndpointBelow = _groundNoHeadroom = _groundNoBend = _groundNoLegal = _groundBetter = _groundApplied = 0;
+            _groundGainSum = 0; _groundGainPeak = _groundDeltaPeak = 0f;
         }
-        internal void DisablePreserveTrace() { _selected = _seeded = false; Current = new KneeReferenceState(); }
+        internal void DisablePreserveTrace() { _selected = _seeded = _groundSelected = _landingSelected = false; Current = new KneeReferenceState(); }
 
         internal bool Step(bool trace, PhysicsStepContext step, SourceStepContext source,
-            Quaternion inputR, Vector3 inputW, float age, float maxAge, float maxW, float maxA, float arrivalRate)
+            Quaternion inputR, Vector3 inputW, float age, float maxAge, float maxW, float maxA, float arrivalRate,
+            KneeFootGroundPacket ground = default, bool preferGround = false, bool preferLanding = false,
+            HipNormalReferenceState hip = default, Quaternion hipR = default, Vector3 hipW = default)
         {
             Current = new KneeReferenceState();
             if (!_selected) return true;
@@ -91,14 +103,69 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     frame.A.magnitude > maxA + 0.002f || nextW.magnitude * step.Dt >= Mathf.PI - 0.0001f)
                     return Invalid("TRAJECTORY_BUDGET_INVALID");
                 frame.R = Advance(_rotation, nextW, step.Dt); frame.W = nextW;
+                _groundSelected = preferGround;
+                frame.GroundTrajectory = new KneeGroundTrajectory.Result { Reason = frame.Stale
+                    ? KneeGroundTrajectory.Status.Stale : KneeGroundTrajectory.Status.Unavailable };
+                // The caller verified current native owner IDs. Recheck all packet
+                // clocks here as well; stale/foreign/partial publication cannot shape a step.
+                if (!frame.Stale && ground.Matches(step, source, ground.Input.ParentId, ground.Input.UpperId,
+                    ground.Input.LowerId, ground.SupportId))
+                    frame.GroundTrajectory = KneeGroundTrajectory.Evaluate(ground.Geometry, ground.Sample.PlannedFoot,
+                        ground.Input.Axis, _rotation, _w, frame.InputR, inputW, frame.R, frame.W, step.Dt, maxW, maxA);
+                if (preferGround && ground.Input.Apply && frame.GroundTrajectory.Better)
+                {
+                    frame.GroundTrajectory.Applied = true;
+                    frame.R = frame.GroundTrajectory.R; nextW = frame.W = frame.GroundTrajectory.W;
+                    frame.A = (nextW - _w) / step.Dt;
+                }
+                _landingSelected = preferGround && preferLanding;
+                KneeReferenceState landingBaseline = frame;
+                frame.LandingPreparation = new KneeLandingPreparation.Result { Reason = KneeLandingPreparation.Status.Off, R = frame.R, W = frame.W };
+                if (_landingSelected)
+                {
+                    // Optional geometry failure returns to the completed original
+                    // step, never a partially selected candidate or a pose reset.
+                    try { frame.LandingPreparation = KneeLandingPreparation.Evaluate(ground, hip, hipR, hipW, frame); }
+                    catch (Exception) { frame.LandingPreparation = new KneeLandingPreparation.Result {
+                        Reason = KneeLandingPreparation.Status.Faulted, R = frame.R, W = frame.W }; }
+                    if (frame.LandingPreparation.Better)
+                    {
+                        var choice = frame.LandingPreparation;
+                        Vector3 chosenA = (choice.W - _w) / step.Dt;
+                        if (!LandingPreparationMath.ValidLane(_rotation, _w, frame.InputR, inputW,
+                            choice.R, choice.W, chosenA, step.Dt, maxW, maxA))
+                            return Invalid("LANDING_TRAJECTORY_BUDGET_INVALID");
+                        frame.LandingPreparation.Applied = true;
+                        frame.R = choice.R; nextW = frame.W = choice.W; frame.A = chosenA;
+                    }
+                }
                 if (trace)
                 {
+                    _landingTrace.Observe(_landingSelected, ground, hip, hipR, hipW, landingBaseline, frame.LandingPreparation);
                     _steps++; if (_source.Valid && source.Matches(_source)) _held++;
                     if (frame.Stale) _stale++;
                     if (frame.AlphaLimited) _alphaLimited++;
                     if (frame.SpeedLimited) _speedLimited++;
                     _peakGap = Mathf.Max(_peakGap, Log(frame.InputR * Quaternion.Inverse(frame.R)).magnitude);
                     _peakW = Mathf.Max(_peakW, nextW.magnitude); _peakA = Mathf.Max(_peakA, frame.A.magnitude);
+                    _traceGroundSelected = preferGround;
+                    var g = frame.GroundTrajectory;
+                    if (g.Evaluated)
+                    {
+                        _groundEvaluated++;
+                        if (g.BaselineMin < -KneeGroundTarget.MinGain) _groundBelow++;
+                    }
+                    if (g.Reason == KneeGroundTrajectory.Status.EndpointBelow) _groundEndpointBelow++;
+                    if (g.Reason == KneeGroundTrajectory.Status.NoHeadroom) _groundNoHeadroom++;
+                    if (g.Reason == KneeGroundTrajectory.Status.NoBendProgress) _groundNoBend++;
+                    if (g.Reason == KneeGroundTrajectory.Status.NoLegalImprovement) _groundNoLegal++;
+                    if (g.Better)
+                    {
+                        _groundBetter++; _groundGainSum += g.CandidateMin - g.BaselineMin;
+                        _groundGainPeak = Mathf.Max(_groundGainPeak, g.CandidateMin - g.BaselineMin);
+                        _groundDeltaPeak = Mathf.Max(_groundDeltaPeak, g.DeltaDegrees);
+                    }
+                    if (g.Applied) _groundApplied++;
                 }
                 _rotation = frame.R; _w = nextW; _last = step; _source = source; Current = frame;
                 return true;
@@ -110,7 +177,15 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             "/steps-held-stale-alphaLimited-speedLimited=" + _steps + "|" + _held + "|" + _stale + "|" + _alphaLimited + "|" + _speedLimited +
             "/peak(inputGapDeg-W-A)=" + S(_peakGap * Mathf.Rad2Deg) + "|" + S(_peakW) + "|" + S(_peakA) +
             "/domain=SHARED_FIXED_UPPER_LOCAL_RELATIVE_RWA/FF=CALLER_SELECTED_GATES_ORIGINAL_ALLOCATION_CAPS" +
-            "/bounds=KNEE_MAX_A_OVER_KD_AND_EXISTING_FF_BOUND/notHumanLimits=True/traceReset=STATISTICS_ONLY/issue=" + (Issue ?? "<none>");
+            "/bounds=KNEE_MAX_A_OVER_KD_AND_EXISTING_FF_BOUND/notHumanLimits=True/traceReset=STATISTICS_ONLY/issue=" + (Issue ?? "<none>") +
+            "\nKNEE_GROUND_TRAJECTORY_V041310/selected-traceSelected=" + _groundSelected + "|" + _traceGroundSelected +
+            "/steps-evaluated-below-endpointBelow-noHeadroom-better-applied=" + _steps + "|" + _groundEvaluated + "|" +
+            _groundBelow + "|" + _groundEndpointBelow + "|" + _groundNoHeadroom + "|" + _groundBetter + "|" + _groundApplied +
+            "/noBend-noLegal=" + _groundNoBend + "|" + _groundNoLegal +
+            "/betterGainMm(mean-peak)-deltaDegPeak=" + (_groundBetter > 0 ? S((float)(_groundGainSum / _groundBetter) * 1000f) : "NA") +
+            "|" + S(_groundGainPeak * 1000f) + "|" + S(_groundDeltaPeak) +
+            "/scope=SAME_STATE_ONE_STEP_GEOMETRY_NOT_NATIVE_RESPONSE/bounds=ORIGINAL_W_A_GOAL_BEND_BRAKING/noNewForce=True" +
+            "/alphaSpeedLimited=BASELINE_REQUEST_BEFORE_GROUND_CHOICE" + "\n" + _landingTrace.Summary();
 
         private bool Invalid(string issue) { Issue = issue; return false; }
         private static Quaternion Advance(Quaternion q, Vector3 w, float dt)

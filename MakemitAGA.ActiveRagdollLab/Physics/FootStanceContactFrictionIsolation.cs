@@ -82,6 +82,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             }
         }
 
+        internal bool CheckPrecontactPair(BoxCollider foot, Collider ground, FootAnkleFoundationReport report, out string error)
+        {
+            error = "ZERO_FRICTION_FOOT_REQUIRED";
+            return _finite && ZeroFriction && foot != null && ValidateReadback(foot.sharedMaterial, ArmB, out error) &&
+                ValidateGroundCompatibility(ground, report, out error);
+        }
+
         internal bool ValidateGroundCompatibility(Collider groundCollider, FootAnkleFoundationReport report, out string error)
         {
             error = null;

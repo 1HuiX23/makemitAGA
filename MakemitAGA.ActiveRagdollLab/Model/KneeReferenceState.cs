@@ -13,6 +13,8 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         internal Quaternion PreviousR, InputR, R;
         internal Vector3 PreviousW, InputW, W, A;
         internal float MaxW, MaxA;
+        internal Physics.KneeGroundTrajectory.Result GroundTrajectory;
+        internal Physics.KneeLandingPreparation.Result LandingPreparation;
         internal bool Matches(PhysicsStepContext step, SourceStepContext source) =>
             Valid && Selected && Step.Matches(step) && Source.Matches(source) &&
             PelvisParentFrame.Q(PreviousR) && PelvisParentFrame.Q(InputR) && PelvisParentFrame.Q(R) &&

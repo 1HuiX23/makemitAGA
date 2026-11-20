@@ -30,8 +30,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
             // Subtract the explicitly selected, proportionally clamped transport;
             // this assigns final brake-floor shaping and roundoff to relative control.
             Vector3 transport = transportRaw * scale, relative = finalAlpha - transport;
-            float qn = Mathf.Sqrt(principal.x * principal.x + principal.y * principal.y + principal.z * principal.z + principal.w * principal.w);
-            Quaternion q = new Quaternion(principal.x / qn, principal.y / qn, principal.z / qn, principal.w / qn);
+            Quaternion q = UnitPrincipal(principal);
             Vector3 relTorque = Tensor(inertia, q, relative), transportTorque = Tensor(inertia, q, transport);
             Vector3 gyro = Vector3.Cross(w, Tensor(inertia, q, w));
             Vector3 residual = torque - relTorque - transportTorque - gyro;
@@ -51,7 +50,12 @@ namespace MakemitAGA.ActiveRagdollLab.Model
             "/splitClosureNm=" + N(ClosureNm) + "/allocatedRelative-parentReactionNm=" + S(q * RelativeTorque) + "|" + S(parentReaction);
         private static string N(float v) => v.ToString("G9", CultureInfo.InvariantCulture);
         private static string S(Vector3 v) => "(" + N(v.x) + "," + N(v.y) + "," + N(v.z) + ")";
-        private static Vector3 Tensor(Vector3 inertia, Quaternion q, Vector3 v)
+        internal static Quaternion UnitPrincipal(Quaternion principal)
+        {
+            float qn = Mathf.Sqrt(principal.x * principal.x + principal.y * principal.y + principal.z * principal.z + principal.w * principal.w);
+            return new Quaternion(principal.x / qn, principal.y / qn, principal.z / qn, principal.w / qn);
+        }
+        internal static Vector3 Tensor(Vector3 inertia, Quaternion q, Vector3 v)
         {
             Vector3 local = Quaternion.Inverse(q) * v;
             return q * new Vector3(inertia.x * local.x, inertia.y * local.y, inertia.z * local.z);

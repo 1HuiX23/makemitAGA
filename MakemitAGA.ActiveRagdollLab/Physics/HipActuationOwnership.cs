@@ -23,7 +23,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             sample = new OwnershipSample();
             if (!c.Step.Valid || c.Fixed <= 0 || !c.JointSolved || !c.Angular.Valid || !receiver.Matches(c.ParentInput) ||
                 !PelvisChestPointResponse.Same(c.BilateralAngularReaction, receiver.AngularReaction) ||
-                receiver.MotionScale != c.MotionScale || receiver.UpwardExtraAcceleration != c.UpwardExtraAcceleration || !V(c.Force) || !V(c.ChildCom) || !V(c.ParentCom) ||
+                receiver.MotionScale != c.MotionScale || receiver.UpperAngularScale != c.UpperAngularScale || receiver.UpwardExtraAcceleration != c.UpwardExtraAcceleration || !V(c.Force) || !V(c.ChildCom) || !V(c.ParentCom) ||
                 !V(c.ChildPoint) || !V(c.ParentPoint) || !V(c.ChildV) || !V(c.ParentV) ||
                 !V(c.ChildTorque) || !V(c.ParentTorque) || !V(c.NetHipTorque) ||
                 !V(actualUpperTorque) || !V(upperW) || !V(parentW)) return false;
@@ -35,8 +35,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             OwnershipSample s = new OwnershipSample
             {
                 PointPairMoment = moment, PointMomentClosure = moment - direct,
-                JointPairResidual = c.ParentAngularReaction + (c.ParentInput.JointTorqueReaction ? c.MotionScale * c.Angular.RelativeTorque : Vector3.zero),
-                JointPairPower = c.ParentInput.JointTorqueReaction ? Vector3.Dot(c.MotionScale * c.Angular.RelativeTorque, upperW - parentW) : 0f,
+                JointPairResidual = c.ParentAngularReaction + (c.ParentInput.JointTorqueReaction ? c.UpperAngularScale * c.Angular.RelativeTorque : Vector3.zero),
+                JointPairPower = c.ParentInput.JointTorqueReaction ? Vector3.Dot(c.UpperAngularScale * c.Angular.RelativeTorque, upperW - parentW) : 0f,
                 CompensationResidual = (receiver.ResidualTorque - receiver.AngularReaction).magnitude,
                 UpperCorrection = actualUpperTorque - c.NetHipTorque,
                 UpperNetResidual = actualUpperTorque + c.ChildTorque - c.NetHipTorque,

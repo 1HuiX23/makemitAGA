@@ -15,9 +15,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         internal int LastCompletedControlFixedSequence => _current.FootControllerLastCompletedFixedSequence;
 
-        internal void Reset()
+        internal void Reset(int currentFixed = 0)
         {
+            // Serial-load owners still need the last completed controller on this same native step.
+            int completed = _current.FootControllerLastCompletedFixedSequence;
             _current = default;
+            if (completed > 0 && completed == currentFixed)
+                _current.FootControllerLastCompletedFixedSequence = completed;
             _capture = default;
             _phase = FootEvidenceTracePhase.Recording;
             _errorSum = _anchorSum = _sourceAngularSpeedSum = _sourceFromBindAngleSum = 0f;

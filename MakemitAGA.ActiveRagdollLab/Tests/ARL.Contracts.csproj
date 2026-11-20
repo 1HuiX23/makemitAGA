@@ -6,7 +6,7 @@
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <IsPackable>false</IsPackable>
-    <Version>0.4.128</Version>
+    <Version>0.4.166</Version>
     <AssemblyName>ARL.Contracts</AssemblyName>
   </PropertyGroup>
   <!-- Link the real implementations, rather than keeping a second copy of their algorithms.
@@ -14,6 +14,39 @@
   <ItemGroup>
     <Compile Include="../Physics/KneeSupportNormalReactionIsolation.cs" Link="Production/KneeSupportNormalReactionIsolation.cs" />
     <Compile Include="../Model/KneeSupportNormalReactionReport.cs" Link="Production/KneeSupportNormalReactionReport.cs" />
+    <Compile Include="../Model/FootContactEntrySnapshot.cs" Link="Production/FootContactEntrySnapshot.cs" />
+    <Compile Include="../Runtime/LandingObservationTiming.cs" Link="Production/LandingObservationTiming.cs" />
+    <Compile Include="../Physics/KneeFlexionFeedbackHeadroomAllocationIsolation.cs" Link="Production/KneeFlexionFeedbackHeadroomAllocationIsolation.cs" />
+    <Compile Include="../Model/SingleLegChainReport.KneeAllocation.cs" Link="Production/SingleLegChainReport.KneeAllocation.cs" />
+    <Compile Include="../Physics/ParentHeightAllocation.cs" Link="Production/ParentHeightAllocation.cs" />
+    <Compile Include="../Physics/RightKneePivot.cs" Link="Production/RightKneePivot.cs" />
+    <Compile Include="../Physics/LeftFootLeadSequence.cs" Link="Production/LeftFootLeadSequence.cs" />
+    <Compile Include="../Physics/LeftFootReleaseTrace.Lead.cs" Link="Production/LeftFootReleaseTrace.Lead.cs" />
+    <Compile Include="../Physics/LeftShinForecast.cs" Link="Production/LeftShinForecast.cs" />
+    <Compile Include="../Physics/LeftFootReleaseTrace.Shin.cs" Link="Production/LeftFootReleaseTrace.Shin.cs" />
+    <Compile Include="../Physics/LeftFootReleaseForecast.cs" Link="Production/LeftFootReleaseForecast.cs" />
+    <Compile Include="../Physics/LeftFootReleaseTrace.cs" Link="Production/LeftFootReleaseTrace.cs" />
+    <Compile Include="../Physics/RightFootLandingForecast.cs" Link="Production/RightFootLandingForecast.cs" />
+    <Compile Include="../Physics/LandingEventHistory.AnkleSequence.cs" Link="Production/LandingEventHistory.AnkleSequence.cs" />
+    <Compile Include="../Physics/RightFootPrecontact.cs" Link="Production/RightFootPrecontact.cs" />
+    <Compile Include="../Physics/RightFootPrecontact.Expiry.cs" Link="Production/RightFootPrecontact.Expiry.cs" />
+    <Compile Include="../Physics/RightFootPrecontact.Rising.cs" Link="Production/RightFootPrecontact.Rising.cs" />
+    <Compile Include="../Physics/RightAnkleLandingSequence.cs" Link="Production/RightAnkleLandingSequence.cs" />
+    <Compile Include="../Physics/RightFootLandingWindow.cs" Link="Production/RightFootLandingWindow.cs" />
+    <Compile Include="../Physics/RightFootTorqueForecast.cs" Link="Production/RightFootTorqueForecast.cs" />
+    <Compile Include="../Physics/RightFootForecastWindow.cs" Link="Production/RightFootForecastWindow.cs" />
+    <Compile Include="../Physics/RightThighTracking.cs" Link="Production/RightThighTracking.cs" />
+    <Compile Include="../Physics/RightThighWindow.cs" Link="Production/RightThighWindow.cs" />
+    <Compile Include="../Physics/LandingEventHistory.KneePivot.cs" Link="Production/LandingEventHistory.KneePivot.cs" />
+    <Compile Include="../Physics/RightAnkleProbe.cs" Link="Production/RightAnkleProbe.cs" />
+    <Compile Include="../Physics/RightAnkleWindow.cs" Link="Production/RightAnkleWindow.cs" />
+    <Compile Include="../Physics/ParentHeightProbe.cs" Link="Production/ParentHeightProbe.cs" />
+    <Compile Include="../Physics/EarlyLandingWindow.cs" Link="Production/EarlyLandingWindow.cs" />
+    <Compile Include="../Physics/SwingLandingWindow.cs" Link="Production/SwingLandingWindow.cs" />
+    <Compile Include="../Physics/SwingKneeCandidate.cs" Link="Production/SwingKneeCandidate.cs" />
+    <Compile Include="../Physics/LandingEventHistory.cs" Link="Production/LandingEventHistory.cs" />
+    <Compile Include="../Physics/LandingWindowOutcomes.cs" Link="Production/LandingWindowOutcomes.cs" />
+    <Compile Include="../Physics/LandingReferenceCapturePolicy.cs" Link="Production/LandingReferenceCapturePolicy.cs" />
     <Compile Include="../Runtime/RuntimeStepClock.cs" Link="Production/RuntimeStepClock.cs" />
     <Compile Include="../Runtime/FoundationPoseWindow.cs" Link="Production/FoundationPoseWindow.cs" />
     <Compile Include="../Runtime/HipJoinPreparationWindow.cs" Link="Production/HipJoinPreparationWindow.cs" />
@@ -23,6 +56,32 @@
     <Compile Include="../Physics/FootContactGeometryLimits.cs" Link="Production/FootContactGeometryLimits.cs" />
     <Compile Include="../Physics/FootBoxGeometry.cs" Link="Production/FootBoxGeometry.cs" />
     <Compile Include="../Physics/KneeGroundTarget.cs" Link="Production/KneeGroundTarget.cs" />
+    <Compile Include="../Physics/KneeGroundFeasibility.cs" Link="Production/KneeGroundFeasibility.cs" />
+    <Compile Include="../Physics/KneeGroundTrajectory.cs" Link="Production/KneeGroundTrajectory.cs" />
+    <Compile Include="../Physics/LandingPreparationMath.cs" Link="Production/LandingPreparationMath.cs" />
+    <Compile Include="../Physics/KneeLandingPreparation.cs" Link="Production/KneeLandingPreparation.cs" />
+    <Compile Include="../Physics/KneeLandingPreparation.Trace.cs" Link="Production/KneeLandingPreparation.Trace.cs" />
+    <Compile Include="../Physics/HipLandingPreparation.cs" Link="Production/HipLandingPreparation.cs" />
+    <Compile Include="../Physics/HipLandingPreparation.Trace.cs" Link="Production/HipLandingPreparation.Trace.cs" />
+    <Compile Include="../Physics/HipNormalReference.Landing.cs" Link="Production/HipNormalReference.Landing.cs" />
+    <Compile Include="../Physics/SingleLegShadowChain.HipPreparation.cs" Link="Production/SingleLegShadowChain.HipPreparation.cs" />
+    <Compile Include="../Model/LandingPreparationCommand.cs" Link="Production/LandingPreparationCommand.cs" />
+    <Compile Include="../Physics/LandingPreparationResponse.cs" Link="Production/LandingPreparationResponse.cs" />
+    <Compile Include="../Physics/LandingPreparationResponse.Geometry.cs" Link="Production/LandingPreparationResponse.Geometry.cs" />
+    <Compile Include="../Physics/FootLandingOpportunityAudit.cs" Link="Production/FootLandingOpportunityAudit.cs" />
+    <Compile Include="../Physics/LandingPreparationGeometry.cs" Link="Production/LandingPreparationGeometry.cs" />
+    <Compile Include="../Physics/FootLandingReferenceEvidence.cs" Link="Production/FootLandingReferenceEvidence.cs" />
+    <Compile Include="../Model/LegMeasuredAnchors.cs" Link="Production/LegMeasuredAnchors.cs" />
+    <Compile Include="../Model/LegLandingReferenceInput.cs" Link="Production/LegLandingReferenceInput.cs" />
+    <Compile Include="../Model/HipGoalPathEvidence.cs" Link="Production/HipGoalPathEvidence.cs" />
+    <Compile Include="../Physics/HipCompositeReferenceShockAbsorberIsolation.cs" Link="Production/HipCompositeReferenceShockAbsorberIsolation.cs" />
+    <Compile Include="../Physics/HipNormalReference.cs" Link="Production/HipNormalReference.cs" />
+    <Compile Include="../Model/HipNormalReferenceState.cs" Link="Production/HipNormalReferenceState.cs" />
+    <Compile Include="../Physics/GroundReferenceStepBudget.cs" Link="Production/GroundReferenceStepBudget.cs" />
+    <Compile Include="../Physics/FootGroundTrajectory.cs" Link="Production/FootGroundTrajectory.cs" />
+    <Compile Include="../Physics/FootRelativeReference.GroundTrajectory.cs" Link="Production/FootRelativeReference.GroundTrajectory.cs" />
+    <Compile Include="../Physics/FootKneeProgressTarget.cs" Link="Production/FootKneeProgressTarget.cs" />
+    <Compile Include="../Physics/FootGroundReference.KneeProgress.cs" Link="Production/FootGroundReference.KneeProgress.cs" />
     <Compile Include="../Physics/FootGroundReference.cs" Link="Production/FootGroundReference.cs" />
     <Compile Include="../Physics/FootRelativeReference.cs" Link="Production/FootRelativeReference.cs" />
     <Compile Include="../Physics/FootAnkleSourceDrivenRelativePdIsolation.Limits.cs" Link="Production/FootAnkleSourceDrivenRelativePdIsolation.Limits.cs" />
@@ -44,6 +103,11 @@
     <Compile Include="../Runtime/PelvisTestCoordinator.cs" Link="Production/PelvisTestCoordinator.cs" />
     <Compile Include="../Runtime/AnkleTestCoordinator.cs" Link="Production/AnkleTestCoordinator.cs" />
     <Compile Include="../Physics/SupportNormalReference.cs" Link="Production/SupportNormalReference.cs" />
+    <Compile Include="../Physics/SupportNormalBraking.cs" Link="Production/SupportNormalBraking.cs" />
+    <Compile Include="../Physics/SupportNormalRecovery.cs" Link="Production/SupportNormalRecovery.cs" />
+    <Compile Include="../Model/PelvisReceiverReport.SupportRecovery.cs" Link="Production/PelvisReceiverReport.SupportRecovery.cs" />
+    <Compile Include="../Physics/PelvisDynamicReceiverIsolation.ReferencePolicy.cs" Link="Production/PelvisDynamicReceiverIsolation.ReferencePolicy.cs" />
+    <Compile Include="../Model/PelvisReceiverReport.SupportReference.cs" Link="Production/PelvisReceiverReport.SupportReference.cs" />
     <Compile Include="../Physics/PelvisComFeedback.cs" Link="Production/PelvisComFeedback.cs" />
     <Compile Include="../Physics/PelvisComReferencePlanner.cs" Link="Production/PelvisComReferencePlanner.cs" />
     <Compile Include="../Model/PelvisNormalResponseEvidence.cs" Link="Production/PelvisNormalResponseEvidence.cs" />
@@ -63,10 +127,10 @@
     <Compile Include="../Physics/PelvisChestPointResponse.cs" Link="Production/PelvisChestPointResponse.cs" />
     <Compile Include="../Physics/HipPointPairMobility.cs" Link="Production/HipPointPairMobility.cs" />
     <Compile Include="../Physics/HipBilateralForceSolver.Budgets.cs" Link="Production/HipBilateralForceSolver.Budgets.cs" />
-    <Compile Include="../Physics/HipBilateralForceSolver.AllocationAudit.cs" Link="Production/HipBilateralForceSolver.AllocationAudit.cs" />
-    <Compile Include="../Model/HipAllocationAuditContext.cs" Link="Production/HipAllocationAuditContext.cs" />
-    <Compile Include="../Model/HipAllocationAuditSample.cs" Link="Production/HipAllocationAuditSample.cs" />
-    <Compile Include="../Model/HipAllocationAuditReport.cs" Link="Production/HipAllocationAuditReport.cs" />
+    <Compile Include="../Physics/HipBilateralForceSolver.BoundedTrade.cs" Link="Production/HipBilateralForceSolver.BoundedTrade.cs" />
+    <Compile Include="../Model/HipAllocationDecision.cs" Link="Production/HipAllocationDecision.cs" />
+    <Compile Include="../Model/HipAllocationReport.cs" Link="Production/HipAllocationReport.cs" />
+    <Compile Include="../Physics/HipActuationOwnership.cs" Link="Production/HipActuationOwnership.cs" />
     <Compile Include="../Physics/HipSystemAllocation.cs" Link="Production/HipSystemAllocation.cs" />
     <Compile Include="../Physics/HipBilateralForceSolver.cs" Link="Production/HipBilateralForceSolver.cs" />
     <Compile Include="../Physics/HipCharacterJointResponseIsolation.Limits.cs" Link="Production/HipCharacterJointResponseIsolation.Limits.cs" />

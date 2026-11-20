@@ -50,8 +50,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     !left.Current.JointSolved || !right.Current.JointSolved ||
                     !F(left.Current.MotionScale) || left.Current.MotionScale < 0f || left.Current.MotionScale > 1f ||
                     left.Current.MotionScale != right.Current.MotionScale ||
+                    left.Current.UpperAngularScale != right.Current.UpperAngularScale ||
+                    !HipSystemAllocation.AngularValid(_hipCommand, left.Current.MotionScale, left.Current.UpperAngularScale, left.Current.UpwardExtraAcceleration) ||
                     left.Current.UpwardExtraAcceleration != right.Current.UpwardExtraAcceleration ||
-                    (!left.Current.FullFeedbackFeasible && left.Current.UpwardExtraAcceleration != 0f) ||
+                    (!left.Current.FullFeedbackFeasible && (left.Current.UpwardExtraAcceleration != 0f || left.Current.UpperAngularScale != left.Current.MotionScale)) ||
                     left.Current.Scale != right.Current.Scale || left.Current.FullFeedbackFeasible != right.Current.FullFeedbackFeasible ||
                     !PelvisChestPointResponse.Same(left.Current.PeerForce, right.Current.Force) ||
                     !PelvisChestPointResponse.Same(right.Current.PeerForce, left.Current.Force) ||
@@ -61,7 +63,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     !ReactionMatches(left.Current) || !ReactionMatches(right.Current)) return RejectHipCompletion("INPUT_OR_PAIR_CONTRACT");
                 if (!PelvisHipAttitudeCommand.TryPlanWithReaction(_hipCommand, -left.Current.Force - right.Current.Force,
                     left.Current.ParentTorque + right.Current.ParentTorque, left.Current.BilateralAngularReaction, out PelvisHipAttitudeCommand command) || command.Clamped) return RejectHipCompletion("ATTITUDE_PLAN_OR_TORQUE_BUDGET");
-                command.MotionScale = left.Current.MotionScale; command.CommonAcceleration = left.Current.CommonAcceleration;
+                command.MotionScale = left.Current.MotionScale; command.UpperAngularScale = left.Current.UpperAngularScale; command.CommonAcceleration = left.Current.CommonAcceleration;
                 command.UpwardExtraAcceleration = left.Current.UpwardExtraAcceleration;
                 if (!command.AllocationMatches()) return RejectHipCompletion("SYSTEM_COM_ALLOCATION");
                 var f = new PelvisReceiverReport.Frame();
@@ -109,7 +111,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 f.HipReactionRecorded = true;
                 Report.CaptureMotionInput(ref f, step); // Optional evidence; catches its own failures.
                 Report.Ring[_pending] = f; Report.HipReactionRecords++;
-                if (command.Clamped) Report.HipAttitudeClamps++;
                 Report.HipAttitudeRequestedPeak = Mathf.Max(Report.HipAttitudeRequestedPeak, command.RequestedTorque.magnitude);
                 Report.HipAttitudeAppliedPeak = Mathf.Max(Report.HipAttitudeAppliedPeak, command.AppliedTorque.magnitude);
                 Report.HipAttitudeResidualPeak = Mathf.Max(Report.HipAttitudeResidualPeak, command.ResidualTorque.magnitude);
@@ -140,7 +141,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             Report.SystemResidualPeak = Mathf.Max(Report.SystemResidualPeak, f.SystemResidual.magnitude);
         }
         private static bool ReactionMatches(HipAnchorPairReport.Command c) => c.Angular.Valid &&
+            PelvisChestPointResponse.Same(c.NetHipTorque, c.UpperAngularScale * c.PureHipTorque) &&
             PelvisChestPointResponse.Same(c.ParentAngularReaction,
-                c.ParentInput.JointTorqueReaction ? -c.MotionScale * c.Angular.RelativeTorque : Vector3.zero);
+                c.ParentInput.JointTorqueReaction ? -c.UpperAngularScale * c.Angular.RelativeTorque : Vector3.zero);
     }
 }

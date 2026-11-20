@@ -252,7 +252,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     _sourceCarryActive = true;
                     _sourceCarryEntries++;
                     _lastSourceCarry = "source=" + sourceId + "/error=" + F(_currentErrorDeg) + "/rW=" + F(_currentRadialWSignedDegPerSec) + "/tW=" + F(_currentTangentialWDegPerSec);
-                    Plugin.Logger?.LogWarning("[ARL][HIP_VECTOR_CAPTURE_SOURCE_CARRY] " + _lastSourceCarry);
+                    Plugin.TryLogWarning("[ARL][HIP_VECTOR_CAPTURE_SOURCE_CARRY] " + _lastSourceCarry);
                 }
                 _sourceCarrySteps++;
             }
@@ -428,9 +428,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 "/floor(gate/pre/post/delta/satisfied)=" + _currentHighErrorAwayFloorGate + "/" + F(_currentPreFloorRadialCommandA) + "/" + F(_currentPostFloorRadialCommandA) + "/" + F(_currentHighErrorAwayFloorDeltaA) + "/" + _currentHighErrorAwayFloorSatisfied +
                 "/maxA=" + F(_currentProductionMaxA) + "->" + F(_currentEffectiveMaxA);
             CopyToReport(report);
-            Plugin.Logger?.LogWarning("[ARL][HIP_VECTOR_CAPTURE_ABORT_EVIDENCE] " + _abortEvidence);
+            Plugin.TryLogWarning("[ARL][HIP_VECTOR_CAPTURE_ABORT_EVIDENCE] " + _abortEvidence);
             if (_highErrorAwayBrakeFloorEnabled)
-                Plugin.Logger?.LogWarning("[ARL][HIP_RADIAL_AWAY_BRAKE_FLOOR_ABORT_EVIDENCE] " + GetHighErrorAwayBrakeFloorKey());
+                Plugin.TryLogWarning("[ARL][HIP_RADIAL_AWAY_BRAKE_FLOOR_ABORT_EVIDENCE] " + GetHighErrorAwayBrakeFloorKey());
         }
 
         internal void CopyToReport(SingleLegChainReport report)

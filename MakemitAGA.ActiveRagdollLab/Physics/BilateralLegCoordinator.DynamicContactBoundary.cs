@@ -29,6 +29,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 bool kneeGroundTarget = continuousEntry && _torso != null &&
                     (_torso.PelvisReceiverControl.Arm == PelvisDynamicReceiverIsolation.DynamicHipArmA ||
                      _torso.PelvisReceiverControl.Arm == PelvisDynamicReceiverIsolation.DynamicHipArmB);
+                bool kneeExtension = kneeGroundTarget;
+                bool hipLanding = kneeGroundTarget && PelvisDynamicReceiverIsolation.UsesHipLandingPreparation(_torso.PelvisReceiverControl.Arm);
+                bool kneeLanding = kneeGroundTarget && PelvisDynamicReceiverIsolation.UsesKneeLandingPreparation(_torso.PelvisReceiverControl.Arm);
+                bool footTrajectory = kneeGroundTarget;
+                bool footKneeProgress = kneeGroundTarget;
                 bool loadAdmission = continuousEntry; // V041200: both arms retain v119 B admission.
                 if (_primary.ContactEntryContinuous != continuousEntry || _secondary.ContactEntryContinuous != continuousEntry ||
                     _primary.ContactEntryRecovery != recoveryEntry || _secondary.ContactEntryRecovery != recoveryEntry ||
@@ -37,6 +42,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     _primary.GroundReferenceApplied != continuousEntry || _secondary.GroundReferenceApplied != continuousEntry ||
                     _primary.GroundReferencePartial != partialGround || _secondary.GroundReferencePartial != partialGround ||
                     _primary.KneeGroundTargetSelected != kneeGroundTarget || _secondary.KneeGroundTargetSelected != kneeGroundTarget ||
+                    _primary.FootGroundTrajectorySelected != footTrajectory || _secondary.FootGroundTrajectorySelected != footTrajectory ||
+                    _primary.FootKneeProgressSelected != footKneeProgress || _secondary.FootKneeProgressSelected != footKneeProgress ||
+                    _primary.KneeGroundExtensionSelected != kneeExtension || _secondary.KneeGroundExtensionSelected != kneeExtension ||
+                    _primary.HipLandingPreparationSelected != hipLanding || _secondary.HipLandingPreparationSelected != hipLanding ||
+                    _primary.KneeLandingPreparationSelected != kneeLanding || _secondary.KneeLandingPreparationSelected != kneeLanding ||
                     _primary.KneeReferenceSelected != coherentKnee || _secondary.KneeReferenceSelected != coherentKnee ||
                     _primary.KneePlannedFeedforwardSelected != plannedKneeFeedforward ||
                     _secondary.KneePlannedFeedforwardSelected != plannedKneeFeedforward)

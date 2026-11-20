@@ -10,6 +10,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     {
         internal const float MaxCorrectionDegrees = 5f;
         internal const float MaxBendDegrees = 150f; // Conservative experiment search bound, not a human limit.
+        internal const float MinExtensionBendDegrees = 5f; // Search margin from straight, not an anatomical claim.
         internal const float MinGain = .0001f;
         private const int SearchSamples = 16;
 
@@ -26,13 +27,21 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             internal PhysicsStepContext Step;
             internal SourceStepContext Source;
             internal bool Valid, Candidate, Applied, Planned;
+            internal bool AllowExtension;
+            internal bool Extension => Candidate && GoalBend < RawBend;
             internal string Reason;
             internal Quaternion Raw, Goal;
             internal FootGroundReference.GroundSample Foot;
             internal Quaternion PlannedFoot;
+            internal FootGroundTrajectory.Result FootTrajectory;
+            internal FootKneeProgressTarget.Result KneeProgress;
             internal PhysicsStepContext GeometryStep;
             internal float FootOnlyMin;
             internal float RawMin, GoalMin, PlanMin, RawAnkleY, GoalAnkleY, Correction, RawBend, GoalBend;
+            // Optional evidence. Never read by candidate selection or packet validity.
+            internal KneeGroundFeasibility.Envelope Feasibility;
+            internal KneeGroundFeasibility.Stage FeasibilityStage;
+            internal float GoalWithPublishedFootMin;
             internal bool Matches(PhysicsStepContext step, SourceStepContext source) =>
                 Step.Matches(step) && Source.Matches(source) && source.Valid &&
                 source.Epoch == step.Epoch && source.Sequence == step.SourceSequence;
@@ -56,9 +65,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private static float BendSlope(Geometry g, Quaternion knee, Vector3 axis) =>
             Vector3.Dot(g.UpperSpan.normalized, knee * Vector3.Cross(axis, g.LowerSpan.normalized));
 
-        internal static Sample Evaluate(Geometry g, Quaternion raw, Vector3 lowerLocalAxis)
+        internal static Sample Evaluate(Geometry g, Quaternion raw, Vector3 lowerLocalAxis, bool allowExtension = false)
         {
-            Sample s = new Sample { Raw = raw, Goal = raw, Reason = "GEOMETRY_UNAVAILABLE" };
+            Sample s = new Sample { Raw = raw, Goal = raw, AllowExtension = allowExtension, Reason = "GEOMETRY_UNAVAILABLE" };
             if (!g.Valid || !Q(raw) || !V(lowerLocalAxis) || lowerLocalAxis.sqrMagnitude < .0001f) return s;
             s.RawMin = s.GoalMin = Minimum(g, raw);
             s.RawAnkleY = s.GoalAnkleY = Ankle(g, raw).y - (g.FloorCenter.y + g.FloorHalf.y);
@@ -75,8 +84,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (s.RawBend >= MaxBendDegrees) { s.Reason = "BEND_SEARCH_BOUND"; return s; }
             Vector3 axis = lowerLocalAxis.normalized;
             float rawSlope = BendSlope(g, raw, axis);
-            // Axis sign is calibration-dependent. Inspect both signs, but accept only
-            // increased segment bend: never straighten/hyperextend to gain floor clearance.
+            // Axis sign is calibration-dependent. A retains added bend only. B may
+            // also reduce bend on the SAME monotone branch, leaving a straight-knee
+            // margin. The original 5-degree arc and independent Foot limits still apply.
             for (int i = 1; i <= SearchSamples; i++)
             {
                 for (int sign = -1; sign <= 1; sign += 2)
@@ -84,10 +94,14 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     float angle = sign * MaxCorrectionDegrees * i / SearchSamples;
                     Quaternion q = raw * Quaternion.AngleAxis(angle, axis);
                     // Ambiguous straight/axis-degenerate input is left unchanged.
-                    if (sign * rawSlope >= -0.000001f || sign * BendSlope(g, q, axis) >= -0.000001f) continue;
+                    float endSlope = sign * BendSlope(g, q, axis);
+                    bool flexion = sign * rawSlope < -0.000001f && endSlope < -0.000001f;
+                    bool extension = allowExtension && sign * rawSlope > 0.000001f && endSlope > 0.000001f;
+                    if (!flexion && !extension) continue;
                     float bend = Bend(g, q);
                     float ankleY = Ankle(g, q).y - (g.FloorCenter.y + g.FloorHalf.y);
-                    if (!Q(q) || !F(bend) || !F(ankleY) || bend <= s.RawBend || bend > MaxBendDegrees ||
+                    if (!Q(q) || !F(bend) || !F(ankleY) || bend > MaxBendDegrees ||
+                        (flexion ? bend <= s.RawBend : bend >= s.RawBend || bend < MinExtensionBendDegrees) ||
                         ankleY - s.RawAnkleY < MinGain) continue;
                     FootGroundReference.GroundSample foot = EvaluateFoot(g, q);
                     Quaternion footGoal = SelectedFoot(g, foot);
@@ -124,8 +138,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             "/footOnlyMinMm=" + (s.Valid ? N(s.FootOnlyMin * 1000f) : "NA") +
             "/footCandidate(correctionDeg-feasible-partial)=" + N(s.Foot.CorrectionDegrees) + "|" + s.Foot.Feasible + "|" + s.Foot.Partial +
             "/correction-bendDeg=" + N(s.Correction) + "|" + N(s.RawBend) + "|" + N(s.GoalBend) +
+            "/directionPolicy=" + (s.AllowExtension ? "BOUNDED_EXTENSION_ALLOWED" : "FLEXION_ONLY") +
+            "/extensionCandidate=" + s.Extension +
             "/rawKneeR=" + N(s.Raw.x) + "," + N(s.Raw.y) + "," + N(s.Raw.z) + "," + N(s.Raw.w) +
-            "/domain=ONE_RENDER_NATIVE_HIP_UPPER_RAW_KNEE_FOOT_PAIR_NOT_SOLVED_CONTACT";
+            "/domain=ONE_RENDER_NATIVE_HIP_UPPER_RAW_KNEE_FOOT_PAIR_NOT_SOLVED_CONTACT/" + KneeGroundFeasibility.SampleText(s) + "/" + s.FootTrajectory.Text() + "/" + s.KneeProgress.Text();
         private static string N(float x) => x.ToString("G9", CultureInfo.InvariantCulture);
         private static bool F(float x) => !float.IsNaN(x) && !float.IsInfinity(x);
         private static bool V(Vector3 v) => F(v.x) && F(v.y) && F(v.z) && F(v.sqrMagnitude);

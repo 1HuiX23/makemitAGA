@@ -9,7 +9,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     // body teleport, collision authority or independent clock. Both current Hip arms retain the v114 complete/partial input policy.
     // A/fallback geometry uses the actual Lower ankle. v126 B can supply the Foot
     // half of a joint Render-chain candidate; the sample labels this domain explicitly.
-    internal sealed class FootGroundReference
+    internal sealed partial class FootGroundReference
     {
         internal const float UprightConeDegrees = FootBoxGeometry.GroundGoalUprightConeDegrees;
         internal const float MaxCorrectionDegrees = 15f;
@@ -20,7 +20,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal struct GroundSample
         {
             internal SourceStepContext Source;
-            internal bool Valid, Feasible, Partial, Selected, BoundValid, DerivedW, JointChain;
+            internal bool Valid, Feasible, Partial, Selected, BoundValid, DerivedW, JointChain, CurrentKneeBasis;
             internal string Reason;
             internal float RawMin, FlatMin, GoalMin, BestUprightMin, HeightDeficit, CorrectionDegrees;
             internal Quaternion Goal;
@@ -45,6 +45,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             if (apply && !enabled) throw new InvalidOperationException("GROUND_REFERENCE_APPLY_REQUIRES_ENABLED");
             if (allowPartial && !apply) throw new InvalidOperationException("GROUND_PARTIAL_REQUIRES_APPLY");
+            _kneeProgressSelected = false; _kneeProgress = default; _progressExpected = default;
             _allowPartial = allowPartial;
             _enabled = enabled; _apply = apply; _finite = true; _issue = null;
             _hasInput = _previousCorrected = false; _lastSource = default; _current = default;
@@ -59,10 +60,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         }
         internal void DisablePreserveTrace()
         {
+            _kneeProgressSelected = false; _kneeProgress = default; _progressExpected = default;
             _enabled = _apply = _allowPartial = _hasInput = _previousCorrected = false;
         }
         internal void ResetTrace()
         {
+            ResetKneeProgressTrace();
             _traceApply = _apply; _tracePartial = _allowPartial;
             _samples = _feasible = _selected = _partialSelected = _heightDeficit = _limited = _unavailable = 0;
             _jointSamples = _jointSelected = 0;
@@ -87,15 +90,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 source.Epoch != _lastSource.Epoch || source.Sequence <= _lastSource.Sequence || source.Time <= _lastSource.Time ||
                 Mathf.Abs(source.Time - _lastSource.Time - dt) > 0.00001f)
             { Invalidate("SOURCE_INPUT_OR_CLOCK_INVALID"); return; }
-            bool selected = _apply && candidate.Valid && (candidate.Feasible || (_allowPartial && candidate.Partial));
-            if (selected) goal = candidate.Goal;
-            // Validate before Log/Inverse: a malformed candidate must latch the contract,
-            // never throw midway through input differentiation or replace held history.
-            if (!Q(goal)) { Invalidate("GOAL_INPUT_NONFINITE"); goal = raw; return; }
-            bool derivative = selected || _previousCorrected;
-            if (derivative)
-                goalW = dt < 0.25f ? FootRelativeReference.Log(goal * Quaternion.Inverse(_lastGoal)) / dt : Vector3.zero;
-            if (!Q(goal) || !V(goalW)) { Invalidate("GOAL_INPUT_NONFINITE"); goal = raw; goalW = rawW; return; }
+            if (!ResolveInput(raw, rawW, dt, candidate, out goal, out goalW, out bool selected, out bool derivative))
+            { Invalidate("GOAL_INPUT_NONFINITE"); goal = raw; goalW = rawW; return; }
             candidate.Source = source; candidate.Selected = selected; candidate.DerivedW = derivative;
             _current = candidate;
             _lastSource = source; _lastRaw = raw; _lastRawW = rawW; _lastGoal = goal; _lastGoalW = goalW;
@@ -114,6 +110,30 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _peakCorrection = Mathf.Max(_peakCorrection, candidate.CorrectionDegrees);
             }
         }
+        // This preview never consumes the source or replaces derivative history.
+        internal bool TryPreviewInput(SourceStepContext source, Quaternion raw, Vector3 rawW, float dt,
+            GroundSample candidate, out Quaternion goal, out Vector3 goalW)
+        {
+            goal = raw; goalW = rawW;
+            if (!_enabled || !_finite || !_hasInput || !source.Valid || !Q(raw) || !V(rawW) ||
+                !F(dt) || dt <= .0001f || source.Epoch != _lastSource.Epoch ||
+                source.Sequence <= _lastSource.Sequence || source.Time <= _lastSource.Time ||
+                Mathf.Abs(source.Time - _lastSource.Time - dt) > .00001f) return false;
+            return ResolveInput(raw, rawW, dt, candidate, out goal, out goalW, out _, out _);
+        }
+        private bool ResolveInput(Quaternion raw, Vector3 rawW, float dt, GroundSample candidate,
+            out Quaternion goal, out Vector3 goalW, out bool selected, out bool derivative)
+        {
+            selected = _apply && candidate.Valid && (candidate.Feasible || (_allowPartial && candidate.Partial));
+            derivative = selected || _previousCorrected;
+            goal = selected ? candidate.Goal : raw; goalW = rawW;
+            // Validation precedes Log: previews and actual publication share this law.
+            if (!Q(goal)) return false;
+            if (derivative)
+                goalW = dt < .25f ? FootRelativeReference.Log(goal * Quaternion.Inverse(_lastGoal)) / dt : Vector3.zero;
+            return V(goalW);
+        }
+
         internal void Invalidate(string issue) { _finite = false; _issue = issue; }
 
         // Exact maximum minimum-height over ALL yaw and up vectors within this upright cone,
@@ -194,7 +214,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             s.Feasible = true; s.Goal = relative; s.Reason = "FEASIBLE_GOAL";
             return s;
         }
-        // Preserve the complete v113 feasible-only path bit-for-bit. Only B continues after
+        // Preserve the complete v113 feasible-only path bit-for-bit. Only allowPartial continues after
         // it rejects a goal. Search a bounded set on the SAME yaw-preserving flattening arc;
         // no global optimality, clearance guarantee or contact permission is inferred.
         internal static GroundSample Evaluate(Vector3 ankle, Quaternion lower, Quaternion rawRelative, Quaternion bind,
@@ -233,7 +253,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             if (!s.Source.Valid) return "landingGoalV041140=NA";
             return "landingGoalV041140=RENDER_INPUT_ONLY/sourceSeq=" + s.Source.Sequence + "/sourceTime=" + S(s.Source.Time) +
-                "/geometry=" + (s.JointChain ? "JOINT_KNEE_FOOT_RENDER_CHAIN_V041260" : "NATIVE_LOWER_RENDER") +
+                "/geometry=" + (s.CurrentKneeBasis ? "COMPLETED_KNEE_REFERENCE_RENDER_CHAIN_V041350" : s.JointChain ? "JOINT_KNEE_FOOT_RENDER_CHAIN_V041260" : "NATIVE_LOWER_RENDER") +
                 "/valid-feasible-partial-selected-derivedW=" + s.Valid + "-" + s.Feasible + "-" + s.Partial + "-" + s.Selected + "-" + s.DerivedW +
                 "/reason=" + (s.Reason ?? "<none>") + "/raw-flat-candidateMinMm=" + S(s.RawMin * 1000f) + "|" + S(s.FlatMin * 1000f) + "|" + S(s.GoalMin * 1000f) +
                 "/boundValid-bestUprightMin-deficitMm=" + s.BoundValid + "|" + S(s.BestUprightMin * 1000f) + "|" + S(s.HeightDeficit * 1000f) +
@@ -247,7 +267,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             "/jointGeometry(render-selected)=" + _jointSamples + "|" + _jointSelected +
             "/peak(deficitMm-correctionDeg)=" + S(_peakDeficit * 1000f) + "|" + S(_peakCorrection) +
             "/limits(uprightCone-correction-clearanceMm)=" + S(UprightConeDegrees) + "|" + S(MaxCorrectionDegrees) + "|" + S(GoalClearanceMeters * 1000f) +
-            "/planner=EXISTING_RENDER_FOOT_REFERENCE_W3.75_A20/plannerGap=SELECTED_INPUT_TO_REFERENCE/noPoseWrite=True/contactAuthority=False/" + SampleText(_current);
+            "/planner=EXISTING_RENDER_FOOT_REFERENCE_W3.75_A20/plannerGap=SELECTED_INPUT_TO_REFERENCE/noPoseWrite=True/contactAuthority=False/" + SampleText(_current) + KneeProgressSummary();
         private static bool F(float x) => !float.IsNaN(x) && !float.IsInfinity(x);
         private static bool V(Vector3 v) => F(v.x) && F(v.y) && F(v.z);
         private static bool Q(Quaternion q) => F(q.x) && F(q.y) && F(q.z) && F(q.w) &&

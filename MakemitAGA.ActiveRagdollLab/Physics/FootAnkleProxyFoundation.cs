@@ -55,6 +55,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private readonly FootTurnEventRecorder _turnEvents = new FootTurnEventRecorder();
         private readonly FootRelativeReference _relativeReference = new FootRelativeReference();
 
+        internal bool FootGroundTrajectorySelected => _relativeReference.GroundTrajectorySelected;
+        internal bool FootKneeProgressSelected => _groundReference.KneeProgressSelected;
         internal bool RelativeReferenceSelected => _relativeReference.Selected;
         internal bool RelativeReferenceActive => _relativeReference.Active;
         internal bool RelativeReferenceFinite => _relativeReference.Finite;
@@ -62,7 +64,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal bool SelectRelativeReference(bool enabled)
         {
             if (!IsBuilt || _ankleDrive.DynamicActive || _traceEnabled) return false;
-            if (!enabled) { _groundReference.DisablePreserveTrace(); ClearKneeFootGroundPacket(); _loadAdmission.DisablePreserveTrace(); }
+            if (!enabled) { _groundReference.DisablePreserveTrace(); _relativeReference.DisableGroundTrajectoryPreserveTrace(); ClearKneeFootGroundPacket(); _loadAdmission.DisablePreserveTrace(); }
             _relativeReference.Select(enabled);
             return _relativeReference.Selected == enabled;
         }
@@ -288,8 +290,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             float kneeOffAxisErrorDegrees,
             Vector3 kneeFlexionAxisWorld,
             Vector3 kneeRelativeCommandWorld,
-            bool loadedStanceEnvironmentEnabled, LegTurnStepEvidence legTurnEvidence)
+            bool loadedStanceEnvironmentEnabled, LegTurnStepEvidence legTurnEvidence, SwingKneeCandidate.Controller swingKnee = default)
         {
+            using var footTime = LandingObservationTiming.Run.Measure(LandingObservationTiming.Stage.FootFixed);
             if (!IsBuilt)
                 return false;
 
@@ -301,7 +304,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
             // Read N+1 before the existing gravity clear, structural readbacks, probe and lifecycle.
             _supportEntityBoundary.ObserveSettledBeforeControllerPreparation(_traceEnabled && traceEnabled,
-                fixedSequence, _contactShadow.Active, _contactShadow.AuthorizedColliderId, _collider, _body, _report);
+                fixedSequence, FormalStanceContactActive, _contactShadow.AuthorizedColliderId, _collider, _body, _report);
 
             // V04170 may historically have left native Foot gravity ON for a just-completed stance solve.
             // v0.4.19 freezes V04170 B/ON as the Foot self-weight primitive; this defensive clear still guarantees every frozen controller step starts gravity-OFF.
@@ -324,7 +327,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             else if (!traceEnabled && _traceEnabled)
                 EndTrace();
 
-            Quaternion currentRelative = Quaternion.Inverse(_lowerBody.rotation) * _body.rotation;
+            Quaternion inverseLowerRotation = Quaternion.Inverse(_lowerBody.rotation);
+            Quaternion footWorldRotation = _body.rotation;
+            Quaternion currentRelative = inverseLowerRotation * footWorldRotation;
             Vector3 lowerAnchorWorld = _lowerBody.transform.TransformPoint(_lowerAnkleAnchorLocal);
             Vector3 footAnchorWorld = _body.transform.TransformPoint(_footAnkleAnchorLocal);
             float relativeError = Quaternion.Angle(_sampledSourceRelative, currentRelative);
@@ -341,7 +346,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     ? (dynamicConstraintContract && (expectedDynamic ? !_body.isKinematic : _body.isKinematic))
                     : (_ankleJoint == null && _body.isKinematic));
             bool solverContract = _footVelocitySolver.ValidateReadback(_body, _report);
-            bool referenceContract = (!_groundReference.Enabled || _groundReference.Finite) && (!_relativeReference.Selected || (_relativeReference.Finite &&
+            bool referenceContract = (!_groundReference.KneeProgressSelected || _relativeReference.GroundTrajectorySelected) &&
+                (!_relativeReference.GroundTrajectorySelected ||
+                (_relativeReference.Selected && _groundReference.Enabled && _groundReference.Apply && _groundReference.AllowPartial)) &&
+                (!_groundReference.Enabled || _groundReference.Finite) && (!_relativeReference.Selected || (_relativeReference.Finite &&
                 (expectedDynamic ? (_relativeReference.Active && _relativeReference.Current.Source.Matches(_report.RuntimeSourceContext))
                     : !_relativeReference.Active)));
             bool finite = structuralContract && solverContract && referenceContract && _report.FootContactOffsetFinite &&
@@ -378,9 +386,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _controlEvidence.Observe(_traceEnabled, new FootFixedStepEvidence
             {
                 FixedSequence = fixedSequence,
+                PreparationPoseValid = _traceEnabled && IsFinite(footAnchorWorld),
+                PreparationSupportId = _supportSurface == null ? 0 : _supportSurface.SelectedId,
+                FootAnchorWorld = footAnchorWorld, LowerAnchorWorld = lowerAnchorWorld,
                 Valid = finite && IsFinite(lowerPointVelocity) && IsFinite(footPointVelocity) &&
                         IsFinite(_lowerBody.angularVelocity) && IsFinite(_body.angularVelocity),
-                ContactActiveBeforeLifecycle = _contactShadow.Active,
+                ContactActiveBeforeLifecycle = FormalStanceContactActive,
                 AnchorErrorMeters = anchorError,
                 TrackingErrorDegrees = relativeError,
                 LowerAnkleVelocityWorld = lowerPointVelocity,
@@ -465,7 +476,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     _report.GroundColliderInstanceId,
                     _soleRequalification.CurrentGroundMaxAbsClearanceMeters,
                     _soleRequalification.CurrentGroundAverageNormalWorld,
-                    _report);
+                    _report, _stanceContactLifecycle.Enabled);
 
                 // v0.4.8 B must guarantee that the Foot zero-friction material cannot be overridden by an
                 // authorized ground material using non-zero Maximum combine. Validate only when a real stance
@@ -485,14 +496,17 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 // current v0.4.0 exact static identity, a short same-Collider hold, and (v0.4.16.1) two consecutive
                 // current physical-sole geometry-ready samples before the collider may transition OFF->ON.
                 FootStanceOnlyAuthorizedContactLifecycle.EntryContext entryContext = default;
-                if (_stanceContactLifecycle.ContinuousEntry && !_contactShadow.Active)
+                if (_stanceContactLifecycle.ContinuousEntry && !FormalStanceContactActive)
                 {
                     // Both rotations use this physical Lower read and the held Render packet above.
-                    // Reference substitutions are diagnostic only; no live source Transform is sampled here.
+                    // The selected control minimum also scores expiry. This uses the held packet, without reading live source transforms.
                     Quaternion entryLowerRotation = _lowerBody.rotation;
                     entryContext = FootStanceOnlyAuthorizedContactLifecycle.CaptureEntryContext(fixedSequence, _body,
                         lowerAnchorWorld, _footAnkleAnchorLocal, entryLowerRotation * ControlRelativeRotation,
                         _sampledFootPosition, _sampledFootRotation, anchorError, sampleAge, _sampledSourceRelative, entryLowerRotation);
+                    entryContext.CurrentGait = _gameNativeGaitPhase.CurrentPhaseFixed == fixedSequence;
+                    entryContext.FootAnchorY = footAnchorWorld.y;
+                    entryContext.FootAnchorYValid = IsFinite(footAnchorWorld);
                     entryContext.LandingGoal = _groundReference.Current;
                     // Reuse this Fixed's existing source receipt/classifier. These fields only select/describe a log window.
                     entryContext.SourcePhase = legTurnEvidence.Matches(step, fixedSequence) &&
@@ -500,38 +514,69 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     entryContext.SourceFresh = fresh;
                     entryContext.SourceHeldDepth = heldDepth;
                     entryContext.SourceDt = _report.RuntimeSourceContext.Dt;
-                    if (LandingReferenceCaptureRequested)
+                    if (FullLandingReferenceRequested(legTurnEvidence.LandingPreparation.Applied))
                     {
+                        using var measurement = LandingObservationTiming.Run.Measure(LandingObservationTiming.Stage.FootPathBuild);
                         entryContext.LandingPath = CaptureLandingReference(step, fixedSequence, legTurnEvidence, entryLowerRotation);
                         if (legTurnEvidence.Matches(step, fixedSequence) && legTurnEvidence.ReceiverNormalResponse.Matches(step))
                             entryContext.ReceiverNormalResponse = legTurnEvidence.ReceiverNormalResponse;
                     }
                 }
-                if (!_stanceContactLifecycle.Step(
-                    _traceEnabled,
-                    fixedSequence,
-                    step.Dt,
-                    _gameNativeGaitPhase.State,
-                    _gameNativeGaitPhase.CurrentStrongStanceSample,
-                    _report.ContactIdentityCurrentQualified,
-                    _report.ContactIdentityCurrentColliderInstanceId,
-                    _report.ContactIdentityCurrentColliderPath,
-                    _soleRequalification.CurrentGroundCollider,
-                    _contactShadow,
-                    _collider,
-                    _targetRoot,
-                    _report,
-                    _supportSurface,
-                    entryContext))
+                bool opportunityWasActive = FormalStanceContactActive;
+                bool leftReleaseProbe = _traceEnabled && LandingObservationTiming.Run.LeftReleaseProbe && _report.Side == "LEFT";
+                int leftPriorSupport = leftReleaseProbe && opportunityWasActive ? _contactShadow.AuthorizedColliderId : 0;
+                LeftFootReleaseForecast.Frame leftFrame = default;
+                if (leftReleaseProbe && float.IsFinite(sampleAge) && sampleAge >= 0f && sampleAge <= FootContactGeometryLimits.RecoveryMaxSourceAgeSeconds &&
+                    (_leftRelease?.NeedsFrame(LandingPhase(_gameNativeGaitPhase.State)) == true || (opportunityWasActive &&
+                    (_gameNativeGaitPhase.State != FootGameNativeLocomotionPhaseObserver.StateStance || !_gameNativeGaitPhase.CurrentStrongStanceSample))))
+                    leftFrame = CaptureLeftReleaseFrame(step, fixedSequence, lowerAnchorWorld, footAnchorWorld,
+                        lowerPointVelocity, footWorldRotation, legTurnEvidence, swingKnee);
+                bool opportunityEnabled = _traceEnabled && _stanceContactLifecycle.ContinuousEntry;
+                bool lifecycleOk;
+                using (LandingObservationTiming.Run.Measure(opportunityWasActive
+                    ? LandingObservationTiming.Stage.LifecycleActive : LandingObservationTiming.Stage.LifecycleInactive))
                 {
+                    lifecycleOk = _stanceContactLifecycle.Step(
+                        _traceEnabled,
+                        fixedSequence,
+                        step.Dt,
+                        _gameNativeGaitPhase.State,
+                        _gameNativeGaitPhase.CurrentStrongStanceSample,
+                        _report.ContactIdentityCurrentQualified,
+                        _report.ContactIdentityCurrentColliderInstanceId,
+                        _report.ContactIdentityCurrentColliderPath,
+                        _soleRequalification.CurrentGroundCollider,
+                        _contactShadow,
+                        _collider,
+                        _targetRoot,
+                        _report,
+                        _supportSurface,
+                        entryContext, _stanceContactFrictionIsolation);
+                }
+                if (!lifecycleOk)
+                {
+                    if (opportunityEnabled)
+                    {
+                        // A real missed stance may already have been counted before a failed native enable.
+                        if (_stanceContactLifecycle.FirstMissThisStep)
+                            ObserveLandingOpportunity(step, fixedSequence, sampleAge, anchorError, currentRelative,
+                                lowerAnchorWorld, footAnchorWorld, legTurnEvidence, opportunityWasActive, swingKnee, footWorldRotation, entryContext);
+                        if (LandingObservationTiming.Run.SwingProbe) _swingWindow.Cut();
+                        if (LandingObservationTiming.Run.EarlyProbe) { _earlyWindow.Cut(); _rightThigh?.Cut(); _rightFootForecast?.Cut(RightFootForecastWindow.Interruption.Fault); _rightFootLanding?.Cut(RightFootLandingWindow.End.Fault); }
+                        _landingOpportunity.Fault();
+                    }
                     _report.Finite = false;
                     return false;
                 }
 
+                if (opportunityEnabled)
+                    ObserveLandingOpportunity(step, fixedSequence, sampleAge, anchorError, currentRelative,
+                        lowerAnchorWorld, footAnchorWorld, legTurnEvidence, opportunityWasActive, swingKnee, footWorldRotation, entryContext);
+
                 // v0.4.1: exact-support contact shadow is the only low-level stage allowed to enable the Foot Collider.
                 // v0.4.7 only orchestrates this closed primitive by per-foot gait phase; the shadow still validates
                 // the authorized Collider object lifecycle and raycast identity every active FixedUpdate.
-                if (!_contactShadow.ObserveFixed(_traceEnabled, _report))
+                if (!_contactShadow.ObserveFixed(_traceEnabled, _report, !_stanceContactLifecycle.Precontact.Physical))
                 {
                     _report.Finite = false;
                     return false;
@@ -602,7 +647,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 if (!_stanceLowerGroundAuthority.Step(
                     _traceEnabled,
                     fixedSequence,
-                    _contactShadow.Active && _report.ContactShadowCurrentContactActive,
+                    FormalCallbackActive,
                     CurrentAuthorizedSupportNormalValid(),
                     _stanceContactFrictionIsolation.ZeroFriction,
                     _contactShadow.AuthorizedColliderId,
@@ -670,7 +715,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     _traceEnabled,
                     fixedSequence,
                     step.Dt,
-                    _contactShadow.Active && _report.ContactShadowCurrentContactActive && CurrentAuthorizedSupportNormalValid(),
+                    FormalCallbackActive && CurrentAuthorizedSupportNormalValid(),
                     _body,
                     _collider,
                     _ankleAngularTransport.CurrentTorqueWorld,
@@ -687,7 +732,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 // anything back into the plant. Observer validity is intentionally not part of Foot fail-close.
                 _mechanicalReaction.CapturePrePhysics(
                     _traceEnabled,
-                    _contactShadow.Active,
+                    FormalStanceContactActive,
                     _body,
                     step.Dt,
                     fixedSequence,
@@ -714,6 +759,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 }
 
                 _controlEvidence.CompleteController(fixedSequence);
+                CompleteRightFootLanding(step);
+                if (leftReleaseProbe)
+                    ObserveLeftRelease(step, fixedSequence, sampleAge, opportunityWasActive, leftPriorSupport,
+                        leftFrame, legTurnEvidence);
                 // V041210 exports existing strong/geometry evidence at the SAME completion boundary.
                 // Preparing a reference earlier does not enable a collider or qualify a load.
                 bool supportWitness = expectedDynamic && _stanceContactLifecycle.Enabled && _stanceContactLifecycle.Finite &&
@@ -753,7 +802,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             // Trace is diagnostic-only. Do NOT reset source pose/W/A or foot-velocity derivative history here:
             // those states feed the physical controller/parent-transport paths, so arl_trace(on) must not create
             // an artificial one/two-sample warm-up. Arm/drive/rollback transitions own physical-history resets.
-            _controlEvidence.Reset();
+            _controlEvidence.Reset(_report.RuntimeContext.Valid ? _report.FixedUpdateSequence : 0);
             _controlEvidence.Publish(_report);
             _report.PublishTurnResponse(_turnEvents.ResponseReceipt);
             _soleRequalification.ResetTrace(_report);
@@ -766,8 +815,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _supportEntityBoundary.ResetTrace(_report);
             _stanceSupportAngular.ResetTrace(_report);
             _footVelocitySolver.ResetTrace(_report);
-            _gameNativeGaitPhase.ResetTrace(_report);
+            _gameNativeGaitPhase.ResetTrace(_report, _stanceContactLifecycle.Enabled);
             _stanceContactLifecycle.ResetTrace(_report);
+            _landingOpportunity.Reset();
+            _leftRelease = null;
+            _parentHeight = null; _rightAnkle = null; _rightThigh = null; _rightFootForecast = null; _rightFootLanding = null;
+            _swingWindow.Reset(); _earlyWindow.Reset(); _swingObserved = _earlyObserved = false;
+            _report.LandingOpportunitySummary = "TRACE_ACTIVE_SUMMARY_AT_STOP";
 
             _stanceLowerGroundAuthority.ResetTrace(_report);
             _stanceFootNativeGravity.ResetTrace(_report);
@@ -795,6 +849,23 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _footVelocitySolver.CopyToReport(_report);
             _gameNativeGaitPhase.EndTrace(_report);
             _stanceContactLifecycle.EndTrace(_report);
+            _landingOpportunity.Seal();
+            _report.LandingOpportunitySummary = _landingOpportunity.Summary() + _stanceContactLifecycle.Precontact.Summary() + (_earlyObserved ? _earlyWindow.Summary() + _swingWindow.Summary(early: true) : _swingObserved ? _swingWindow.Summary() : "");
+
+            if (_leftRelease != null)
+            {
+                _leftRelease.Seal();
+                _report.LandingOpportunitySummary += _leftRelease.Summary();
+            }
+            if (_earlyObserved && _report.Side=="RIGHT")
+            {
+                _report.LandingOpportunitySummary += (_rightAnkle ?? new RightAnkleWindow()).Summary();
+                _report.LandingOpportunitySummary += (_rightThigh ?? new RightThighWindow()).Summary();
+                _report.LandingOpportunitySummary += (_rightFootForecast ?? new RightFootForecastWindow()).Summary();
+                _report.LandingOpportunitySummary += (_rightFootLanding ?? new RightFootLandingWindow()).Summary();
+            }
+            if (_earlyObserved && _report.Side=="LEFT")
+                _report.LandingOpportunitySummary += _parentHeight?.Summary() ?? ParentHeightProbe.Trace.EmptySummary;
 
             _stanceLowerGroundAuthority.EndTrace(_report);
             _stanceFootNativeGravity.EndTrace(_report);
@@ -813,6 +884,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (!IsBuilt || _body == null)
                 return;
             _contactShadow.DisablePreserveTrace(_report);
+            _stanceContactLifecycle.ContactDisabled(_report);
             _body.isKinematic = true;
             _body.useGravity = false;
             if (_collider != null) _collider.enabled = false;
@@ -984,7 +1056,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             get
             {
                 if (!IsBuilt) return FreeSpaceBoundaryIssue.MissingFoundation;
-                if (_loadAdmission.Selected || _groundReference.Enabled || _stanceContactLifecycle.Enabled || _stanceContactLifecycle.ContinuousEntry || _stanceContactLifecycle.EntryRecovery || !_stanceContactLifecycle.Finite ||
+                if (_groundReference.KneeProgressSelected || _relativeReference.GroundTrajectorySelected || _loadAdmission.Selected || _groundReference.Enabled || _stanceContactLifecycle.Enabled || _stanceContactLifecycle.ContinuousEntry || _stanceContactLifecycle.EntryRecovery || !_stanceContactLifecycle.Finite ||
                     _contactShadow.Arm != FootQualifiedContactShadow.ArmA || _contactShadow.Active || !_contactShadow.Finite)
                     return FreeSpaceBoundaryIssue.ContactAuthorization;
                 if (_stanceContactFrictionIsolation.Arm != FootStanceContactFrictionIsolation.ArmA || !_stanceContactFrictionIsolation.Finite)
@@ -1156,31 +1228,43 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             return ready;
         }
 
+        // A precontact callback is a real collision. Only a later formal ENTER/STAY can seed stance loading.
+        private bool FormalCallbackActive => FormalStanceContactActive && !_stanceContactLifecycle.AwaitingFormalCallback && _report.ContactShadowCurrentContactActive;
+        private bool FormalStanceContactActive => _contactShadow.Finite && _contactShadow.Active && !_stanceContactLifecycle.Precontact.Physical;
         internal bool ContactEntryContinuous => _stanceContactLifecycle.ContinuousEntry;
         internal bool ContactEntryRecovery => _stanceContactLifecycle.EntryRecovery;
-        internal void SelectContactEntryContinuous(bool enabled, bool recovery = false, bool groundReference = false, bool partialGround = false, bool loadAdmission = false)
+        internal void SelectContactEntryContinuous(bool enabled, bool recovery = false, bool groundReference = false, bool partialGround = false, bool loadAdmission = false, bool footTrajectory = false, bool footKneeProgress = false, RightFootPrecontact.Mode precontact = RightFootPrecontact.Mode.Off)
         {
             if (_traceEnabled || _collider == null || _collider.enabled || _contactShadow.Active)
                 throw new InvalidOperationException("CONTACT_ENTRY_SELECTION_REQUIRES_QUIESCED_TRACE_OFF");
             if (loadAdmission && !enabled) throw new InvalidOperationException("LOAD_ADMISSION_REQUIRES_CONTINUOUS_CONTACT");
             _stanceContactLifecycle.SelectContinuousEntry(enabled, _report, recovery);
+            _stanceContactLifecycle.Precontact.Select(RightFootPrecontact.ForFoot(
+                enabled && loadAdmission ? precontact : RightFootPrecontact.Mode.Off, _report.Side));
             _loadAdmission.Select(loadAdmission);
+            if (footKneeProgress && !footTrajectory)
+                throw new InvalidOperationException("KNEE_PROGRESS_REQUIRES_COMMON_FOOT_TRAJECTORY");
+            if (footTrajectory && (!enabled || !groundReference || !partialGround))
+                throw new InvalidOperationException("FOOT_GROUND_TRAJECTORY_REQUIRES_JOINT_CONTACT_INPUT");
             _groundReference.Select(enabled, groundReference, partialGround); ClearKneeFootGroundPacket();
+            _relativeReference.SelectGroundTrajectory(footTrajectory);
+            _groundReference.SelectKneeProgress(footKneeProgress);
             if (enabled) _groundReference.SeedInput(_report.RuntimeSourceContext, _sampledSourceRelative, _sampledSourceRelativeAngularVelocityLocal);
         }
 
         internal void SetStanceContactLifecycleEnabled(bool enabled)
         {
-            if (!enabled) { _groundReference.DisablePreserveTrace(); ClearKneeFootGroundPacket(); _loadAdmission.DisablePreserveTrace(); }
+            if (!enabled) { _groundReference.DisablePreserveTrace(); _relativeReference.DisableGroundTrajectoryPreserveTrace(); ClearKneeFootGroundPacket(); _loadAdmission.DisablePreserveTrace(); }
             if (!enabled)
                 _stanceFootNativeGravity.QuiescePreserveTrace(_body, _report, out _);
+            _gameNativeGaitPhase.ResetPhase();
             _stanceContactLifecycle.SetEnabled(enabled, _contactShadow, _collider, _report);
             UpdateStaticState();
         }
 
         internal void DisableStanceContactLifecycle()
         {
-            _groundReference.DisablePreserveTrace(); ClearKneeFootGroundPacket();
+            _groundReference.DisablePreserveTrace(); _relativeReference.DisableGroundTrajectoryPreserveTrace(); ClearKneeFootGroundPacket();
             _loadAdmission.DisablePreserveTrace();
             _stanceFootNativeGravity.QuiescePreserveTrace(_body, _report, out _);
             _stanceContactLifecycle.DisableAndReset(_contactShadow, _collider, _report);
@@ -1189,7 +1273,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         internal bool QuiesceStanceContactLifecyclePreserveTrace(out string error)
         {
-            _groundReference.DisablePreserveTrace(); ClearKneeFootGroundPacket();
+            _groundReference.DisablePreserveTrace(); _relativeReference.DisableGroundTrajectoryPreserveTrace(); ClearKneeFootGroundPacket();
             _loadAdmission.DisablePreserveTrace();
             _ankleConstraint.QuiesceStancePlanarDamping(_report);
             _stanceSupportAngular.ClearCurrentState(_report);
@@ -1211,19 +1295,42 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal void SetContactShadowArmA()
         {
             _contactShadow.SetArmA(_collider, _report);
+            if (_contactShadow.Finite) _stanceContactLifecycle.ContactDisabled(_report);
             UpdateStaticState();
         }
 
         internal int DisableContactShadowPreserveTrace()
         {
             int failures = _contactShadow.DisablePreserveTrace(_report);
+            if (failures == 0) _stanceContactLifecycle.ContactDisabled(_report);
             UpdateStaticState();
             return failures;
         }
 
         internal bool NotifyContactShadowCollision(string phase, Collision collision)
         {
-            bool ok = _contactShadow.NotifyCollision(phase, collision, _report);
+            bool ok = _contactShadow.NotifyCollision(phase, collision, _report, !_stanceContactLifecycle.Precontact.Physical);
+            var pre = _stanceContactLifecycle.Precontact;
+            if (ok && _contactShadow.LastCallbackWasAuthorized)
+            {
+                bool physicalPreview = pre.Physical;
+                int local = _report.FixedUpdateSequence;
+                int support = _contactShadow.AuthorizedColliderId;
+                if (phase == "ENTER" || phase == "STAY")
+                {
+                    if (physicalPreview || pre.NeedsFormalImpact(support))
+                    {
+                        Vector3? before = physicalPreview ? pre.PreSolveW : _mechanicalReaction.PreSolveAngularVelocity(local);
+                        float normalImpulse = float.NaN, deltaW = float.NaN;
+                        try { normalImpulse = collision.impulse.y; } catch { }
+                        try { if (before.HasValue) deltaW = (_body.angularVelocity - before.Value).magnitude; } catch { }
+                        if (physicalPreview) pre.Callback(local, support, normalImpulse, deltaW);
+                        else pre.FormalCallback(local, support, normalImpulse, deltaW);
+                    }
+                    if (FormalStanceContactActive) _stanceContactLifecycle.ObserveFormalCallback();
+                }
+                if (physicalPreview) { UpdateStaticState(); return true; }
+            }
             _supportEntityBoundary.ObserveCallbackCensus(_traceEnabled, _report.FixedUpdateSequence,
                 _contactShadow.LastCallbackWasAuthorized, ok);
             if (ok && _contactShadow.LastCallbackWasAuthorized)
@@ -1291,13 +1398,25 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             bool selfWeightTransferApplied,
             float selfWeightFootLoadAcceleration,
             SingleLegChainReport legReport, Vector3 kneeAppliedAcceleration, string sourceMotionPhase,
-            PelvisParentFrame dynamicParent, LegTurnStepEvidence legTurnEvidence, PelvisRunScope scope = PelvisRunScope.TorsoPairOnly)
+            PelvisParentFrame dynamicParent, LegTurnStepEvidence legTurnEvidence, PelvisRunScope scope = PelvisRunScope.TorsoPairOnly,
+            Rigidbody upperBody = null, bool upperWeightApplied = false)
         {
             if (!_report.RuntimeContext.Matches(step) || _report.FixedUpdateSequence != fixedSequence)
                 throw new InvalidOperationException("FOOT_PRE_SOLVE_CONTEXT_NOT_CURRENT");
             // Called by SingleLeg only after V04200, V04210 and Lower native-gravity scheduling have completed
             // for this Fixed step. Solver readback is a production contract; the joined ledger remains diagnostic-only.
             bool exactAuthorizedStance = ExactAuthorizedStanceSupportLoadEligible;
+            var precontact = _stanceContactLifecycle.Precontact;
+            if (precontact.Physical && !precontact.CheckUnloaded(fixedSequence,
+                exactAuthorizedStance || _loadAdmission.Eligible || _body.useGravity || _lowerBody.useGravity ||
+                upperBody == null || upperBody.useGravity || upperWeightApplied || selfWeightTransferApplied ||
+                _stanceFootNativeGravity.CurrentApplied || legReport.StanceLowerNativeGravityCurrentApplied ||
+                legReport.StanceFootLowerReciprocalCurrentApplied))
+            {
+                _report.Finite = false;
+                _report.Detail = "RIGHT_PRECONTACT_UNEXPECTED_SCHEDULED_LOAD";
+                return false;
+            }
             bool footGravityScheduled = _report.StanceFootNativeGravityCurrentApplied &&
                                         _report.StanceFootNativeGravityCurrentScheduledFixed == fixedSequence;
             _ankleConstraint.RecordStancePlanarDampingLoadedSolve(_traceEnabled, fixedSequence,
@@ -1330,7 +1449,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _supportEntityBoundary.CapturePreSolve(_traceEnabled, fixedSequence,
                 exactAuthorizedStance && footGravityScheduled && selfWeightTransferApplied &&
                 _body != null && !_body.isKinematic && _stanceContactFrictionIsolation.ZeroFriction,
-                _contactShadow.Active, _contactShadow.AuthorizedCollider, _collider, _body, _report);
+                FormalStanceContactActive, _contactShadow.AuthorizedCollider, _collider, _body, _report);
             return true;
         }
 

@@ -30,6 +30,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             internal Vector3 CommonMeasuredA, CommonRequestedA, CommonTau;
             internal Vector3 NextLowerW, NextFootW, LockedNextErrorWorld;
             internal Vector3 MeasuredLowerA, MeasuredFootA;
+            internal FootFixedStepEvidence PreparationBefore;
+            internal LandingPreparationResponse.Sample PreparationResponse;
+            internal LandingPreparationGeometry.Sample PreparationGeometry;
             internal LegTurnStepEvidence Leg;
             internal bool LegValid;
             internal SourceStepContext CommandSource;
@@ -59,6 +62,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             internal void Reset() { Count = TriggerSequence = Remaining = 0; Score = 0f; Collecting = false; }
         }
 
+        private readonly LandingPreparationResponse _preparationResponse = new LandingPreparationResponse();
         private readonly Frame[] _ring = new Frame[Before];
         private readonly Window _peak = new Window(), _normalHip = new Window(), _hipPeak = new Window();
         private int _next, _count, _captured, _resolved, _censored, _invalid, _gaps, _normalHipCandidates;
@@ -78,6 +82,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal void Reset(PelvisRunScope scope = PelvisRunScope.DynamicLegFreeSpace)
         {
             _traceScope = scope;
+            _preparationResponse.Reset();
             ResetStepProgress();
             ResetHipWitness();
             ResetHipScope();
@@ -154,7 +159,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 f.LegValid = leg.Matches(step, f.Fixed) && leg.Source.Matches(report.RuntimeSourceContext);
                 if (f.LegValid)
                 {
-                    f.Leg = leg; _legCaptured++;
+                    f.Leg = leg; f.PreparationBefore = report.CurrentObservedStep; _legCaptured++;
                     if (leg.RawWorldWValid) _legRawWValid++;
                 }
                 else _legUnavailable++;
@@ -189,6 +194,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     f.ConditionerHigh = conditioner.CurrentRawHigh;
                     f.ConditionerConfirmed = conditioner.CurrentConfirmed;
                 }
+                try { if (f.LegValid && f.Leg.LandingPreparation.Applied)
+                    f.PreparationGeometry = LandingPreparationGeometry.Build(f.Leg.LandingPreparation,
+                        f.Leg.LandingInput, f.PreparationBefore, f.LowerR, f.FootR, f.SourceRelR); }
+                catch { _preparationResponse.Fault(); }
                 RecordConditionerWitness(f);
                 RecordReferenceWitness(f);
                 try { CaptureHipWitness(ref f); }
@@ -228,6 +237,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 catch { f.Progress = new StepProgress(); _progressFailures++; }
                 try { f.HipResponse = ResolveHipProgress(f, step, nextSource, nextLeg, observed.FixedSequence); }
                 catch { f.HipResponse = new HipProgress(); _hipResponseFailures++; }
+                try { if (f.LegValid && f.Leg.LandingPreparation.Applied)
+                    f.PreparationResponse = LandingPreparationResponse.Measure(f.Leg.LandingPreparation, f.PreparationBefore, f.FootR, step, observed, nextFootR, f.PreparationGeometry); }
+                catch { _preparationResponse.Fault(); }
                 Record(f);
             }
             catch { _invalid++; CensorPending(); BreakContinuity(); }
@@ -254,6 +266,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         private void Record(Frame f)
         {
+            try { if (f.LegValid) _preparationResponse.Observe(f.Leg.LandingPreparation, f.Resolved, f.PreparationResponse); }
+            catch { _preparationResponse.Fault(); }
             Append(_peak, f); Append(_normalHip, f); Append(_hipPeak, f);
             // Both arms retain the worst RAW-animation local error. A smoother control goal must
             // not move the only peak window away from the largest remaining animation mismatch.
@@ -307,6 +321,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             AppendReferenceSummary(sb);
             AppendHipSummary(sb);
             AppendHipScopeSummary(sb);
+            sb.AppendLine(_preparationResponse.Summary());
             if (compact)
             {
                 AppendCompactWindows(sb);

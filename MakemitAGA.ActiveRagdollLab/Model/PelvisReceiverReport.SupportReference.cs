@@ -17,6 +17,10 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         private PelvisComReferencePlanner.ComPlan _supportApproachPeakPlan;
         private PhysicsStepContext _supportPeakStep;
         private PhysicsStepContext _supportApproachPeakStep;
+        private int _supportBrakeSelected, _supportBrakeAdvanced, _supportBrakeResidual;
+        private float _supportBrakeAdvancePeak, _supportBrakeResidualPeak;
+        private PelvisComReferencePlanner.ComPlan _supportBrakePeakPlan;
+        private PhysicsStepContext _supportBrakePeakStep;
 
         internal void ResetSupportReference()
         {
@@ -29,6 +33,9 @@ namespace MakemitAGA.ActiveRagdollLab.Model
             _supportApproachUnderPeak = 0f;
             _supportPeakPlan = default; _supportPeakStep = default;
             _supportApproachPeakPlan = default; _supportApproachPeakStep = default;
+            _supportBrakeSelected = _supportBrakeAdvanced = _supportBrakeResidual = 0;
+            _supportBrakeAdvancePeak = _supportBrakeResidualPeak = 0f;
+            _supportBrakePeakPlan = default; _supportBrakePeakStep = default;
         }
         internal void RecordSupportReference(PelvisComReferencePlanner.ComPlan plan, PhysicsStepContext step)
         {
@@ -38,6 +45,15 @@ namespace MakemitAGA.ActiveRagdollLab.Model
             if ((plan.SupportInput.StanceMask & 1) != 0) _supportPrimary++;
             if ((plan.SupportInput.StanceMask & 2) != 0) _supportSecondary++;
             if (plan.SupportFloorSelected) _supportSelected++;
+            if (plan.SupportBrakingSelected) _supportBrakeSelected++;
+            float advance = plan.SupportBrakingExtraY * step.Dt;
+            if (advance > .000001f) _supportBrakeAdvanced++;
+            if (plan.SupportBrakingFinalResidual > .000001f) _supportBrakeResidual++;
+            _supportBrakeResidualPeak = System.Math.Max(_supportBrakeResidualPeak, plan.SupportBrakingFinalResidual);
+            if (advance > _supportBrakeAdvancePeak)
+            {
+                _supportBrakeAdvancePeak = advance; _supportBrakePeakPlan = plan; _supportBrakePeakStep = step;
+            }
             if (plan.SupportCandidateDeltaY > 0f) _supportRaised++;
             // A nonzero float is not necessarily a useful preparation. This is an
             // evidence threshold on candidate displacement, never a control gate.
@@ -91,11 +107,22 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                 .Append("/floor=HELD_CALIBRATED_ANIMATION_PELVIS_ORIGIN_PLUS_CURRENT_REFERENCE_COM_OFFSET")
                 .Append("/bounds=EXISTING_VECTOR_V3_A6/feedback=ORIGINAL_DEFICIT_AND_PHYSICAL_BRAKE_AFTER_CANDIDATE")
                 .Append("/scope=HORIZONTAL_OWNED_BOX/groundFeasibilityCertified=False");
+            sb.Append("/supportReferenceBraking=V041360/selected-advanced-finalResidual=").Append(_supportBrakeSelected)
+                .Append('|').Append(_supportBrakeAdvanced).Append('|').Append(_supportBrakeResidual)
+                .Append("/brakingPeak(candidateAdvanceMm-finalResidualMm)=").Append(F(_supportBrakeAdvancePeak * 1000f))
+                .Append('|').Append(F(_supportBrakeResidualPeak * 1000f))
+                .Append("/brakingModel=HELD_FLOOR_REFERENCE_ONLY_FULL_A6_RESERVE_NOT_BODY_CAPABILITY")
+                .Append("/advanced=PRE_FEEDBACK_CANDIDATE_DELTA_Y_TIMES_DT_GT_0.001MM");
             if (_supportPeakStep.Valid) AppendSupportReference(sb, _supportPeakPlan, _supportPeakStep);
             if (_supportApproachPeakStep.Valid)
             {
                 sb.Append("/approachOnlyPeak");
                 AppendSupportReference(sb, _supportApproachPeakPlan, _supportApproachPeakStep);
+            }
+            if (_supportBrakePeakStep.Valid)
+            {
+                sb.Append("/brakingAdvancePeak");
+                AppendSupportReference(sb, _supportBrakePeakPlan, _supportBrakePeakStep);
             }
             return sb.ToString();
         }
@@ -111,7 +138,13 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                 .Append('|').Append(F(plan.SupportCandidateDeltaY)).Append('|').Append(F(plan.SupportRemainingUnderY * 1000f))
                 .Append("/normalBudgetV041220(priority-brakingKept-extraDeltaY-tangentDeltaV-candidateUnderMm)=")
                 .Append(plan.SupportNormalPrioritySelected).Append('|').Append(plan.SupportTangentBrakingPreserved).Append('|')
-                .Append(F(plan.SupportPriorityExtraY)).Append('|').Append(F(plan.SupportTangentDeltaV)).Append('|').Append(F(plan.SupportCandidateUnderY * 1000f));
+                .Append(F(plan.SupportPriorityExtraY)).Append('|').Append(F(plan.SupportTangentDeltaV)).Append('|').Append(F(plan.SupportCandidateUnderY * 1000f))
+                .Append("/supportBrakingV041360(selected-minV-extraV-baselineCandidateResidualMm-finalResidualMm)=")
+                .Append(plan.SupportBrakingSelected).Append('|').Append(F(plan.SupportBrakingMinimumY)).Append('|')
+                .Append(F(plan.SupportBrakingExtraY)).Append('|').Append(F(plan.SupportBrakingBaselineResidual * 1000f)).Append('|')
+                .Append(F(plan.SupportBrakingFinalResidual * 1000f))
+                .Append("/brakingReference(pY-vY-aY-candidateAy)=").Append(F(plan.Position.y)).Append('|')
+                .Append(F(plan.Velocity.y)).Append('|').Append(F(plan.Acceleration.y)).Append('|').Append(F(plan.CandidateA.y));
         }
     }
 }
