@@ -9,14 +9,25 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     {
         private sealed class LeadEvent
         {
-            internal int Origin, Upper, Lower, Foot, FormalLocal;
+            internal int Origin;
             internal Lead.Step Last;
-            internal string End, Formal, MissOutcome;
+            internal string End;
+        }
+
+        // All prospective windows from one release share the same real landing.
+        private sealed class ContactLink
+        {
+            internal int Upper, Lower, Foot, FormalLocal;
+            internal string Formal, MissOutcome;
         }
         private int _leadRequests, _leadStarted, _leadVertical, _leadOrdinary, _leadRecovery;
         private readonly int[] _leadPaired = new int[Lead.Length];
-        internal bool WatchingLeadFormal => _open?.Lead != null;
-        private bool FollowingLead => WatchingLeadFormal && _open.Lead.End == null;
+        internal bool WatchingReleaseContact => _open?.Contact != null;
+        private bool FollowingLead => _open?.Lead != null && _open.Lead.End == null;
+        private void WatchContact(in Foot.Frame f)
+        {
+            _open.Contact ??= new ContactLink { Upper = f.UpperId, Lower = f.LowerId, Foot = f.FootId };
+        }
 
         private void IssueLead(Row r)
         {
@@ -34,8 +45,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             }
             if (e == null)
             {
-                _open.Lead = e = new LeadEvent { Origin = s.Origin, Upper = r.Before.UpperId,
-                    Lower = r.Before.LowerId, Foot = r.Before.FootId };
+                WatchContact(r.Before);
+                _open.Lead = e = new LeadEvent { Origin = s.Origin };
                 _leadStarted++;
             }
             e.Last = s;
@@ -47,7 +58,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (!FollowingLead) return;
             using var cost = LandingObservationTiming.Run.Measure(LandingObservationTiming.Stage.LeftFootLead);
             var e = _open.Lead;
-            if (r.Lead == null || r.Lead != e.Last || !r.ShinPaired || next.UpperId != e.Upper)
+            if (r.Lead == null || r.Lead != e.Last || !r.ShinPaired || next.UpperId != _open.Contact.Upper)
             {
                 e.End = "MissingAdjacentReceipt";
                 return;
@@ -66,10 +77,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (FollowingLead) _open.Lead.End = reason;
         }
 
-        private void LeadOutcome(in Tick t)
+        private void ContactOutcome(in Tick t)
         {
-            if (!WatchingLeadFormal) return;
-            var e = _open.Lead;
+            if (!WatchingReleaseContact) return;
+            var e = _open.Contact;
             bool sameFormal = t.Active && t.EventSupport == t.Support && t.FormalFoot == e.Foot &&
                 t.FormalLower == e.Lower && t.FormalUpper == e.Upper;
             if (_open.Landing == "FirstMiss" && e.MissOutcome == null)
@@ -82,7 +93,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (!sameFormal) { e.Formal = "UnverifiedFormal"; return; }
             e.FormalLocal = t.Local;
             e.Formal = t.Recovery ? "Recovery" : "Ordinary";
-            if (t.Recovery) _leadRecovery++; else _leadOrdinary++;
+            if (_open.Lead != null)
+            {
+                if (t.Recovery) _leadRecovery++; else _leadOrdinary++;
+            }
         }
 
         private void AppendLeadSummary(StringBuilder b)
@@ -99,8 +113,14 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (e == null) return;
             b.Append("\nLEFT_FOOT_LEAD_EVENT_V041660/epoch-support-release-origin=").Append(r.Origin.Step.Epoch).Append('|')
                 .Append(r.Origin.ReleasedSupport).Append('|').Append(r.Origin.Local).Append('|').Append(e.Origin)
-                .Append("/sequenceEnd=").Append(e.End ?? "Pending")
-                .Append("/firstLanding-local=").Append(r.Landing ?? "Pending").Append('|').Append(r.LandingLocal)
+                .Append("/sequenceEnd=").Append(e.End ?? "Pending");
+            AppendActualContact(b,r);
+        }
+
+        private static void AppendActualContact(StringBuilder b, Release r)
+        {
+            var e = r.Contact;
+            b.Append("/firstLanding-local=").Append(r.Landing ?? "Pending").Append('|').Append(r.LandingLocal)
                 .Append("/firstMissOutcome=").Append(e.MissOutcome ?? "NA")
                 .Append("/actualFirstFormal-local=").Append(e.Formal ?? "Pending").Append('|').Append(e.FormalLocal);
         }

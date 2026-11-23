@@ -62,6 +62,8 @@ namespace MakemitAGA.ActiveRagdollLab.Model
                 if (!s.Matches(f.MotionNextStep) || !FiniteValue(m.PdA.y) ||
                     Math.Abs(s.P + s.D - m.PdA.y) > 0.0001f * (1f + Math.Abs(m.PdA.y)))
                 { _normalMissing++; return; }
+                if (LandingObservationTiming.Run.Transitions?.WantsLeftHeight == true)
+                    s.CaptureSupportBraking(m.ComReference, m.ComReferenceStep);
                 _normalLatest = s;
                 float abs = Math.Abs(s.ErrorY);
                 _normalSamples++; _normalAbsErrorSum += abs;

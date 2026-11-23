@@ -5,11 +5,14 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 {
     internal sealed partial class HipAnchorTranslationPair
     {
-        private bool CanCommit(HipAnchorPairReport.Command c)
+        private bool CanCommit(HipAnchorPairReport.Command c) =>
+            _staged && !Report.CurrentApplied && ValidateSnapshot(c, _input.Seed.ParentInput);
+
+        private bool ValidateSnapshot(in HipAnchorPairReport.Command c, in PelvisHipCommandFrame frame)
         {
-            if (!_staged || !Report.Selected || !Report.Finite || !_input.Ready || !c.JointSolved || Report.CurrentApplied ||
+            if (!Report.Selected || !Report.Finite || !_input.Ready || !c.JointSolved ||
                 !c.Step.Matches(_input.Seed.Step) || c.Fixed != _input.Seed.Fixed || c.ChildId != Report.ChildId || c.ParentId != Report.ParentId ||
-                !c.ParentInput.SameAs(_input.Seed.ParentInput) || !Same(c.PureHipTorque, _input.PureTorque) ||
+                !c.ParentInput.SameAs(frame) || !Same(c.PureHipTorque, _input.PureTorque) ||
                 !Same(c.ChildCom, _input.Seed.ChildCom) || !Same(c.ParentCom, _input.Seed.ParentCom) ||
                 !Same(c.ChildPoint, _input.Seed.ChildPoint) || !Same(c.ParentPoint, _input.Seed.ParentPoint) ||
                 _child == null || _parent == null || _child.isKinematic || _parent.isKinematic || _parent.useGravity ||

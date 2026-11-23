@@ -53,8 +53,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             var c = right.Report.Current;
             if (!leg.Matches(step, req.Local) || !leg.Source.Matches(req.Source) || !leg.KneeHeightsValid || !leg.UpperAnchorsValid ||
                 !kneeTransport || !c.JointSolved || input.Seed.Fixed != req.Local || c.Fixed != req.Local ||
-                !RightThighTracking.Same(leg.HipFinalA, c.AllocatedHipAlpha) ||
-                !RightThighTracking.Same(leg.KneeTotalA, leg.KneeRelativeA + leg.HipFinalA))
+                !leg.KneeAngular.Matches(kneeTransport, leg.HipFinalA, c.AllocatedHipAlpha, leg.KneeRelativeA, leg.KneeTotalA))
                 return new Forecast.Result { State = Forecast.Status.MissingLeg };
             if (upper == null || _lowerBody == null || _body == null || _body.isKinematic || _body.GetInstanceID() != req.Body ||
                 upper.GetInstanceID() != input.Seed.ChildId || c.ChildId != input.Seed.ChildId ||
@@ -66,7 +65,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 return new Forecast.Result { State = Forecast.Status.Geometry };
             var m = new RightThighTracking.Motion {
                 UpperMaxW = upper.maxAngularVelocity, LowerMaxW = _lowerBody.maxAngularVelocity,
-                LowerW = _lowerBody.angularVelocity, KneeRelativeA = leg.KneeRelativeA,
+                LowerW = _lowerBody.angularVelocity, KneeRelativeA = leg.KneeRelativeA, KneeAngular = leg.KneeAngular,
                 KneeGapV = _lowerBody.GetPointVelocity(p.LowerKnee) - upper.GetPointVelocity(p.UpperKnee),
                 AnkleGapV = _body.GetPointVelocity(p.FootAnkle) - _lowerBody.GetPointVelocity(p.LowerAnkle)
             };

@@ -30,12 +30,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     {
         internal const string Mode = "GAME_NATIVE_LOCOMOTION_STANCE_SWING_PHASE_QUALIFICATION_V0450";
 
-        internal const float StanceMaxAbsClearanceMeters = 0.030f;
-        internal const float SwingMinAbsClearanceMeters = 0.055f;
-        internal const float StanceMaxTangentialSpeed = 0.35f;
-        internal const float StanceMaxNormalSpeed = 0.22f;
-        internal const float SwingMinTangentialSpeed = 0.65f;
-        internal const float SwingMinNormalSpeed = 0.30f;
+        internal const float StanceMaxAbsClearanceMeters = FootGaitEvidence.StanceHeight;
+        internal const float SwingMinAbsClearanceMeters = FootGaitEvidence.SwingHeight;
+        internal const float StanceMaxTangentialSpeed = FootGaitEvidence.StanceTangent;
+        internal const float StanceMaxNormalSpeed = FootGaitEvidence.StanceNormal;
+        internal const float SwingMinTangentialSpeed = FootGaitEvidence.SwingTangent;
+        internal const float SwingMinNormalSpeed = FootGaitEvidence.SwingNormal;
         internal const float PhaseConfirmSeconds = 0.050f;
         internal const int MinTraceSamples = 180;
         internal const int MinStanceSamples = 30;
@@ -62,7 +62,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private int _swingEntries;
         private int _stanceToSwingTransitions;
         private int _swingToStanceTransitions;
-        private int _ambiguousSamples;
         private int _noHitSamples;
         private int _fullFootprintSamples;
         private int _sameSurfaceSamples;
@@ -89,6 +88,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private int _stanceSurfaceSwitches;
         private bool _currentStrongStanceSample;
 
+        internal FootGaitEvidence CurrentEvidence { get; private set; }
         internal int CurrentPhaseFixed { get; private set; }
         internal string State => _state;
         internal bool CurrentStrongStanceSample => _currentStrongStanceSample;
@@ -101,6 +101,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _lastReason = "<none>";
             ClearCandidate();
             CurrentPhaseFixed = 0;
+            CurrentEvidence = default;
             _currentStrongStanceSample = false;
         }
 
@@ -117,7 +118,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _swingEntries = 0;
             _stanceToSwingTransitions = 0;
             _swingToStanceTransitions = 0;
-            _ambiguousSamples = 0;
             _noHitSamples = 0;
             _fullFootprintSamples = 0;
             _sameSurfaceSamples = 0;
@@ -163,6 +163,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 ClearCandidate();
             }
             CurrentPhaseFixed = 0;
+            CurrentEvidence = default;
             _currentStrongStanceSample = false;
             if (!traceEnabled && !controlActive)
             {
@@ -218,23 +219,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 if (footprintSameSurface) _sameSurfaceSamples++;
             }
 
-            bool strongStance = groundHitCount == 5 && footprintSameSurface &&
-                                clearanceAbs <= StanceMaxAbsClearanceMeters &&
-                                normalSpeedAbs <= StanceMaxNormalSpeed &&
-                                tangentialSpeed <= StanceMaxTangentialSpeed;
-            bool strongSwing = groundHitCount == 0 ||
-                               clearanceAbs >= SwingMinAbsClearanceMeters ||
-                               normalSpeedAbs >= SwingMinNormalSpeed ||
-                               tangentialSpeed >= SwingMinTangentialSpeed;
-
-            // If both become true because a render-sampled velocity spike occurs exactly while all five probes are
-            // still close to the floor, classify it as transition evidence rather than forcing either endpoint.
-            if (strongStance && strongSwing)
-            {
-                strongStance = false;
-                strongSwing = false;
-                if (qualificationSampleEligible) _ambiguousSamples++;
-            }
+            CurrentEvidence = new FootGaitEvidence(groundHitCount, footprintSameSurface, groundColliderInstanceId,
+                clearanceAbs, normal, normalSpeed, tangentialSpeed);
+            bool strongStance = CurrentEvidence.Stance;
+            bool strongSwing = CurrentEvidence.Swing != FootGaitEvidence.Trigger.None;
             _currentStrongStanceSample = strongStance;
 
             if (strongStance)
@@ -462,7 +450,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 "/samples(S-W-T-U)=" + _stanceSamples + "-" + _swingSamples + "-" + _transitionSamples + "-" + _unknownSamples +
                 "/entries(S-W)=" + _stanceEntries + "-" + _swingEntries +
                 "/transitions(SW-WS)=" + _stanceToSwingTransitions + "-" + _swingToStanceTransitions +
-                "/ambiguous=" + _ambiguousSamples +
+                "/ambiguous=0" +
                 "/hits(no-full-same)=" + _noHitSamples + "-" + _fullFootprintSamples + "-" + _sameSurfaceSamples +
                 "/firstFixed(S-W-lastT)=" + _firstStanceFixed + "-" + _firstSwingFixed + "-" + _lastTransitionFixed +
                 "/stanceVtanMeanMax=" + F(report.GameNativeGaitStanceTangentialSpeedMean) + "-" + F(_stanceTangentialSpeedMax) +

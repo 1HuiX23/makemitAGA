@@ -160,7 +160,15 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             }
             // Publish the new identity only after its required payload is valid. A bad
             // source frame must not relabel the previous held Foot pose as a fresh sample.
-            if (advance) _report.RuntimeSourceContext = source;
+            if (advance)
+            {
+                var previous = _report.RuntimeSourceContext;
+                float elapsed = source.Time - previous.Time;
+                _pulseSourceReady = previous.Valid && source.Epoch == previous.Epoch && source.Sequence == previous.Sequence + 1 &&
+                    elapsed > .0001f && elapsed < .25f;
+                if (!_pulseSourceReady) _pulseSourceContinuity++;
+                _report.RuntimeSourceContext = source;
+            }
             if (!advance)
             {
                 // Preview/reset snapshots are not new Render packets. Preserve all W/A,
@@ -186,6 +194,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _sampledFootPosition = footPosition;
             _sampledFootRotation = sampledSoleRotation;
             _sampledFootLinearVelocityWorld = IsFinite(footLinearVelocity) ? footLinearVelocity : Vector3.zero;
+            var transitionTrace = LandingObservationTiming.Run.Transitions;
+            if (transitionTrace != null) CaptureTransitionSource(transitionTrace, source, footPosition, sampledSoleRotation);
             _sampledSourceRelative = relative;
             if (advance) _turnEvents.ObserveSource(source, sampledSoleRotation);
 
@@ -501,8 +511,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     // Both rotations use this physical Lower read and the held Render packet above.
                     // The selected control minimum also scores expiry. This uses the held packet, without reading live source transforms.
                     Quaternion entryLowerRotation = _lowerBody.rotation;
+                    Quaternion entryFootRelative = ControlRelativeRotation;
                     entryContext = FootStanceOnlyAuthorizedContactLifecycle.CaptureEntryContext(fixedSequence, _body,
-                        lowerAnchorWorld, _footAnkleAnchorLocal, entryLowerRotation * ControlRelativeRotation,
+                        lowerAnchorWorld, _footAnkleAnchorLocal, entryLowerRotation * entryFootRelative,
                         _sampledFootPosition, _sampledFootRotation, anchorError, sampleAge, _sampledSourceRelative, entryLowerRotation);
                     entryContext.CurrentGait = _gameNativeGaitPhase.CurrentPhaseFixed == fixedSequence;
                     entryContext.FootAnchorY = footAnchorWorld.y;
@@ -517,19 +528,25 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     if (FullLandingReferenceRequested(legTurnEvidence.LandingPreparation.Applied))
                     {
                         using var measurement = LandingObservationTiming.Run.Measure(LandingObservationTiming.Stage.FootPathBuild);
-                        entryContext.LandingPath = CaptureLandingReference(step, fixedSequence, legTurnEvidence, entryLowerRotation);
+                        entryContext.LandingPath = CaptureLandingReference(step, fixedSequence, legTurnEvidence, entryLowerRotation, entryFootRelative);
                         if (legTurnEvidence.Matches(step, fixedSequence) && legTurnEvidence.ReceiverNormalResponse.Matches(step))
                             entryContext.ReceiverNormalResponse = legTurnEvidence.ReceiverNormalResponse;
                     }
                 }
                 bool opportunityWasActive = FormalStanceContactActive;
                 bool leftReleaseProbe = _traceEnabled && LandingObservationTiming.Run.LeftReleaseProbe && _report.Side == "LEFT";
-                int leftPriorSupport = leftReleaseProbe && opportunityWasActive ? _contactShadow.AuthorizedColliderId : 0;
+                var transitionTrace = _traceEnabled ? LandingObservationTiming.Run.Transitions : null;
+                int priorSupport = opportunityWasActive ? _contactShadow.AuthorizedColliderId : 0;
+                _formalBeforePulse = opportunityWasActive;
+                _pulsePriorFloor = priorSupport;
+                _pulseAnkle = footAnchorWorld;
+                _pulseRotation = footWorldRotation;
+                _pulseAge = sampleAge;
                 LeftFootReleaseForecast.Frame leftFrame = default;
                 if (leftReleaseProbe && float.IsFinite(sampleAge) && sampleAge >= 0f && sampleAge <= FootContactGeometryLimits.RecoveryMaxSourceAgeSeconds &&
                     (_leftRelease?.NeedsFrame(LandingPhase(_gameNativeGaitPhase.State)) == true || (opportunityWasActive &&
                     (_gameNativeGaitPhase.State != FootGameNativeLocomotionPhaseObserver.StateStance || !_gameNativeGaitPhase.CurrentStrongStanceSample))))
-                    leftFrame = CaptureLeftReleaseFrame(step, fixedSequence, lowerAnchorWorld, footAnchorWorld,
+                    leftFrame = CaptureReleaseFrame(step, fixedSequence, lowerAnchorWorld, footAnchorWorld,
                         lowerPointVelocity, footWorldRotation, legTurnEvidence, swingKnee);
                 bool opportunityEnabled = _traceEnabled && _stanceContactLifecycle.ContinuousEntry;
                 bool lifecycleOk;
@@ -761,8 +778,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _controlEvidence.CompleteController(fixedSequence);
                 CompleteRightFootLanding(step);
                 if (leftReleaseProbe)
-                    ObserveLeftRelease(step, fixedSequence, sampleAge, opportunityWasActive, leftPriorSupport,
+                    ObserveLeftRelease(step, fixedSequence, sampleAge, opportunityWasActive, priorSupport,
                         leftFrame, legTurnEvidence);
+                if (transitionTrace != null)
+                    CaptureTransitionStep(transitionTrace, step, fixedSequence, fresh, heldDepth, sampleAge, opportunityWasActive,
+                        priorSupport, footAnchorWorld, lowerAnchorWorld, footPointVelocity, footWorldRotation, legTurnEvidence);
                 // V041210 exports existing strong/geometry evidence at the SAME completion boundary.
                 // Preparing a reference earlier does not enable a collider or qualify a load.
                 bool supportWitness = expectedDynamic && _stanceContactLifecycle.Enabled && _stanceContactLifecycle.Finite &&
@@ -1318,6 +1338,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 int support = _contactShadow.AuthorizedColliderId;
                 if (phase == "ENTER" || phase == "STAY")
                 {
+                    LandingObservationTiming.Run.Transitions?.NoteContact(TransitionSide, _report.RuntimeContext, local, support, physicalPreview);
                     if (physicalPreview || pre.NeedsFormalImpact(support))
                     {
                         Vector3? before = physicalPreview ? pre.PreSolveW : _mechanicalReaction.PreSolveAngularVelocity(local);

@@ -12,8 +12,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         // Ordinary entry stays at 2 mm. Recovery's 3 mm / 150 ms are experimental, not a safety certification.
         // No pose correction, force, new raycast or authority outside confirmed strong STANCE.
         internal const float ContinuousIdentityHoldSeconds = FootGameNativeLocomotionPhaseObserver.PhaseConfirmSeconds;
-        internal const float MaxEntryPenetrationMeters = FootContactGeometryLimits.OrdinaryPenetrationMeters;
-        internal const float MaxEntryGapMeters = FootContactGeometryLimits.RecoveryMaxGapMeters;
         internal const float RecoveryHoldSeconds = FootContactGeometryLimits.RecoveryHoldSeconds;
         private const int MaxMissedEntryLogs = 8;
         private bool _continuousEntry, _entryRecovery;
@@ -30,6 +28,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         // Read-only event markers. Keep the first depth violation even when stance confirmation arrives later.
         internal bool FirstMissThisStep { get; private set; }
+        internal OrdinaryFootEntry.Sample EntrySample { get; private set; }
         private int _depthLatchFixed;
         internal int FirstMissDepthFixed => FirstMissThisStep ? _depthLatchFixed : 0;
         internal bool MissInProgress => _entryMissCounted;
@@ -273,7 +272,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 return false;
             }
             _entryPenetrationPeak = Mathf.Max(_entryPenetrationPeak, -_entryGeometry.MinClearance);
-            if (_entryGeometry.MinClearance < -MaxEntryPenetrationMeters && !_entryWindowMissed)
+            EntrySample = new OrdinaryFootEntry.Sample {
+                Local = fixedSequence, Floor = _qualifiedStanceColliderId, LegacyReady = legacyGeometryReady,
+                NativeInside = _entryGeometry.FullFootprint, NativeSole = _entryGeometry.MinClearance,
+                Confirmed = confirmedStance, IdentityHeld = _qualifiedStanceSeconds + 0.000001f >= ContinuousIdentityHoldSeconds
+            };
+            if (OrdinaryFootEntry.TooDeep(_entryGeometry.MinClearance) && !_entryWindowMissed)
             {
                 _entryWindowMissed = true;
                 _depthLatchFixed = fixedSequence;
@@ -301,8 +305,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _lastReason = "SHALLOW_STANCE_ENTRY_REQUALIFIED";
                 return true;
             }
-            bool geometryReady = !_entryWindowMissed && _entryGeometry.FullFootprint && legacyGeometryReady &&
-                _entryGeometry.MinClearance <= MaxEntryGapMeters;
+            bool geometryReady = EntrySample.GeometryReady(_entryWindowMissed, _entryGeometry.FullFootprint, _entryGeometry.MinClearance);
             if (!geometryReady)
             {
                 _entryGeometryRejectSamples++;
@@ -314,8 +317,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             }
             _activationGeometryReadySamples++;
             _lastReason = "STANCE_ENTRY_CONCURRENT_QUALIFICATION";
-            return confirmedStance && _qualifiedStanceSeconds + 0.000001f >= ContinuousIdentityHoldSeconds &&
-                _activationGeometryReadySamples >= MinActivationGeometryReadySamples;
+            return EntrySample.CanEnter(_activationGeometryReadySamples);
         }
 
         private bool RecoveryEntryReady(bool confirmedStance, bool legacyGeometryReady, int fixedSequence, float dt)

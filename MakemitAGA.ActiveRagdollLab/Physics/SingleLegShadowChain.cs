@@ -52,8 +52,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal string HipPointResponseDetails => _hipAnchorPair.Response.GetDetails(_torso == null ? null : _torso.PelvisReceiver);
         internal bool CancelQueuedHipPair(PhysicsStepContext step)
         { _hipContinuationPending = false; return _hipAnchorPair.CancelQueued(step); }
-        internal bool CommitBilateralHipPairs(PhysicsStepContext step, SingleLegShadowChain peer) =>
-            peer != null && HipAnchorTranslationPair.CommitBilateral(step, _hipAnchorPair, peer._hipAnchorPair);
+        internal bool CommitBilateralHipPairs(PhysicsStepContext step, SingleLegShadowChain peer, bool awaitingFootDecision) =>
+            peer != null && HipAnchorTranslationPair.CommitBilateral(step, _hipAnchorPair, peer._hipAnchorPair, awaitingFootDecision);
         internal void ObserveHipAllocation(PhysicsStepContext step, SingleLegShadowChain peer)
         {
             if (!_traceEnabled || peer == null || _torso == null || !_torso.PelvisReceiver.TraceRunning) return;
@@ -1926,7 +1926,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             Vector3 flexionAppliedWorld = flexionAxisWorld * flexionAccel;
             Vector3 relativeKneeAppliedWorld = flexionAppliedWorld + softAppliedWorld;
             // Frozen v0.2.75 transport: compose the relative Knee command with the actual same-step
-            // final Hip angular acceleration; common-mode transport is outside the relative Knee cap.
+            // allocated Hip alpha at Knee issue. A later 173 pulse keeps this already-issued Knee command.
             Vector3 combinedAppliedWorld = _kneeParentAngularTransport.Compose(
                 _lastHipAppliedAngularAccelerationWorld,
                 relativeKneeAppliedWorld,

@@ -4,11 +4,11 @@ using UnityEngine;
 
 namespace MakemitAGA.ActiveRagdollLab.Physics
 {
-    // Both arms retain v163 B physical control. B replays a three-step foot tether alternative from the unloaded shin and foot receipts.
+    // Both arms retain v163 B contact. Only B may change the pelvis allocation for one unloaded solve after a paired turn release.
     internal sealed partial class PelvisDynamicReceiverIsolation
     {
-        internal const string DynamicHipArmA = "A_V041660_PREVIOUS_STEP_BASELINE";
-        internal const string DynamicHipArmB = "B_V041660_LEFT_FOOT_HORIZONTAL_LEAD";
+        internal const string DynamicHipArmA = "A_V041780_NATIVE_RISE";
+        internal const string DynamicHipArmB = "B_V041780_LANDING_TRACKING_RESERVE";
         internal static bool UsesSupportBraking(string arm) => IsDynamicHipArm(arm);
         internal static bool UsesSupportNormalRecovery(string arm) => IsDynamicHipArm(arm);
         internal static bool UsesHipLandingPreparation(string arm) => false; // Both formal arms use the V142 A physical baseline.

@@ -34,7 +34,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         // sole is still catching up to the source pose.  Require two consecutive current-geometry-ready
         // FixedUpdates before enabling the collider so the first collision callback cannot inherit a
         // known-invalid support-normal witness from the activation boundary.
-        internal const int MinActivationGeometryReadySamples = 2;
+        internal const int MinActivationGeometryReadySamples = OrdinaryFootEntry.RequiredGeometrySamples;
 
         private const string StateDisabled = "DISABLED";
         private const string StateWaiting = "WAIT_STANCE";
@@ -48,6 +48,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private string _invalidReason;
         private string _state = StateDisabled;
         private string _lastReason = "<none>";
+        internal bool ReleasedToSwing => _lastReason == "RELEASE_ON_TRANSITION_TO_SWING";
         private float _qualifiedStanceSeconds;
         private int _qualifiedStanceColliderId;
         private int _preparedColliderId;
@@ -174,6 +175,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             FootSupportSurfaceIsolation supportSurface,
             EntryContext entryContext, ref bool pending)
         {
+            EntrySample = new OrdinaryFootEntry.Sample { Local = fixedSequence };
             DiagnosticEntryGeometry = default;
             FirstMissThisStep = OrdinaryEnabledThisStep = RecoveryEnabledThisStep = false;
             if (!_enabled)

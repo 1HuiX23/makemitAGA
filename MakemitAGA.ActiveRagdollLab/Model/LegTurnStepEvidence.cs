@@ -12,6 +12,9 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         internal SourceStepContext Source;
         internal int Fixed, Modes, CommittedUpperId;
         internal LegLandingReferenceInput LandingInput; // Optional; never part of Matches or a control gate.
+        // Same socket and coordinate frames as LandingInput.Parent, also available on a formal release step.
+        internal bool TransitionHipValid;
+        internal float TransitionHipHeight;
         internal bool KneeHeightsValid;
         internal Vector3 KneeHeights, UpperLocalSpan; // Held animation, selected pose on receiver reference, and settled lower-side knee anchor.
         // The Upper-side anchors were read by mechanical reporting in this same PRE_N.
@@ -29,6 +32,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         internal Quaternion RawHipRelativeR; // Optional witness: the exact input of legacy hipRot, not the final world control goal.
         internal Vector3 RawUpperW, RawLowerW, UpperW, HipParentW, HipTargetW, KneeTargetRelW;
         internal Vector3 HipFinalA, HipParentPreCapA, KneeRelativeA, KneeTotalA;
+        internal KneeAngularReceipt KneeAngular;
 
         // Optional same-Fixed snapshot of the existing FF owner. Not part of Matches or any control gate.
         internal bool HipFeedforwardValid, HipFeedforwardEnabled, HipFeedforwardActive, HipFeedforwardClamped;

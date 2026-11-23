@@ -243,6 +243,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
             internal PhysicsStepContext InputStep; // Physical identity; Fixed is receiver-trace-local.
             internal MotionInput Motion;
             internal PhysicsStepContext MotionNextStep;
+            internal bool HipEvidenceFinalized;
             internal PelvisHipAttitudeCommand HipAttitude;
             internal int Fixed, Settled;
             internal bool Resolved, Censored, HipReactionRecorded;

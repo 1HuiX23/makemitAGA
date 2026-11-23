@@ -28,7 +28,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             internal bool Issued => Decision == Action.Horizontal || Decision == Action.Limited || Decision == Action.Feedback;
         }
 
-        internal static bool Requests(in Foot.Frame f, in Foot.Result issued, in LeftShinForecast.Result shin)
+        internal static bool Requests(in Foot.Frame f, in Foot.Result issued, in LeftShinForecast.Result shin) =>
+            EarlyDescent(f,issued,shin) && issued.Gap > Radius;
+
+        internal static bool EarlyDescent(in Foot.Frame f, in Foot.Result issued, in LeftShinForecast.Result shin)
         {
             // Clear implies a five-point Lift, valid footprint and a sole still inside the lower bound.
             // This test sees only PRE_N and the commands issued for N, never the successor gait.
@@ -37,7 +40,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             float footY = issued.FootPoint.y - b.FootAnkle.y;
             return shin.State == LeftShinForecast.Status.Predicted && issued.State == Foot.Decision.Clear &&
                 RightFootTorqueForecast.Band(issued.Sole) == RightFootTorqueForecast.HeightBand.InBand &&
-                f.Pose.Gap <= Radius && issued.Gap > Radius && shinY < 0f && footY - shinY >= KneeGroundTarget.MinGain;
+                f.Pose.Gap <= Radius && shinY < 0f && footY - shinY >= KneeGroundTarget.MinGain;
         }
 
         internal static Step Predict(int local, Phase gait, in Foot.Frame frame, in Foot.Result original,
@@ -81,7 +84,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (previous == null)
             {
                 if (!Requests(frame,original,shin)) return s;
-                s.Decision = Horizontal(baseDelta,response,s);
+                s.Decision = FitHorizontal(baseDelta,response,s.Cap,ref s.Applied,out s.Needed,out s.Added);
                 if (!s.Issued) return s;
             }
             else s.Decision = Action.Feedback;
@@ -124,27 +127,29 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             return s;
         }
 
-        private static Action Horizontal(Vector3 gap, float response, Step s)
+        internal static Action FitHorizontal(Vector3 gap, float response, float cap, ref Vector3 applied,
+            out float needed, out float added)
         {
+            needed = added = 0f;
             float y = Mathf.Abs(gap.y);
             if (y > Radius) return Action.VerticalGap;
             var planar = new Vector3(gap.x,0f,gap.z);
             float distance = planar.magnitude;
             if (distance <= 0f) return Action.NoRoom;
             var direction = -planar / distance;
-            s.Needed = Mathf.Max(0f,distance - Slice(Radius,y));
+            needed = Mathf.Max(0f,distance - Slice(Radius,y));
             float target = Mathf.Max(y,Radius - PrecisionInset);
             float request = Mathf.Max(0f,distance - Slice(target,y)) / response;
             // Positive root of |issued + k*direction|² = cap². Keeping Y
             // fixed also preserves the original acceleration perpendicular to this ray.
-            float along = Vector3.Dot(s.Applied,direction);
-            float headroom = Mathf.Max(0f,s.Cap * s.Cap - s.Applied.sqrMagnitude);
+            float along = Vector3.Dot(applied,direction);
+            float headroom = Mathf.Max(0f,cap * cap - applied.sqrMagnitude);
             float root = Mathf.Sqrt(along * along + headroom);
             float available = along > 0f ? headroom / (root + along) : root - along;
             float extra = Mathf.Min(request,available);
             if (extra <= 0f || !float.IsFinite(extra)) return Action.NoRoom;
-            s.Applied += direction * extra;
-            s.Added = extra * response;
+            applied += direction * extra;
+            added = extra * response;
             return extra < request ? Action.Limited : Action.Horizontal;
         }
 

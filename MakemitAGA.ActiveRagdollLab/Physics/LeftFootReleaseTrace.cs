@@ -35,7 +35,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             internal Motion Motion;
             internal LeftFootLeadSequence.Step Lead;
             internal LeftShinForecast.Result Shin;
-            internal bool ShinCompleted, ShinPaired, CorrectedCross;
+            internal bool ShinCompleted, ShinPaired, CorrectedCross, PreparationCommand;
             internal float CorrectedSole = float.NaN, CorrectedGap = float.NaN;
             internal bool Settled, Cross;
             internal float ConditionalSole = float.NaN, ConditionalGap = float.NaN;
@@ -45,6 +45,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             internal Tick Origin;
             internal LeadEvent Lead;
+            internal ContactLink Contact;
+            internal PreparationWindows Preparation;
             internal readonly List<Row> Rows = new List<Row>();
             internal string End, Landing;
             internal int LandingLocal, ResumedLocal;
@@ -103,7 +105,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _age += _last.Step.Dt;
                 if (_age > LinkHorizonSeconds + 1e-6d) { Close("Horizon"); return; }
                 bool newLift = t.Gait == Phase.Lift && (_last.Gait == Phase.Swing || _last.Gait == Phase.Approach);
-                if (newLift || (WatchingLeadFormal && LandingWindowOutcomes.StartsNewSwing(t.Gait,_last.Gait)))
+                if (newLift || (WatchingReleaseContact && LandingWindowOutcomes.StartsNewSwing(t.Gait,_last.Gait)))
                 { Close(t.Gait == Phase.Lift ? "NewLift" : "NewSwing"); return; }
             }
             _last = t;
@@ -124,7 +126,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (t.Gait == Phase.Lift) _open.SawLift = true;
             if (Sampling)
             {
-                if (!frame.Valid) { _open.End = "MissingPose"; EndLead("MissingPose"); _pending = null; }
+                if (!frame.Valid) { _open.End = "MissingPose"; EndPredictions("MissingPose"); _pending = null; }
                 else
                 {
                     if (_pending != null)
@@ -134,11 +136,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     }
                     if (t.Active) _open.End = "Formal";
                     else if (t.Miss) _open.End = "FirstMiss";
-                    else if (!FollowingLead && !t.Released && t.Gait == Phase.Swing) _open.End = "FirstSwing";
-                    else if (!FollowingLead && !t.Released && t.Gait == Phase.Approach) _open.End = "Approach";
+                    else if (!FollowingPrediction && !t.Released && t.Gait == Phase.Swing) _open.End = "FirstSwing";
+                    else if (!FollowingPrediction && !t.Released && t.Gait == Phase.Approach) _open.End = "Approach";
                     else if (!t.Released && (_open.Origin.Gait == Phase.Swing || _open.Origin.Gait == Phase.Approach))
                         _open.End = "ReleaseSuccessor";
-                    else if (!FollowingLead && (_age - _windowStartAge + t.Step.Dt > FootContactGeometryLimits.RecoveryHoldSeconds + 1e-6d ||
+                    else if (!FollowingPrediction && (_age - _windowStartAge + t.Step.Dt > FootContactGeometryLimits.RecoveryHoldSeconds + 1e-6d ||
                         _open.Rows.Count - _windowStartRow >= MaxIntervals))
                     {
                         _open.End = "WindowLimit";
@@ -147,7 +149,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     else Issue(t, frame, unloaded, motion);
                 }
             }
-            LeadOutcome(t);
+            ContactOutcome(t);
             if (t.Ordinary || t.Miss || t.Recovery)
             {
                 if (_open.Landing == null)
@@ -156,12 +158,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     _open.Landing = t.EventSupport != t.Support ? "UnverifiedFloor" :
                         t.Miss ? "FirstMiss" : t.Recovery ? "Recovery" : "Ordinary";
                 }
-                if (WatchingLeadFormal && t.Miss && !t.Active && _open.Landing == "FirstMiss" && t.EventSupport == t.Support)
+                if (WatchingReleaseContact && t.Miss && !t.Active && _open.Landing == "FirstMiss" && t.EventSupport == t.Support)
                 {
                     // Keep only the real first formal enable and original miss outcome until the cycle changes.
                     _open.End ??= "FirstMiss";
                     _open.WaitingForLift = false;
-                    EndLead("FirstMiss");
+                    EndPredictions("FirstMiss");
                 }
                 else Close("Landing");
             }
@@ -171,7 +173,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private void Issue(in Tick t, in Forecast.Frame frame, bool unloaded, in Motion motion)
         {
             var cmd = Forecast.Compare(frame, t.Gait, unloaded, motion);
-            if (!cmd.Predicted && FollowingLead) EndLead(cmd.State.ToString());
+            if (!cmd.Predicted && FollowingPrediction) EndPredictions(cmd.State.ToString());
             _pending = new Row { From = t, Before = frame, Command = cmd, Motion = motion,
                 Shin = new LeftShinForecast.Result { State = cmd.Predicted ? LeftShinForecast.Status.MissingReceipt : LeftShinForecast.Status.NotSampled } };
             _open.Rows.Add(_pending);
@@ -191,6 +193,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             row.Cross = Forecast.ReadTrial(row.Command, frame, out row.ConditionalSole, out row.ConditionalGap);
             SettleShin(row, frame);
             ReadLead(row, frame);
+            ReadPreparation(row,frame);
             _settled++;
             if (row.Command.State == Forecast.Decision.Trial) _pairedTrials++;
             if (row.Cross) _crossings++;
@@ -199,11 +202,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private void Close(string reason)
         {
             if (_open == null) return;
-            EndLead(reason);
-            if (_open.Lead != null)
+            EndPredictions(reason);
+            if (_open.Contact != null)
             {
-                _open.Lead.Formal ??= reason;
-                if (_open.Landing == "FirstMiss") _open.Lead.MissOutcome ??= reason;
+                _open.Contact.Formal ??= reason;
+                if (_open.Landing == "FirstMiss") _open.Contact.MissOutcome ??= reason;
             }
             _open.End ??= reason;
             _open.Landing ??= reason;
@@ -224,6 +227,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 .Append("/faults=").Append(_faults).Append("/lowerForecast=PRE_POINT_VELOCITY/plantWrites=0");
             AppendShinSummary(b);
             AppendLeadSummary(b);
+            AppendPreparationSummary(b);
             foreach (var e in _details)
             {
                 var o = e.Origin;
@@ -233,12 +237,14 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     .Append("/exit=").Append(e.End).Append("/firstLanding-local=").Append(e.Landing).Append('|').Append(e.LandingLocal);
                 if (e.ResumedLocal > 0) b.Append("/resumedAtLift=").Append(e.ResumedLocal);
                 AppendLeadEvent(b,e);
+                AppendPreparations(b,e);
                 for (int i = 0; i < e.Rows.Count; i++)
                 {
                     var row = e.Rows[i];
                     AppendRow(b, row);
                     AppendShinRow(b, row, i + 1 < e.Rows.Count ? e.Rows[i + 1] : null);
                     AppendLeadRow(b,row);
+                    AppendPreparationCommand(b,row);
                 }
             }
             return b.ToString();

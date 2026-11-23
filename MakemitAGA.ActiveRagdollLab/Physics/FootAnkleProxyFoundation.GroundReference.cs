@@ -88,11 +88,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             !FormalStanceContactActive;
 
         internal bool FullLandingReferenceRequested(bool adopted) => LandingReferenceCaptureRequested &&
-            LandingReferenceCapturePolicy.NeedsFull(LandingObservationTiming.Run.Compact,
-                _stanceContactLifecycle.EntryHistoryAvailable, adopted);
+            (LandingReferenceCapturePolicy.NeedsFull(LandingObservationTiming.Run.Compact,
+                _stanceContactLifecycle.EntryHistoryAvailable, adopted) ||
+             (TransitionSide == 0 && LandingObservationTiming.Run.Transitions?.WantsLeftHeight == true));
 
         private FootLandingReferenceEvidence.LandingPath CaptureLandingReference(PhysicsStepContext step,
-            int fixedSequence, LegTurnStepEvidence leg, Quaternion lowerRotation)
+            int fixedSequence, LegTurnStepEvidence leg, Quaternion lowerRotation, Quaternion footRelative)
         {
             try
             {
@@ -104,7 +105,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 Vector3 ankle = Vector3.Scale(_lowerAnkleAnchorLocal, lowerScale);
                 return FootLandingReferenceEvidence.Build(step, _report.RuntimeSourceContext, fixedSequence, leg.LandingInput,
                     _sampledFootPosition + _sampledFootRotation * Vector3.Scale(_footAnkleAnchorLocal, footScale),
-                    _lowerBody.position + lowerRotation * ankle, lowerRotation, ankle);
+                    _lowerBody.position + lowerRotation * ankle, lowerRotation, ankle, leg.RawUpperR, footRelative);
             }
             catch { return default; } // Optional read failure cannot interrupt contact or control.
         }

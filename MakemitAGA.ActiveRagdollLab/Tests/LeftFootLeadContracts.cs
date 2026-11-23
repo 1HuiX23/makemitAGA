@@ -26,7 +26,7 @@ namespace ARL.Contracts
             Check.Run("166 floor, body, clock, load, receipt and first-miss continuity", Cuts);
         }
 
-        private static Foot.Frame Frame(int n, float sole, Vector3 gap, float dt = .02f)
+        internal static Foot.Frame Frame(int n, float sole, Vector3 gap, float dt = .02f)
         {
             var f = Fixture.Frame(sole);
             f.UpperId = 33;
@@ -40,7 +40,7 @@ namespace ARL.Contracts
             return f;
         }
 
-        private static Motion MotionFor(Vector3 raw, float cap = 60f)
+        internal static Motion MotionFor(Vector3 raw, float cap = 60f)
         {
             var m = Fixture.Command();
             m.Tether.Kp = 400f;
@@ -200,7 +200,7 @@ namespace ARL.Contracts
             var f = Frame(1,-.0005f,Vector3.zero);
             tr.Observe(t,f,true,MotionFor(Vector3.zero));
             Complete(tr,t,f,new Vector3(.006f,.001f,0));
-            Check.That(tr.WatchingLeadFormal,"prospectively armed");
+            Check.That(tr.WatchingReleaseContact,"prospectively armed");
             return tr;
         }
 
@@ -230,7 +230,7 @@ namespace ARL.Contracts
             return tr;
         }
 
-        private static Trace.Tick Contact(int local, bool recovery)
+        internal static Trace.Tick Contact(int local, bool recovery)
         {
             var t = Fixture.Tick(local,Phase.Stance);
             t.Active = true; t.Ordinary = !recovery; t.Recovery = recovery;
@@ -252,7 +252,7 @@ namespace ARL.Contracts
                 tr.Observe(t,default,false,default);
                 t = Fixture.Tick(6,Phase.Stance); t.MissInProgress = retained;
                 tr.Observe(t,default,false,default);
-                Check.That(tr.WatchingLeadFormal && !tr.Sampling,"wait without capturing new commands");
+                Check.That(tr.WatchingReleaseContact && !tr.Sampling,"wait without capturing new commands");
                 tr.Observe(Contact(7,retained),default,false,default);
                 string valid = retained ? "Recovered/actualFirstFormal-local=Recovery|7" : "HoldEnded/actualFirstFormal-local=Ordinary|7";
                 Check.That(tr.Summary().Contains("firstLanding-local=FirstMiss|5/firstMissOutcome="+valid),"first miss survives later contact");

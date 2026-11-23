@@ -13,7 +13,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal void ResetTrace() { Report.ResetTrace(); Response.Reset(); }
         private Rigidbody _child, _parent;
         private PhysicsStepContext _lastStep;
-        private bool _queued, _staged, _trace;
+        private bool _queued, _staged, _trace, _deferredEvidence, _pulseRevised;
         private HipAnchorPairInput _input;
         internal bool Off => !Report.Selected && !Report.CurrentApplied && !_staged;
         internal bool Prepare(Rigidbody child, Rigidbody parent)
@@ -85,7 +85,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _input.PureTorque = torque; _input.DesiredAlpha = desiredAlpha; _input.TorqueRequested = true;
             return true;
         }
-        internal static bool CommitBilateral(PhysicsStepContext step, HipAnchorTranslationPair left, HipAnchorTranslationPair right)
+        internal static bool CommitBilateral(PhysicsStepContext step, HipAnchorTranslationPair left, HipAnchorTranslationPair right, bool awaitingFootDecision = false)
         {
             if (left == null || right == null || left == right) return false;
             try
@@ -96,7 +96,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 // Validate BOTH snapshots before any force/actuator write. CurrentApplied
                 // means all three writes returned; bilateral fail-close owns their cancellation.
                 if (!left.CanCommit(lc) || !right.CanCommit(rc)) return left.Invalid("HIP_BILATERAL_PRECOMMIT_INVALID");
-                return left.Commit(lc) && right.Commit(rc);
+                return left.Commit(lc, awaitingFootDecision) && right.Commit(rc, awaitingFootDecision);
             }
             catch (Exception e) { return left.Invalid("HIP_BILATERAL_COMMIT_EXCEPTION:" + e.GetType().Name); }
         }
@@ -105,7 +105,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             input=_input;
             return Report.CurrentApplied && Report.Current.Step.Matches(step) && input.Seed.Step.Matches(step);
         }
-        private bool Commit(HipAnchorPairReport.Command c)
+        private bool Commit(HipAnchorPairReport.Command c, bool deferEvidence)
         {
             if (!CanCommit(c)) return Invalid("HIP_PAIR_COMMIT_INVALID");
             int written = 0;
@@ -125,13 +125,45 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 return Invalid("HIP_PAIR_WRITE_EXCEPTION:" + ex.GetType().Name);
             }
             Report.Current = c; Report.CurrentApplied = true; _lastStep = c.Step; _queued = true; _staged = false;
-            if (_trace)
-            {
-                Report.Record(c, (c.AppliedA - c.DesiredA * c.Scale).magnitude);
-                Response.Capture(c, _child, _parent);
-                Response.CaptureHipTorque(c.Step, c.Fixed, c.UpperActuatorTorque, c.AllocatedHipAlpha);
-            }
+            _pulseRevised = false;
+            _deferredEvidence = deferEvidence;
+            if (!deferEvidence) CaptureFinalCommand(c);
             return true;
+        }
+
+        private void CaptureFinalCommand(in HipAnchorPairReport.Command c)
+        {
+            if (!_trace) return;
+            Report.Record(c, (c.AppliedA - c.DesiredA * c.Scale).magnitude);
+            Response.Capture(c, _child, _parent);
+            Response.CaptureHipTorque(c.Step, c.Fixed, c.UpperActuatorTorque, c.AllocatedHipAlpha);
+        }
+
+        internal void FinishFootDecision(in PhysicsStepContext step)
+        {
+            if (!_deferredEvidence) return;
+            _deferredEvidence = false;
+            if (_queued && Report.CurrentApplied && Report.Current.Step.Matches(step)) CaptureFinalCommand(Report.Current);
+        }
+
+        internal bool AcceptsPulse(in HipAnchorPairReport.Command c, Rigidbody parent, out Rigidbody upper)
+        {
+            upper = _child;
+            if (!_queued || !_deferredEvidence || _pulseRevised || _staged || !Report.CurrentApplied || !Report.Current.Step.Matches(c.Step) ||
+                _parent != parent || _child == null || _child.useGravity || !Report.Current.ParentInput.SameAs(_input.Seed.ParentInput)) return false;
+            var frame = Report.Current.ParentInput;
+            if (frame.UpwardRetentionEligible || c.ParentInput.Acceleration.y < frame.Acceleration.y) return false;
+            frame.Acceleration.y = c.ParentInput.Acceleration.y;
+            frame.UpwardRetentionEligible = c.ParentInput.UpwardRetentionEligible;
+            return ValidateSnapshot(c, frame);
+        }
+
+        // All nine differential writes returned. Cancellation now owns the total queued command.
+        internal void PublishPulse(in HipAnchorPairReport.Command c)
+        {
+            _pulseRevised = true;
+            _input.Seed.ParentInput = c.ParentInput;
+            Report.Current = c;
         }
         private static bool Same(Vector3 a, Vector3 b) => PelvisChestPointResponse.Same(a, b);
         internal bool CancelQueued(PhysicsStepContext step)

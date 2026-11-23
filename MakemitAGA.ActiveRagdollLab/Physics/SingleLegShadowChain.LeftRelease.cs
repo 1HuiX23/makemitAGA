@@ -14,17 +14,17 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             var row = trace?.PendingShin(step, _runtimeSource, _fixedUpdateSequence);
             if (row == null) return;
             using var timing = LandingObservationTiming.Run.Measure(LandingObservationTiming.Stage.LeftShinForecast);
-            try { trace.CompleteShin(row, ReadLeftShinCommand(step, row)); }
+            try { trace.CompleteShin(row, ReadUnloadedShinCommand(step, row.From.Source, row.Before, row.Motion)); }
             catch { trace.CompleteShin(row, new Shin.Result { State = Shin.Status.Fault }); }
         }
 
-        private Shin.Result ReadLeftShinCommand(in PhysicsStepContext step, LeftFootReleaseTrace.Row row)
+        private Shin.Result ReadUnloadedShinCommand(in PhysicsStepContext step, in SourceStepContext source,
+            in LeftFootReleaseForecast.Frame before, in RightFootLandingForecast.Motion motion)
         {
-            var before = row.Before;
             int local = _fixedUpdateSequence;
             var foot = _footFoundation.Report;
-            if (!_runtimeStep.Matches(step) || !_legTurnCurrent.Matches(step, local) || !_legTurnCurrent.Source.Matches(row.From.Source) ||
-                !foot.RuntimeContext.Matches(step) || !foot.RuntimeSourceContext.Matches(row.From.Source) ||
+            if (!_runtimeStep.Matches(step) || !_legTurnCurrent.Matches(step, local) || !_legTurnCurrent.Source.Matches(source) ||
+                !foot.RuntimeContext.Matches(step) || !foot.RuntimeSourceContext.Matches(source) ||
                 _footFoundation.LastCompletedControlFixedSequence != local || _report.FixedUpdateSequence != local || !before.Anchors.Valid)
                 return new Shin.Result { State = Shin.Status.MissingFrame };
             if (_report.HipAnchorLinearTransportCurrentFixed != local || !_hipAnchorPair.TryGetCommittedInput(step, out var hip) ||
@@ -37,7 +37,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             var footBody = _footFoundation.DynamicBody;
             if (_upperBody == null || _lowerBody == null || footBody == null || _hipJoint != null || _kneeJoint != null ||
                 _upperBody.isKinematic || _lowerBody.isKinematic ||
-                footBody.isKinematic || before.UpperId != applied.ChildId || _upperBody.GetInstanceID() != before.UpperId ||
+                footBody.isKinematic || before.UpperId != applied.ChildId || _legTurnCurrent.CommittedUpperId != applied.ChildId ||
+                _upperBody.GetInstanceID() != before.UpperId ||
                 _lowerBody.GetInstanceID() != before.LowerId || footBody.GetInstanceID() != before.FootId ||
                 _upperBody.constraints != RigidbodyConstraints.None || _lowerBody.constraints != RigidbodyConstraints.None ||
                 (applied.ChildPoint - before.Anchors.UpperHip).sqrMagnitude > 1e-8f)
@@ -61,9 +62,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 Com = applied.ChildCom, V = hip.ChildComV, W = hip.ChildW, Inertia = hip.ChildInertia, Principal = hip.ChildPrincipal,
                 Mass = applied.ChildMass, Drag = _upperBody.drag, AngularDrag = _upperBody.angularDrag, MaxW = _upperBody.maxAngularVelocity
             };
-            var parentAlpha = _kneeParentAngularTransport.Enabled ? _legTurnCurrent.HipFinalA : Vector3.zero;
-            if (!RightThighTracking.Same(_legTurnCurrent.KneeTotalA, parentAlpha + _legTurnCurrent.KneeRelativeA) ||
-                !RightThighTracking.Same(_legTurnCurrent.HipFinalA, applied.AllocatedHipAlpha))
+            var angular = _legTurnCurrent.KneeAngular;
+            if (!angular.Matches(_kneeParentAngularTransport.Enabled, _legTurnCurrent.HipFinalA,
+                applied.AllocatedHipAlpha, _legTurnCurrent.KneeRelativeA, _legTurnCurrent.KneeTotalA))
                 return new Shin.Result { State = Shin.Status.AngularMismatch };
             var tether = _kneeCharacterJointResponseIsolation;
             var inputs = new Shin.Commands {
@@ -73,10 +74,18 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 SpringA = tether.CurrentPositionErrorWorld * KneeCharacterJointResponseIsolation.TetherPositionSpring,
                 DamperA = tether.CurrentVelocityErrorWorld * KneeCharacterJointResponseIsolation.TetherVelocityDamper,
                 TetherCap = KneeCharacterJointResponseIsolation.TetherMaxAcceleration,
-                HipTransportAlpha = parentAlpha, KneeRelativeAlpha = _legTurnCurrent.KneeRelativeA,
-                AnkleReactionNm = -row.Motion.Angular.Drive
+                HipTransportAlpha = angular.Parent, KneeRelativeAlpha = _legTurnCurrent.KneeRelativeA,
+                AnkleReactionNm = -motion.Angular.Drive
             };
-            return Shin.Predict(step.Dt, before.Anchors, before.Pose.Box.LowerAnkle, upper, lower, inputs);
+            var result = Shin.Predict(step.Dt, before.Anchors, before.Pose.Box.LowerAnkle, upper, lower, inputs);
+            if (result.State == Shin.Status.Predicted && !tether.CurrentSupportNormalConstraint)
+                result.Knee = new LeftLegHeightPreparation.KneeMotion {
+                    Raw = tether.CurrentRawAccelerationWorld, Applied = inputs.KneeTetherA,
+                    Kp = KneeCharacterJointResponseIsolation.TetherPositionSpring,
+                    Kd = KneeCharacterJointResponseIsolation.TetherVelocityDamper, Cap = inputs.TetherCap,
+                    Drag = lower.Drag, HardGap = KneeCharacterJointResponseIsolation.TetherAnchorValidityMeters
+                };
+            return result;
         }
     }
 }

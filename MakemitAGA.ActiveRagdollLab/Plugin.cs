@@ -16,9 +16,9 @@ namespace MakemitAGA.ActiveRagdollLab
         Plugin.PluginVersion)]
     public sealed class Plugin : BepInEx.Unity.IL2CPP.BasePlugin
     {
-        internal const string PluginVersion = "0.4.166";
-        // Both arms retain the right-foot policy while B samples the left release on the pinned Main floor.
-        internal const string SourceRevision = "V041660_LEFT_FOOT_HORIZONTAL_LEAD_20261120";
+        internal const string PluginVersion = "0.4.178";
+        // Both arms share the contact policy. B may issue one bounded pelvis rise command per paired turn release.
+        internal const string SourceRevision = "V041780_LANDING_TRACKING_RESERVE_20261124";
         internal static ManualLogSource Logger;
         private Harmony _harmony;
         private UnityEngine.Events.UnityAction<Scene, LoadSceneMode> _sceneLoadedHandler;
@@ -45,7 +45,7 @@ namespace MakemitAGA.ActiveRagdollLab
         private void LoadCore()
         {
             Logger.LogInfo("[ARL] Active Ragdoll Lab " + PluginVersion + " loaded | sourceRevision=" + SourceRevision +
-                " | Both arms use the v163 B right-foot contact policy. B compares three unloaded steps after an early horizontal left-foot tether correction. See arl_help for the current run.");
+                " | Both arms use the v163 B right-foot contact policy. A keeps the original allocation. B can issue one bounded pelvis rise pulse before the first left landing. See arl_help for the current run.");
             try
             {
                 ClassInjector.RegisterTypeInIl2Cpp<RagdollProxyContactTracker>();
@@ -109,6 +109,17 @@ namespace MakemitAGA.ActiveRagdollLab
         }
 
         // Optional diagnostic output may outlive a BepInEx listener during stop or unload.
+        internal static bool TryLogInfo(string message)
+        {
+            try
+            {
+                if (Logger == null) return false;
+                Logger.LogInfo(message);
+                return true;
+            }
+            catch { return false; }
+        }
+
         internal static void TryLogWarning(string message)
         {
             try { Logger?.LogWarning(message); }

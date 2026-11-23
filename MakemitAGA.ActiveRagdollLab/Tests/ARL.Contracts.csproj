@@ -6,12 +6,17 @@
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <IsPackable>false</IsPackable>
-    <Version>0.4.166</Version>
+    <Version>0.4.178</Version>
     <AssemblyName>ARL.Contracts</AssemblyName>
   </PropertyGroup>
   <!-- Link the real implementations, rather than keeping a second copy of their algorithms.
        No project reference to the game plugin: these contracts require only the .NET SDK. -->
   <ItemGroup>
+    <Compile Include="../Configuration/ProfileTemplateFile.cs" Link="Production/ProfileTemplateFile.cs" />
+    <EmbeddedResource Include="Fixtures/LandingReceiver171.tsv" LogicalName="ARL.Contracts.LandingReceiver171" />
+    <EmbeddedResource Include="Fixtures/TurnLanding171.tsv" LogicalName="ARL.Contracts.TurnLanding171" />
+    <EmbeddedResource Include="Fixtures/TurnLanding170.tsv" LogicalName="ARL.Contracts.TurnLanding170" />
+    <EmbeddedResource Include="Fixtures/TurnLanding169.tsv" LogicalName="ARL.Contracts.TurnLanding169" />
     <Compile Include="../Physics/KneeSupportNormalReactionIsolation.cs" Link="Production/KneeSupportNormalReactionIsolation.cs" />
     <Compile Include="../Model/KneeSupportNormalReactionReport.cs" Link="Production/KneeSupportNormalReactionReport.cs" />
     <Compile Include="../Model/FootContactEntrySnapshot.cs" Link="Production/FootContactEntrySnapshot.cs" />
@@ -20,6 +25,9 @@
     <Compile Include="../Model/SingleLegChainReport.KneeAllocation.cs" Link="Production/SingleLegChainReport.KneeAllocation.cs" />
     <Compile Include="../Physics/ParentHeightAllocation.cs" Link="Production/ParentHeightAllocation.cs" />
     <Compile Include="../Physics/RightKneePivot.cs" Link="Production/RightKneePivot.cs" />
+    <Compile Include="../Physics/LeftLegHeightPreparation.Foot.cs" Link="Production/LeftLegHeightPreparation.Foot.cs" />
+    <Compile Include="../Physics/LeftLegHeightPreparation.cs" Link="Production/LeftLegHeightPreparation.cs" />
+    <Compile Include="../Physics/LeftFootReleaseTrace.Preparation.cs" Link="Production/LeftFootReleaseTrace.Preparation.cs" />
     <Compile Include="../Physics/LeftFootLeadSequence.cs" Link="Production/LeftFootLeadSequence.cs" />
     <Compile Include="../Physics/LeftFootReleaseTrace.Lead.cs" Link="Production/LeftFootReleaseTrace.Lead.cs" />
     <Compile Include="../Physics/LeftShinForecast.cs" Link="Production/LeftShinForecast.cs" />
@@ -54,6 +62,39 @@
     <Compile Include="../Model/HipJoinPose.cs" Link="Production/HipJoinPose.cs" />
     <Compile Include="../Model/PelvisParentFrame.cs" Link="Production/PelvisParentFrame.cs" />
     <Compile Include="../Physics/FootContactGeometryLimits.cs" Link="Production/FootContactGeometryLimits.cs" />
+    <Compile Include="../Physics/FootTransitionMotion.cs" Link="Production/FootTransitionMotion.cs" />
+    <Compile Include="../Physics/TurnHandoffTrajectory.cs" Link="Production/TurnHandoffTrajectory.cs" />
+    <EmbeddedResource Include="Fixtures/LandingPulse172.tsv" LogicalName="ARL.Contracts.LandingPulse172" />
+    <Compile Include="../Physics/LandingPulseWindow.cs" Link="Production/LandingPulseWindow.cs" />
+    <Compile Include="../Physics/LandingPulseForces.cs" Link="Production/LandingPulseForces.cs" />
+    <Compile Include="../Physics/PelvisDynamicReceiverIsolation.LandingPulse.cs" Link="Production/PelvisDynamicReceiverIsolation.LandingPulse.cs" />
+    <Compile Include="../Physics/HipAnchorTranslationPair.cs" Link="Production/HipAnchorTranslationPair.cs" />
+    <Compile Include="../Physics/LandingRiseAllocation.cs" Link="Production/LandingRiseAllocation.cs" />
+    <Compile Include="../Physics/BilateralFootTransitionTrace.Rise.cs" Link="Production/BilateralFootTransitionTrace.Rise.cs" />
+    <Compile Include="../Model/KneeAngularReceipt.cs" Link="Production/KneeAngularReceipt.cs" />
+    <Compile Include="../Physics/OrdinaryFootEntry.cs" Link="Production/OrdinaryFootEntry.cs" />
+    <Compile Include="../Physics/LandingHipHeightBudget.cs" Link="Production/LandingHipHeightBudget.cs" />
+    <Compile Include="../Physics/BilateralFootTransitionTrace.HeightBudget.cs" Link="Production/BilateralFootTransitionTrace.HeightBudget.cs" />
+    <Compile Include="../Physics/CombinedLandingSearch.cs" Link="Production/CombinedLandingSearch.cs" />
+    <Compile Include="../Physics/CombinedLandingSearch.Preview.cs" Link="Production/CombinedLandingSearch.Preview.cs" />
+    <Compile Include="../Physics/TurnHandoffWindow.Combined.cs" Link="Production/TurnHandoffWindow.Combined.cs" />
+    <Compile Include="../Physics/TurnHandoffWindow.AnkleGap.cs" Link="Production/TurnHandoffWindow.AnkleGap.cs" />
+    <Compile Include="../Physics/TurnHandoffWindow.Continuous.cs" Link="Production/TurnHandoffWindow.Continuous.cs" />
+    <EmbeddedResource Include="Fixtures/LandingTracking175.tsv" LogicalName="ARL.Contracts.LandingTracking175" />
+    <EmbeddedResource Include="Fixtures/LandingTracking176.tsv" LogicalName="ARL.Contracts.LandingTracking176" />
+    <EmbeddedResource Include="Fixtures/LandingTracking177.tsv" LogicalName="ARL.Contracts.LandingTracking177" />
+    <EmbeddedResource Include="Fixtures/CombinedLanding174.tsv" LogicalName="ARL.Contracts.CombinedLanding174" />
+    <EmbeddedResource Include="Fixtures/ContinuousLanding173.tsv" LogicalName="ARL.Contracts.ContinuousLanding173" />
+    <Compile Include="../Physics/LandingFootTraction.cs" Link="Production/LandingFootTraction.cs" />
+    <Compile Include="../Physics/LandingFootTraction.Planar.cs" Link="Production/LandingFootTraction.Planar.cs" />
+    <Compile Include="../Physics/TurnHandoffWindow.Traction.cs" Link="Production/TurnHandoffWindow.Traction.cs" />
+    <Compile Include="../Physics/LandingHeightBreakdown.cs" Link="Production/LandingHeightBreakdown.cs" />
+    <Compile Include="../Physics/TurnHandoffWindow.cs" Link="Production/TurnHandoffWindow.cs" />
+    <Compile Include="../Physics/BilateralFootTransitionTrace.Landing.cs" Link="Production/BilateralFootTransitionTrace.Landing.cs" />
+    <Compile Include="../Physics/BilateralFootTransitionTrace.Handoff.cs" Link="Production/BilateralFootTransitionTrace.Handoff.cs" />
+    <Compile Include="../Physics/BilateralFootTransitionTrace.cs" Link="Production/BilateralFootTransitionTrace.cs" />
+    <Compile Include="../Physics/BilateralFootTransitionTrace.Render.cs" Link="Production/BilateralFootTransitionTrace.Render.cs" />
+    <Compile Include="../Physics/BilateralFootTransitionTrace.Window.cs" Link="Production/BilateralFootTransitionTrace.Window.cs" />
     <Compile Include="../Physics/FootBoxGeometry.cs" Link="Production/FootBoxGeometry.cs" />
     <Compile Include="../Physics/KneeGroundTarget.cs" Link="Production/KneeGroundTarget.cs" />
     <Compile Include="../Physics/KneeGroundFeasibility.cs" Link="Production/KneeGroundFeasibility.cs" />

@@ -355,17 +355,35 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             }
 
             _stepClock.InvalidateBinding();
+            try { return BuildOwnedFoundation(torsoOnly); }
+            catch (Exception failure)
+            {
+                // Manual arl_build and deferred setup share the same ownership boundary.
+                // An exception after allocating the torso must still release partial legs first.
+                if (HasActiveFoundation)
+                {
+                    _cleanupPending = true;
+                    LastRollbackSucceeded = false;
+                    try { RollbackWithReceipt("foundation-build-exception:" + failure.GetType().Name); }
+                    catch (Exception cleanup) { Plugin.TryLogWarning("[ARL] Build rollback incomplete | " + cleanup); }
+                }
+                throw;
+            }
+        }
+
+        private static string BuildOwnedFoundation(bool torsoOnly)
+        {
             _proxy = new TwoBodyShadowProxy(_profile, _audit);
             string torsoResult = _proxy.Build();
             if (!_proxy.IsBuilt)
             {
                 // Torso 与 bilateral/per-leg 报告统一由聚合写入器维护；失败路径也走同一入口。
                 WriteAllReports();
-                _logger?.LogWarning("[ARL][TWO_BODY] build-failed | " + torsoResult);
-                RollbackInternal("torso-build-failed");
-                return torsoResult;
+                Plugin.TryLogWarning("[ARL][TWO_BODY] build-failed | " + torsoResult);
+                var cleanup = RollbackWithReceipt("torso-build-failed");
+                return cleanup.Succeeded ? torsoResult : torsoResult + "\nARL build：清理尚未完成，请执行 arl_test_cleanup 重试。";
             }
-            _logger?.LogWarning("[ARL][TWO_BODY_FROZEN_BASELINE] " + torsoResult);
+            Plugin.TryLogWarning("[ARL][TWO_BODY_FROZEN_BASELINE] " + torsoResult);
 
             string legResult = torsoOnly ? "scope=TORSO_PAIR_ONLY | legFootObjectsAndJoints=NOT_CREATED" : "singleLegEnabled=False";
             if (!torsoOnly && _profile.SingleLegEnabled)
@@ -380,11 +398,12 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
                 legResult = _legChain.Build();
                 if (!_legChain.IsBuilt)
                 {
-                    _logger?.LogError("[ARL][BILATERAL_LEG] build-failed | " + legResult);
-                    RollbackInternal("bilateral-leg-build-failed");
-                    return torsoResult + "\n" + legResult + "\nARL build：腿部foundation失败，已整体回滚。";
+                    try { _logger?.LogError("[ARL][BILATERAL_LEG] build-failed | " + legResult); } catch { }
+                    var cleanup = RollbackWithReceipt("bilateral-leg-build-failed");
+                    return torsoResult + "\n" + legResult + (cleanup.Succeeded ? "\nARL build：腿部 foundation 失败，已整体回滚。" :
+                        "\nARL build：腿部 foundation 失败，清理尚未完成，请执行 arl_test_cleanup 重试。");
                 }
-                _logger?.LogWarning("[ARL][BILATERAL_LEG] " + legResult);
+                Plugin.TryLogWarning("[ARL][BILATERAL_LEG] " + legResult);
             }
 
             WriteAllReports();
@@ -1156,7 +1175,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             }
             catch (Exception e)
             {
-                _logger?.LogWarning("[ARL] report-write-failed | path=" + path + " | " + e.Message);
+                Plugin.TryLogWarning("[ARL] report-write-failed | path=" + path + " | " + e.Message);
             }
         }
     }

@@ -54,6 +54,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal bool ControlErrorsValid { get; private set; }
         internal float ControlComErrorMeters { get; private set; }
         internal float ControlPelvisErrorDegrees { get; private set; }
+        internal LandingRiseAllocation.Input LandingRiseInput { get; private set; }
         private ParentHeightProbe.Input _landingHeightInput;
         internal ParentHeightProbe.Input LandingHeightInput => _landingHeightInput;
         internal struct Reference
@@ -543,6 +544,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                             _comReferenceStep, _comReferencePlan, error.y, commonA),
                         BoundedTradeSelected = IsDynamicHipArm(_control.Arm),
                         ReferenceRotation = targetPelvisRotation, ReferenceW = targetW };
+                // The physical release decision joins these current inputs after both feet finish this solve.
+                LandingRiseInput = default;
+                if (publishCommon && _comReferenceStep.Matches(step) && _comReferencePlan.ArrivalEnabled)
+                    LandingRiseInput = new LandingRiseAllocation.Input { Step = step, Support = _comReferencePlan.SupportInput,
+                        RefV = targetComV.y, RefA = feedforwardA.y, PreV = actualV.y, Error = error.y };
                 if (publishCommon && LandingObservationTiming.Run.EarlyProbe && _landingHeightInput.Step.Matches(step))
                 {
                     _landingHeightInput.ReceiverReady=true; _landingHeightInput.ActualCom=actualCom;

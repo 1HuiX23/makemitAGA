@@ -12,10 +12,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         // PRE_N geometry and velocities are taken before releasing the formal
         // collider. Only the command receipt is read after all Foot owners finish.
-        private Forecast.Frame CaptureLeftReleaseFrame(in PhysicsStepContext step, int local, Vector3 lower, Vector3 foot,
-            Vector3 lowerVelocity, Quaternion rotation, in LegTurnStepEvidence leg, SwingKneeCandidate.Controller kneeController)
+        private Forecast.Frame CaptureReleaseFrame(in PhysicsStepContext step, int local, Vector3 lower, Vector3 foot,
+            Vector3 lowerVelocity, Quaternion rotation, in LegTurnStepEvidence leg, SwingKneeCandidate.Controller kneeController, bool compareKnee = true)
         {
-            using var timing = LandingObservationTiming.Run.Measure(LandingObservationTiming.Stage.LeftFootRelease);
+            using var timing = compareKnee ? LandingObservationTiming.Run.Measure(LandingObservationTiming.Stage.LeftFootRelease) : default;
             try
             {
                 if (_supportSurface == null || !_supportSurface.MainRoomBox || _body == null || _lowerBody == null || _collider == null ||
@@ -41,7 +41,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     SourceAnkleY = (_sampledFootPosition + _sampledFootRotation * Vector3.Scale(_footAnkleAnchorLocal, scale)).y,
                     HipY = legMatches && leg.MeasuredAnchors.Valid ? leg.PhysicalUpperHip.y : float.NaN,
                     KneeY = legMatches && leg.MeasuredAnchors.Valid ? leg.PhysicalLowerKnee.y : float.NaN };
-                if (_gameNativeGaitPhase.CurrentPhaseFixed == local && Forecast.CanCompareKnee(frame, LandingPhase(_gameNativeGaitPhase.State)))
+                if (compareKnee && _gameNativeGaitPhase.CurrentPhaseFixed == local && Forecast.CanCompareKnee(frame, LandingPhase(_gameNativeGaitPhase.State)))
                 {
                     frame.KneeExamined = true;
                     try { frame.Knee = CompareReleaseKnee(step, local, frame, leg, kneeController); }
@@ -70,6 +70,20 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             return Forecast.CompareKnee(frame.Pose.Box, leg.MeasuredAnchors, pose, k, step, source);
         }
 
+        private bool UnloadedReleaseFrame(in Forecast.Frame frame) => frame.Valid &&
+            Forecast.UnloadedFoot(FormalStanceContactActive || _contactShadow.Active, _collider.enabled, _body.useGravity,
+                _stanceFootNativeGravity.CurrentApplied, _report.StanceFootNativeGravityCurrentScheduledFixed, ExactAuthorizedStanceSupportLoadEligible);
+
+        private RightFootLandingForecast.Motion UnloadedReleaseMotion(in PhysicsStepContext step, int local, in Forecast.Frame frame)
+        {
+            if (!_report.RuntimeContext.Matches(step) || LastCompletedControlFixedSequence!=local ||
+                !_report.AnkleConstraintCurrentDynamic || _ankleConstraint.CharacterJointArm || !_ankleDrive.DynamicActive ||
+                _body.isKinematic || _lowerBody.isKinematic || frame.FootId!=_body.GetInstanceID() || frame.LowerId!=_lowerBody.GetInstanceID()) return default;
+            var motion=ReadIssuedFootMotion(frame.Pose);
+            motion.MeasuredLowerTransport=_ankleTransport.MeasuredThisStep;
+            return motion;
+        }
+
         private void ObserveLeftRelease(in PhysicsStepContext step, int local, float age, bool wasActive, int priorSupport,
             in Forecast.Frame frame, in LegTurnStepEvidence leg)
         {
@@ -94,20 +108,14 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     Motion = frame.FootId != 0 && leg.Matches(step, local) && leg.Source.Matches(_report.RuntimeSourceContext) ? leg.SourcePhase : null,
                     Miss = lifecycle.FirstMissThisStep, Recovery = lifecycle.RecoveryEnabledThisStep, Ordinary = lifecycle.OrdinaryEnabledThisStep,
                     EventSupport = eventSupport, MissInProgress = lifecycle.MissInProgress };
-                if (active && _leftRelease.WatchingLeadFormal)
+                if (active && _leftRelease.WatchingReleaseContact)
                 {
                     t.FormalFoot = _body.GetInstanceID();
                     t.FormalLower = _lowerBody.GetInstanceID();
                     t.FormalUpper = leg.Matches(step, local) && leg.Source.Matches(t.Source) ? leg.CommittedUpperId : 0;
                 }
-                bool unloaded = frame.Valid && Forecast.UnloadedFoot(active || _contactShadow.Active, _collider.enabled, _body.useGravity,
-                    _stanceFootNativeGravity.CurrentApplied, _report.StanceFootNativeGravityCurrentScheduledFixed, ExactAuthorizedStanceSupportLoadEligible);
-                RightFootLandingForecast.Motion motion = default;
-                if (unloaded && _report.RuntimeContext.Matches(step) &&
-                    LastCompletedControlFixedSequence == local && _report.AnkleConstraintCurrentDynamic && !_ankleConstraint.CharacterJointArm &&
-                    _ankleDrive.DynamicActive && !_body.isKinematic && !_lowerBody.isKinematic &&
-                    frame.FootId == _body.GetInstanceID() && frame.LowerId == _lowerBody.GetInstanceID())
-                    motion = ReadIssuedFootMotion(frame.Pose);
+                bool unloaded = UnloadedReleaseFrame(frame);
+                var motion = unloaded ? UnloadedReleaseMotion(step,local,frame) : default;
                 _leftRelease.Observe(t, frame, unloaded, motion);
             }
             catch { _leftRelease.Fault(); }

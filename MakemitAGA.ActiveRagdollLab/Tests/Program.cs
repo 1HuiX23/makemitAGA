@@ -42,6 +42,18 @@ namespace ARL.Contracts
             LeftFootReleaseContracts.Run();
             LeftShinContracts.Run();
             LeftFootLeadContracts.Run();
+            LeftLegPreparationContracts.Run();
+            FootTransitionContracts.Run();
+            TurnHandoffContracts.Run();
+            TurnLandingContracts.Run();
+            LandingTractionContracts.Run();
+            LandingRiseContracts.Run();
+            LandingPulseContracts.Run();
+            ContinuousLandingContracts.Run();
+            CombinedLandingContracts.Run();
+            LandingTrackingContracts.Run();
+            LandingPreviewContracts.Run();
+            Maintenance170Contracts.Run();
             CoordinatorContracts.Run();
             FoundationContracts.Run();
             TrajectoryContracts.Run();

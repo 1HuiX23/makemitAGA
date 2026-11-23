@@ -1,3 +1,4 @@
+using System.Globalization;
 using System;
 using MakemitAGA.ActiveRagdollLab.Configuration;
 using MakemitAGA.ActiveRagdollLab.Model;
@@ -486,6 +487,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private static bool Finite(float v) => !(float.IsNaN(v) || float.IsInfinity(v));
         private static bool Finite(Vector3 v) => Finite(v.x) && Finite(v.y) && Finite(v.z);
         private static bool Finite(Quaternion q) => Finite(q.x) && Finite(q.y) && Finite(q.z) && Finite(q.w);
-        private static string F(float v) => Finite(v) ? v.ToString("0.######") : "NaN";
+        private static string F(float v) => Finite(v) ? v.ToString("0.######", CultureInfo.InvariantCulture) : "NaN";
     }
 }

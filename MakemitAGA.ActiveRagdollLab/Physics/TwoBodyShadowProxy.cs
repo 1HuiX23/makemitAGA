@@ -1,3 +1,4 @@
+using System.Globalization;
 using System;
 using MakemitAGA.ActiveRagdollLab.Runtime;
 using System.Collections.Generic;
@@ -295,9 +296,21 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal PelvisReceiverControlStatus PelvisReceiverControl => _pelvisReceiver.ControlStatus;
         internal PelvisHipAttitudeCommand HipAttitudeCommand => _pelvisReceiver.HipAttitudeCommand;
         internal string HipCompletionIssue => _pelvisReceiver.HipCompletionIssue;
-        internal bool CompleteHipTranslationReaction(PhysicsStepContext step, HipAnchorPairReport left, HipAnchorPairReport right) =>
+        internal string MotionPhaseForLanding => _motionPhase;
+        internal void FinishLandingPulse(PhysicsStepContext step) => _pelvisReceiver.FinishFootDecision(step);
+        internal bool ApplyLandingPulse(PhysicsStepContext step, int floor, HipAnchorTranslationPair left,
+            HipAnchorTranslationPair right, bool primaryLeft, in LandingRiseAllocation.Allocation choice)
+        {
+            if (!_runtimeStep.Matches(step) || !_legParentCommand.Matches(step) || !_legParentCommand.HipCommand.SameAs(_pelvisReceiver.HipCommand))
+                return _pelvisReceiver.RejectHipCompletion("RISE_PULSE_SHARED_CLOCK");
+            if (!_pelvisReceiver.ApplyLandingPulse(step,floor,left,right,primaryLeft,choice)) return false;
+            _legParentCommand.HipCommand = _pelvisReceiver.HipCommand;
+            return true;
+        }
+
+        internal bool CompleteHipTranslationReaction(PhysicsStepContext step, HipAnchorPairReport left, HipAnchorPairReport right, bool awaitingFootDecision) =>
             _runtimeStep.Matches(step) && _legParentCommand.Matches(step)
-                ? _pelvisReceiver.CompleteHipTranslationReaction(step, left, right)
+                ? _pelvisReceiver.CompleteHipTranslationReaction(step, left, right, awaitingFootDecision)
                 : _pelvisReceiver.RejectHipCompletion("PROXY_PARENT_OR_SHARED_STEP_CONTEXT");
         internal bool DynamicPelvisReceiverSelected => _pelvisReceiver.DynamicSelected;
         private string CurrentParentTranslationReference => DynamicPelvisReceiverSelected ? "TWO_BODY_COMMON_COM_PD" : ParentFeedforwardReferencePoseBridge;
@@ -382,6 +395,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _driveEnabled && _poseBridge.Initialized ? _poseBridge.CommandPosition : _sampledPelvisPosition;
         internal Quaternion CurrentPelvisCommandRotation => DynamicPelvisReceiverSelected ? RequireDynamicParentFrame().CommandRotation :
             _driveEnabled && _poseBridge.Initialized ? _poseBridge.CommandRotation : _sampledPelvisRotation;
+        internal LandingRiseAllocation.Input LandingRiseInput => _pelvisReceiver.LandingRiseInput;
         internal ParentHeightProbe.Input LandingHeightInput => _pelvisReceiver.LandingHeightInput;
         internal bool TryGetLegParentCommand(PhysicsStepContext step, out LegParentCommandFrame command)
         {
@@ -563,7 +577,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     " | target=" + _audit.TargetName +
                     " | pelvisSize=" + Format(pelvisSize) +
                     " | chestSize=" + Format(chestSize) +
-                    " | torso=" + torso.ToString("G7") +
+                    " | torso=" + torso.ToString("G7", CultureInfo.InvariantCulture) +
                     " | pelvisKinematic=True | chestKinematic=True" +
                     " | drive=False | gravity=" + _gravityEnabled +
                     " | colliders=" + _collidersEnabled +
@@ -582,7 +596,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     " | characterJointAnchorValidated=" + _characterJointAnchorModeValidated +
                     " | connectedBodyMatch=" + (_characterJoint != null && _characterJoint.connectedBody == _pelvisBody) +
                     " | jointLimitMode=" + (_profile.WideJointLimitIsolation ? "WIDE_ISOLATION" : "ANATOMICAL") +
-                    " | effectiveLimits=" + _effectiveLowTwistLimit.ToString("G6") + ".." + _effectiveHighTwistLimit.ToString("G6") + "/" + _effectiveSwing1Limit.ToString("G6") + "/" + _effectiveSwing2Limit.ToString("G6") +
+                    " | effectiveLimits=" + _effectiveLowTwistLimit.ToString("G6", CultureInfo.InvariantCulture) + ".." + _effectiveHighTwistLimit.ToString("G6", CultureInfo.InvariantCulture) + "/" + _effectiveSwing1Limit.ToString("G6", CultureInfo.InvariantCulture) + "/" + _effectiveSwing2Limit.ToString("G6", CultureInfo.InvariantCulture) +
                     " | standardJointRequired=CharacterJoint" +
                     " | sourceObjectUnchanged=True";
             }
@@ -1148,13 +1162,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _nextTraceTime = 0f;
                 UpdateReport("trace-enabled");
                 Plugin.Logger?.LogInfo(
-                    "[ARL][TRACE] trace-start | intervalSeconds=" + TraceLogInterval.ToString("G6") +
+                    "[ARL][TRACE] trace-start | intervalSeconds=" + TraceLogInterval.ToString("G6", CultureInfo.InvariantCulture) +
                     " | logMode=" + (_profile.TraceVerboseSnapshots ? "VERBOSE" : "COMPACT") +
                     " | sourceTurnContext=" + (_profile.SourceTurnVerboseContextLogging ? "VERBOSE" : "SUMMARY_ONLY") +
                     " | diagnostics=render-sample-hold-velocity+pose-bridge+pose-consistent-parent-ff+source-turn-discontinuity-attribution+recovery-failure-attribution+drive-fail-fast");
                 return
                     "ARL trace | enabled=True" +
-                    " | intervalSeconds=" + TraceLogInterval.ToString("G6") +
+                    " | intervalSeconds=" + TraceLogInterval.ToString("G6", CultureInfo.InvariantCulture) +
                     " | statsReset=True" +
                     " | phaseSafeFixedStep=True | renderVelocityBridge=sample-and-hold | poseBridge=predict-correct" +
                     " | parentFFReference=" + CurrentParentTranslationReference +
@@ -1185,7 +1199,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 Plugin.Logger?.LogInfo("[ARL][TRACE] trace-stop");
                 return
                     "ARL trace | enabled=False" +
-                    " | intervalSeconds=" + TraceLogInterval.ToString("G6") +
+                    " | intervalSeconds=" + TraceLogInterval.ToString("G6", CultureInfo.InvariantCulture) +
                     " | summary=" + summary +
                     " | freeze=" + freezeSummary;
             }
@@ -1303,9 +1317,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 " | detail=" + SafeLogText(detail) +
                 " | drive=" + _driveEnabled +
                 " | finite=" + HasFinitePhysicsState() +
-                " | rotErr=" + _report.RotationErrorDegrees.ToString("G7") +
-                " | chestPosErr=" + _report.ChestPositionErrorMeters.ToString("G7") +
-                " | anchorErr=" + _report.AnchorErrorMeters.ToString("G7"), true);
+                " | rotErr=" + _report.RotationErrorDegrees.ToString("G7", CultureInfo.InvariantCulture) +
+                " | chestPosErr=" + _report.ChestPositionErrorMeters.ToString("G7", CultureInfo.InvariantCulture) +
+                " | anchorErr=" + _report.AnchorErrorMeters.ToString("G7", CultureInfo.InvariantCulture), true);
 
             // Stop both diagnostic clocks immediately. No preview-follow sample after this point may enter
             // NORMAL/SOURCE/RECOVERY freeze statistics. The user can still call arl_trace(off) later to
@@ -1632,7 +1646,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (!IsFinite(errorDistance) || errorDistance > _profile.DriveDisableDistance)
                 throw new InvalidOperationException(
                     "CHARACTER_JOINT chest position error exceeded safety gate: " +
-                    errorDistance.ToString("G7"));
+                    errorDistance.ToString("G7", CultureInfo.InvariantCulture));
 
             // Legacy virtual/native anchors coincide. B's native pivot is Chest COM;
             // a rotated source virtual lever is no longer a native constraint separation.
@@ -1642,7 +1656,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (!IsFinite(jointAnchorError) || jointAnchorError > _profile.JointAnchorSafetyDistance)
                 throw new InvalidOperationException(
                     "CHARACTER_JOINT anchor error exceeded safety gate: " +
-                    jointAnchorError.ToString("G7"));
+                    jointAnchorError.ToString("G7", CultureInfo.InvariantCulture));
 
             // v0.2.0 清理冻结前的 A/B 分支：v0.1.11-v0.2.0 已经验证 POSE_BRIDGE_COMMAND 为正式主线。
             // source/render parentTransportVel 仍保留作诊断，但不再允许运行时切换控制参考，避免后续链路误入历史实验分支。
@@ -2460,7 +2474,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         private static string Format(Vector3 value)
         {
-            return "(" + value.x.ToString("G6") + "," + value.y.ToString("G6") + "," + value.z.ToString("G6") + ")";
+            return "(" + value.x.ToString("G6", CultureInfo.InvariantCulture) + "," + value.y.ToString("G6", CultureInfo.InvariantCulture) + "," + value.z.ToString("G6", CultureInfo.InvariantCulture) + ")";
         }
     }
 }

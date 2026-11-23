@@ -58,6 +58,14 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private bool _pinnedMainRoom;
         internal bool ExposureReady => _finite && _pairLeft >= MinPairSamples && _pairRight >= MinPairSamples &&
             _probeMatches > 0 && (_arm != ArmB || (_boxLeftCallbacks > 0 && _boxRightCallbacks > 0));
+        // The bilateral coordinator validated this exact static shape before either Foot callback.
+        // The paired trace and the unload-only pelvis pulse reuse it. Contact admission takes its own readback.
+        internal bool TryGetTransitionBox(out Vector3 center, out Vector3 half)
+        {
+            center = _boxPosition; half = _boxSize * .5f;
+            return MainRoomBox && _finite && _selectedId != 0;
+        }
+
         internal bool TryGetEntryBox(int identity, out Vector3 center, out Vector3 half)
         {
             center = Vector3.zero; half = Vector3.zero;

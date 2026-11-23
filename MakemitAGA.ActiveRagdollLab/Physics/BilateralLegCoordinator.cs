@@ -352,6 +352,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             // Preflight both sides and compute all initial values before the first native write.
             LegInitialState primary = _primary.PrepareDynamicJoin(step, command.PhysicalParent);
             LegInitialState secondary = _secondary.PrepareDynamicJoin(step, command.PhysicalParent);
+            _landingPulse.Reset("DriveStarted");
             _bilateralFailClosedLatched = false;
             try
             {
@@ -424,28 +425,38 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             }
             if (_primary != null && PelvisRunScopes.HasHipCoupling(_primary.DynamicScope) && DriveEnabled && !AnyDriveAborted)
             {
+                bool decisionPending = _landingPulse.MayChoose(step, _torso.MotionPhaseForLanding);
                 bool pairsApplied;
                 using (LandingObservationTiming.Run.Measure(LandingObservationTiming.Stage.HipPair))
-                    pairsApplied = _primary.CommitBilateralHipPairs(step, _secondary);
+                    pairsApplied = _primary.CommitBilateralHipPairs(step, _secondary, decisionPending);
                 if (!pairsApplied)
                     FailCloseStanceContactIsolation("HIP_BILATERAL_FORCE_COMPLETION_FAILED:" +
                         (_primary.HipAnchorPair.Issue ?? (_secondary?.HipAnchorPair.Issue) ?? "INPUT_OR_CLOCK"));
-                else if (!_torso.CompleteHipTranslationReaction(step, _primary.HipAnchorPair, _secondary.HipAnchorPair))
+                else if (!_torso.CompleteHipTranslationReaction(step, _primary.HipAnchorPair, _secondary.HipAnchorPair, decisionPending))
                     FailCloseStanceContactIsolation("HIP_PAIR_RECEIVER_ATTITUDE_COMPLETION_FAILED:" + (_torso.HipCompletionIssue ?? "UNKNOWN"));
                 else if (!_primary.CompleteHipControllerStep(step) || !_secondary.CompleteHipControllerStep(step))
                     FailCloseStanceContactIsolation("HIP_CONTROLLER_CONTINUATION_FAILED");
                 else
                 {
-                    // The receiver has committed the bounded same-step correction.
-                    // All actual commands are now known. Diagnostic composition writes no forces
-                    // and cannot become a second owner or a readiness/safety prerequisite.
-                    _primary.CompleteHipPointResponse(step, _secondary.HipAnchorPair);
-                    _secondary.CompleteHipPointResponse(step, _primary.HipAnchorPair);
                     bool primaryLeft = string.Equals(PrimarySide, "LEFT", StringComparison.OrdinalIgnoreCase);
                     var left = primaryLeft ? _primary : _secondary;
                     var right = primaryLeft ? _secondary : _primary;
+                    if (!CompleteLandingPulse(step, left, right, primaryLeft, decisionPending, out bool pulseApplied))
+                    {
+                        FailCloseStanceContactIsolation("HIP_LANDING_PULSE_FAILED:" + (_torso.HipCompletionIssue ?? "UNKNOWN"));
+                        return;
+                    }
+                    _primary.CompleteHipPointResponse(step, _secondary.HipAnchorPair);
+                    _secondary.CompleteHipPointResponse(step, _primary.HipAnchorPair);
                     left.ObserveHipAllocation(step, right);
                     if (LandingObservationTiming.Run.LeftReleaseProbe) left.CompleteLeftShinForecast(step);
+                    var transitions = LandingObservationTiming.Run.Transitions;
+                    if (transitions != null)
+                    {
+                        left.ObserveLandingRise(step, right, transitions, primaryLeft, pulseApplied);
+                        left.ObserveTurnHandoff(0,step,transitions);
+                        right.ObserveTurnHandoff(1,step,transitions);
+                    }
                     if (LandingObservationTiming.Run.EarlyProbe)
                     {
                         left.ObserveParentHeight(step, right);
@@ -493,6 +504,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         public string SetDrive(bool enabled)
         {
+            if (!enabled) _landingPulse.Reset("DriveStopped");
             if (!enabled) CancelHipJoinPreparation("CANCELLED_BY_SAFE_OFF");
             // OFF is a cleanup operation and must remain available even if a historical/exceptional half-built
             // coordinator has lost one child. ON still requires the complete bilateral foundation.
@@ -529,6 +541,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (_bilateralEnabled && !_secondary.FrozenProductionStackReady)
                 return "ARL bilateral leg drive：secondary frozen production stack未READY；请先 arl_hip_stack(on)。";
 
+            _landingPulse.Reset("DriveStarted");
             _bilateralFailClosedLatched = false;
             try
             {

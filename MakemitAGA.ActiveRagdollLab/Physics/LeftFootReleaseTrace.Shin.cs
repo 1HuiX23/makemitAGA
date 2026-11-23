@@ -29,7 +29,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 {
                     row.Shin = new Shin.Result { State = Shin.Status.InvalidInput };
                     row.ShinCompleted = true;
-                    EndLead("InvalidFootForecast");
+                    EndPredictions("InvalidFootForecast");
                     return;
                 }
                 _shinPredicted++;
@@ -37,9 +37,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             }
             row.Shin = result;
             row.ShinCompleted = true;
-            if (result.State != Shin.Status.Predicted) { EndLead(result.State.ToString()); return; }
+            if (result.State != Shin.Status.Predicted) { EndPredictions(result.State.ToString()); return; }
             try { IssueLead(row); }
             catch { _faults++; EndLead("LeadFault"); }
+            try { IssuePreparation(row); }
+            catch { _faults++; StopPreparations("PreparationFault"); }
         }
 
         private static float XZ(Vector3 v) => Mathf.Sqrt(v.x * v.x + v.z * v.z);

@@ -33,7 +33,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         // Both real force pairs have returned. The sole receiver owner now adds
         // (bounded total - already committed baseline) torque, once before solve.
         internal bool CompleteHipTranslationReaction(MakemitAGA.ActiveRagdollLab.Runtime.PhysicsStepContext step,
-            HipAnchorPairReport left, HipAnchorPairReport right)
+            HipAnchorPairReport left, HipAnchorPairReport right, bool awaitingFootDecision = false)
         {
             try
             {
@@ -109,11 +109,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 if (!Report.TraceRunning) return true;
                 f.HipAttitude = command;
                 f.HipReactionRecorded = true;
-                Report.CaptureMotionInput(ref f, step); // Optional evidence; catches its own failures.
-                Report.Ring[_pending] = f; Report.HipReactionRecords++;
-                Report.HipAttitudeRequestedPeak = Mathf.Max(Report.HipAttitudeRequestedPeak, command.RequestedTorque.magnitude);
-                Report.HipAttitudeAppliedPeak = Mathf.Max(Report.HipAttitudeAppliedPeak, command.AppliedTorque.magnitude);
-                Report.HipAttitudeResidualPeak = Mathf.Max(Report.HipAttitudeResidualPeak, command.ResidualTorque.magnitude);
+                Report.Ring[_pending] = f;
+                if (!awaitingFootDecision) FinishFootDecision(step);
                 return true;
             }
             catch (Exception e)
@@ -122,6 +119,20 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 return Invalid("RECEIVER_HIP_ATTITUDE_COMPLETION_EXCEPTION:" + e.GetType().Name);
             }
         }
+        internal void FinishFootDecision(PhysicsStepContext step)
+        {
+            if (!Report.TraceRunning || _pending < 0) return;
+            var f = Report.Ring[_pending];
+            if (!f.InputStep.Matches(step) || !f.HipReactionRecorded || f.HipEvidenceFinalized) return;
+            var command = f.HipAttitude;
+            f.HipEvidenceFinalized = true;
+            Report.CaptureMotionInput(ref f, step);
+            Report.Ring[_pending] = f; Report.HipReactionRecords++;
+            Report.HipAttitudeRequestedPeak = Mathf.Max(Report.HipAttitudeRequestedPeak, command.RequestedTorque.magnitude);
+            Report.HipAttitudeAppliedPeak = Mathf.Max(Report.HipAttitudeAppliedPeak, command.AppliedTorque.magnitude);
+            Report.HipAttitudeResidualPeak = Mathf.Max(Report.HipAttitudeResidualPeak, command.ResidualTorque.magnitude);
+        }
+
         private void ResolvePending(PhysicsStepContext step)
         {
             if (_pending < 0) return;

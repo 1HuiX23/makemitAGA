@@ -15,7 +15,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             FixedLoop, FixedTorso, FixedLegs, SourceLoop, SourceTorso, SourceLegs,
             LegFullCapture, LegParentCapture, FootPathBuild, LifecycleActive, LifecycleInactive,
             ObserverActive, ObserverInactive, EntryText,
-            LegPrepare, HipPair, KneePd, FootFixed, FootProbe, BilateralEvidence, SwingKneeProbe, EarlyKneeProbe, ParentHeightProbe, RightAnkleProbe, RightKneePivotSnapshot, RightThighTracking, RightFootForecast, RightFootLanding, LeftFootRelease, LeftShinForecast, LeftFootLead
+            LegPrepare, HipPair, KneePd, FootFixed, FootProbe, BilateralEvidence, SwingKneeProbe, EarlyKneeProbe, ParentHeightProbe, RightAnkleProbe, RightKneePivotSnapshot, RightThighTracking, RightFootForecast, RightFootLanding, LeftFootRelease, LeftShinForecast, LeftFootLead, LeftLegPreparation, FootTransitionSource, FootTransitionPair, TurnHandoff, LandingRise, CombinedLanding
         }
 
         internal readonly struct Measurement : IDisposable
@@ -94,6 +94,8 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
         internal bool EarlyProbe => Running && _withEarlyProbe;
         internal bool LeftReleaseProbe => Running && _withLeftRelease;
         private bool _withLeftRelease;
+        private BilateralFootTransitionTrace _transitions;
+        internal BilateralFootTransitionTrace Transitions => Running ? _transitions : null;
         internal bool SwingProbe => Running && _withSwingProbe;
         internal static string ModeName(bool compact) => compact ? "COMPACT" : "FULL";
 
@@ -103,7 +105,8 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             Running = PelvisDynamicReceiverIsolation.IsDynamicHipArm(arm);
             Compact = _wasCompact = Running;
             _withHistory = Running;
-            _withLeftRelease = arm == PelvisDynamicReceiverIsolation.DynamicHipArmB;
+            _withLeftRelease = Running;
+            _transitions = _withLeftRelease ? new BilateralFootTransitionTrace() : null;
             // Both v154 arms retain the same event windows and the same observation cost.
             _withSwingProbe = _withEarlyProbe = false;
             Array.Clear(_times, 0, _times.Length);
@@ -143,6 +146,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
         {
             if (!Running) return false;
             Running = Compact = false;
+            _transitions?.Seal();
             return true;
         }
 
@@ -166,6 +170,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
                 .Append("/measure=count-seconds-Hz-meanMs-maxMs-gt33_33-gt50-gt100-gt250")
                 .Append("/all=").Append(_all.Text()).Append("/bothActiveThroughout=").Append(_both.Text())
                 .Append("/other=").Append(_other.Text());
+            if (_transitions != null) sb.Append(_transitions.Summary());
             return sb.ToString();
         }
         private static string Mean(double sum, long count) => count == 0 ? "NA" : N(sum / count);

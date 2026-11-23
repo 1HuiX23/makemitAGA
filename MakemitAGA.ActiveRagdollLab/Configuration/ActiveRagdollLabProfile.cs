@@ -157,11 +157,8 @@ namespace MakemitAGA.ActiveRagdollLab.Configuration
             string path = ConfigPath;
             try
             {
-                if (File.Exists(path))
+                if (!ProfileTemplateFile.CreateIfMissing(path, GetTemplateText))
                     return "ARL 配置已存在：" + path;
-
-                Directory.CreateDirectory(Path.GetDirectoryName(path));
-                File.WriteAllText(path, GetTemplateText());
                 logger?.LogInfo("[ARL][PROFILE] template-created | path=" + path);
                 return "已创建 ARL 配置模板：" + path;
             }

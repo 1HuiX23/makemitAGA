@@ -53,7 +53,7 @@ namespace ARL.Contracts
             foreach (var arm in new[] { PelvisDynamicReceiverIsolation.DynamicHipArmA, PelvisDynamicReceiverIsolation.DynamicHipArmB, "legacy", null })
             {
                 timing.Begin(arm);
-                Check.That(timing.LeftReleaseProbe == (arm == PelvisDynamicReceiverIsolation.DynamicHipArmB), "left observes B only");
+                Check.That(timing.LeftReleaseProbe == PelvisDynamicReceiverIsolation.IsDynamicHipArm(arm), "both formal arms observe the left release");
                 Check.That(RightFootPrecontact.ForArm(arm) == (timing.Running ? RightFootPrecontact.Mode.PreviousStepExpiryReview :
                     RightFootPrecontact.Mode.Off), "163 B right baseline");
                 timing.Seal(); Check.That(!timing.LeftReleaseProbe, "sealed");

@@ -12,6 +12,9 @@ namespace MakemitAGA.ActiveRagdollLab.Model
         internal float UpwardExtra;
         internal bool RecoveryCaptured, RecoverySelected, RecoveryEligible;
         internal float RecoveryExtraY;
+        internal bool BrakingCaptured, BrakingSelected;
+        internal int WitnessMask, ApproachMask, WitnessSupportId;
+        internal float BrakingExtraV;
         internal PhysicsStepContext Input, Settled;
         internal int Fixed, PelvisId, ChestId;
         internal string SourcePhase;
@@ -33,6 +36,21 @@ namespace MakemitAGA.ActiveRagdollLab.Model
             Finite(Allocated) && Finite(Q) && Q >= 0f && Q <= 1f &&
             System.Math.Abs(Allocated - (Request * Q + UpwardExtra)) <= .0001f * (1f + System.Math.Abs(Allocated)) &&
             Finite(Observed) && Finite(PreV) && Finite(PostV);
+
+        // Optional context from the same resolved N-1 input. Missing this context
+        // leaves the existing normal-response receipt and all controllers independent.
+        internal void CaptureSupportBraking(in Physics.PelvisComReferencePlanner.ComPlan plan, PhysicsStepContext planStep)
+        {
+            bool witness = plan.SupportInput.Matches(Input);
+            BrakingCaptured = planStep.Matches(Input) && plan.ArrivalEnabled && Finite(plan.SupportBrakingExtraY) &&
+                (witness || (!plan.SupportInput.ForStep.Valid && !plan.SupportBrakingSelected));
+            if (!BrakingCaptured) return;
+            WitnessMask = witness ? plan.SupportInput.StanceMask : 0;
+            ApproachMask = witness ? plan.SupportInput.ApproachMask : 0;
+            WitnessSupportId = witness ? plan.SupportInput.SupportId : 0;
+            BrakingSelected = plan.SupportBrakingSelected;
+            BrakingExtraV = plan.SupportBrakingExtraY;
+        }
 
         internal string Text()
         {

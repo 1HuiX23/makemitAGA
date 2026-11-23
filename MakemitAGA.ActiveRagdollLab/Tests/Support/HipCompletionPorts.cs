@@ -15,8 +15,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     {
         private sealed class SelectionPort { internal string Arm = DynamicHipArmB; }
         private readonly SelectionPort _control = new SelectionPort();
-        private readonly NativeBodyPort _pelvis = new NativeBodyPort(101, 4f);
-        private readonly NativeBodyPort _chest = new NativeBodyPort(102, 6f);
+        private readonly Rigidbody _pelvis = new Rigidbody { Id=101, mass=4f };
+        private readonly Rigidbody _chest = new Rigidbody { Id=102, mass=6f };
+        internal LandingRiseAllocation.Input LandingRiseInput { get; private set; }
         private readonly PelvisReceiverReport Report = new PelvisReceiverReport();
         private int _pending = -1;
         private PelvisHipCommandFrame _hipCommand;
@@ -40,34 +41,17 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             }
             Report.TraceRunning = false;
         }
-        private sealed class NativeBodyPort
-        {
-            private readonly int _id;
-            internal readonly float mass;
-            internal Vector3 velocity = Vector3.zero;
-            internal Vector3 ForceSum = Vector3.zero, TorqueSum = Vector3.zero;
-            internal int ForceCalls = 0, TorqueCalls = 0;
-            internal readonly HashSet<int> FailForceCalls = new HashSet<int>();
-            internal bool FailTorque = false;
-            internal NativeBodyPort(int id, float bodyMass) { _id = id; mass = bodyMass; }
-            internal int GetInstanceID() => _id;
-            internal void AddForce(Vector3 force, ForceMode mode)
-            {
-                ForceCalls++;
-                if (FailForceCalls.Contains(ForceCalls)) throw new InvalidOperationException("native-force-port");
-                ForceSum += force;
-            }
-            internal void AddTorque(Vector3 torque, ForceMode mode)
-            {
-                TorqueCalls++;
-                if (FailTorque) throw new InvalidOperationException("native-torque-port");
-                TorqueSum += torque;
-            }
-        }
+
     }
 
     internal sealed partial class HipPointResponseAudit
     {
+        internal void Reset() { }
+        internal void Stop() { }
+        internal void Observe(PhysicsStepContext step, int local, Rigidbody child, Rigidbody parent, Vector3 c, Vector3 p) { }
+        internal void Capture(HipAnchorPairReport.Command c, Rigidbody child, Rigidbody parent) { }
+        internal void CaptureHipTorque(PhysicsStepContext step, int local, Vector3 torque, Vector3 alpha) { }
+        internal void Cancel(PhysicsStepContext step) { }
         private struct ResponseFrame
         {
             internal HipAnchorPairReport.Command Command;
@@ -113,7 +97,7 @@ namespace MakemitAGA.ActiveRagdollLab.Model
             internal PhysicsStepContext InputStep;
             internal int Fixed, Settled;
             internal float Dt, PelvisMass, ChestMass;
-            internal bool HipReactionRecorded, Resolved, Censored;
+            internal bool HipReactionRecorded, HipEvidenceFinalized, Resolved, Censored;
             internal Vector3 PrePelvisV, PreChestV, PostPelvisV, PostChestV, PelvisJ, ChestJ, TorqueJ;
             internal Vector3 HipLeftJ, HipRightJ, HipMomentJ, SystemDeltaP, SystemResidual;
             internal PelvisHipAttitudeCommand HipAttitude;

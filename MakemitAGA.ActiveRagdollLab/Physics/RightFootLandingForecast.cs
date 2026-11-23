@@ -27,6 +27,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             internal Angular.BodyMotion Angular;
             internal Vector3 AppliedLinearA;
             internal float LinearDrag;
+            internal bool MeasuredLowerTransport;
             internal RightAnkleLandingSequence.Tether Tether;
         }
         internal struct Pair

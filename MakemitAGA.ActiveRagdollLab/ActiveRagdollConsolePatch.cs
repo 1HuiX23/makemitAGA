@@ -30,7 +30,7 @@ namespace MakemitAGA.ActiveRagdollLab
             }
             catch (Exception e)
             {
-                Plugin.Logger?.LogError("[ARL] Command failed: " + e);
+                try { Plugin.Logger?.LogError("[ARL] Command failed: " + e); } catch { }
                 PrintGame("<color=red>ARL 命令失败：</color> " + e.GetType().Name + " / " + e.Message);
                 return false;
             }
@@ -153,7 +153,7 @@ namespace MakemitAGA.ActiveRagdollLab
                 if (ankleTestArgs.Length != 1)
                 {
                     string usage = ActiveRagdollLabRuntime.StartAnkleTest();
-                    Plugin.Logger?.LogWarning("[ARL][ANKLE_TEST_BUNDLE][NOT_STARTED] started=False | reason=ARGUMENT_COUNT | " + usage);
+                    Plugin.TryLogWarning("[ARL][ANKLE_TEST_BUNDLE][NOT_STARTED] started=False | reason=ARGUMENT_COUNT | " + usage);
                     PrintGame(usage);
                 }
                 else
@@ -294,7 +294,7 @@ namespace MakemitAGA.ActiveRagdollLab
                 if (traceValid)
                 {
                     string result = ActiveRagdollLabRuntime.SetTrace(trace);
-                    Plugin.Logger?.LogInfo("[ARL][COMMAND_RESULT][TRACE] " + result);
+                    Plugin.TryLogInfo("[ARL][COMMAND_RESULT][TRACE] " + result);
                     bool stateMatches = ActiveRagdollLabRuntime.TraceActive == trace;
                     if (!stateMatches)
                     {
@@ -335,7 +335,7 @@ namespace MakemitAGA.ActiveRagdollLab
 
         private static void LogTestBundleItem(string bundle, string step, string result)
         {
-            Plugin.Logger?.LogInfo("[ARL][TEST_BUNDLE][" + bundle + "][" + step + "]\n" + (result ?? "<null>"));
+            Plugin.TryLogInfo("[ARL][TEST_BUNDLE][" + bundle + "][" + step + "]\n" + (result ?? "<null>"));
         }
 
         private static void RunTestSetupBundle(bool torsoOnly = false)
@@ -391,7 +391,7 @@ namespace MakemitAGA.ActiveRagdollLab
 
         private static void RunTestStatusBundle(bool detailed = false)
         {
-            Plugin.Logger?.LogInfo((detailed ? "[ARL][TEST_REPORT_SNAPSHOT]\n" : "[ARL][TEST_STATUS_SUMMARY]\n") + ActiveRagdollLabRuntime.GetMaintenanceStatusSnapshot(detailed));
+            if (Plugin.Logger != null) Plugin.TryLogInfo((detailed ? "[ARL][TEST_REPORT_SNAPSHOT]\n" : "[ARL][TEST_STATUS_SUMMARY]\n") + ActiveRagdollLabRuntime.GetMaintenanceStatusSnapshot(detailed));
             PrintGame(ActiveRagdollLabRuntime.FoundationSetupStatus());
             PrintGame(ActiveRagdollLabRuntime.GetAutomaticStopGameStatus());
             if (ActiveRagdollLabRuntime.PelvisStatusIsCurrentScope)
@@ -446,7 +446,7 @@ namespace MakemitAGA.ActiveRagdollLab
 
         private static void PrintHelp()
         {
-            PrintGame("<b>MakemitAGA Active Ragdoll Lab v0.4.140</b>\n" +
+            PrintGame("<b>MakemitAGA Active Ragdoll Lab v" + Plugin.PluginVersion + "</b>\n" +
                 "arl_test_setup / arl_pelvis_hip_test(a|b|stop) / arl_test_status / arl_test_cleanup\n" +
                 "arl_test_report（仅需重新展开完整诊断时使用）\n" +
                 ActiveRagdollLabRuntime.StartPelvisHipTest() + "\nUpper只读审计回归arl_pelvis_upper_load_test(b|stop)，膝部法向耦合回归arl_pelvis_knee_test(b|stop)，小腿自重回归arl_pelvis_lower_load_test(b|stop)，Foot自重对照arl_pelvis_foot_load_test(b|stop)，无载荷接触对照arl_pelvis_contact_test(b|stop)，无接触对照arl_pelvis_leg_test(a|b|stop)。\n旧腿足承重回归arl_ankle_test(b|stop)；既有Upper自重OFF对照仍接受a。\n\n" +
@@ -521,16 +521,17 @@ namespace MakemitAGA.ActiveRagdollLab
             string value = text ?? string.Empty;
             if (value.Length > MaxGameConsoleCharacters)
             {
-                Plugin.Logger?.LogWarning("[ARL][GameConsole] output-over-budget | chars=" + value.Length + " | budget=" + MaxGameConsoleCharacters);
-                Plugin.Logger?.LogInfo("[ARL][GameConsole][FULL_OUTPUT]\n" + value);
+                Plugin.TryLogWarning("[ARL][GameConsole] output-over-budget | chars=" + value.Length + " | budget=" + MaxGameConsoleCharacters);
+                bool logged = Plugin.TryLogInfo("[ARL][GameConsole][FULL_OUTPUT]\n" + value);
                 value = value.Substring(0, Math.Min(SafePrefixCharacters, value.Length)) +
-                        "\n<color=yellow>游戏内输出已截断；完整内容见 BepInEx 日志或报告文件。</color>";
+                        (logged ? "\n<color=yellow>游戏内输出已截断，完整内容见 BepInEx 日志。</color>" :
+                            "\n<color=yellow>游戏内输出已截断，完整内容写入日志失败。</color>");
             }
             try { ConsoleMain.ConsolePrintGame(value); return true; }
             catch (Exception e)
             {
-                Plugin.Logger?.LogWarning("[ARL][GAME_CONSOLE_DELIVERY_FAILED] " + e.GetType().Name + ":" + e.Message);
-                Plugin.Logger?.LogInfo("[ARL][GameConsole] " + value);
+                Plugin.TryLogWarning("[ARL][GAME_CONSOLE_DELIVERY_FAILED] " + e.GetType().Name + ":" + e.Message);
+                Plugin.TryLogInfo("[ARL][GameConsole] " + value);
                 return false;
             }
         }

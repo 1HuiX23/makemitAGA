@@ -44,6 +44,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private float _traceFeedforwardMax;
 
         internal bool Enabled => _enabled;
+        internal bool MeasuredThisStep => _finite && _currentActive;
         internal string Arm => _enabled ? ArmB : ArmA;
 
         internal void FreezeProductionArm()

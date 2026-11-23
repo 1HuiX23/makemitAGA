@@ -44,7 +44,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
     internal sealed class PelvisTestCoordinator
     {
         internal const string Plan = "TORSO_SAMPLE> TORSO_CONTROL_AND_PARENT_PUBLISH> CLOCKED_LEGS_IF_PRESENT> SESSION_READINESS";
-        internal const string TestInstructions = "ARL v0.4.166。本轮测 B，在 Main 平地从 arl_test_setup 开始。SETUP_READY 后 arl_drive(on) → arl_knee_axis_calibrate(on)，自然行走和转身采样。arl_knee_axis_status 双侧 COLLECTING_QUALITY_READY_STOP_TO_FINALIZE 后 arl_knee_axis_calibrate(off)，双侧 ready=True 后 arl_knee_axis_apply → arl_hip_stack(on)。arl_hip_stack_status 双侧 READY 后静止约 1 秒，执行 arl_pelvis_hip_test(b)。等待几何时静止，见 STARTED 与对应实验臂后计时。静止 40 秒、自然走停转身 40 秒（直线优先）、静止 20 秒。arl_pelvis_hip_test(stop) → arl_test_cleanup → arl_test_status。NOT_STARTED 或自动停止后直接 cleanup、status。revision=V041660_LEFT_FOOT_HORIZONTAL_LEAD_20261120。";
+        internal const string TestInstructions = "ARL v0.4.178。本轮测 B，在 Main 平地从 arl_test_setup 开始。SETUP_READY 后 arl_drive(on) → arl_knee_axis_calibrate(on)，自然行走和转身采样。arl_knee_axis_status 双侧 COLLECTING_QUALITY_READY_STOP_TO_FINALIZE 后 arl_knee_axis_calibrate(off)，双侧 ready=True 后 arl_knee_axis_apply → arl_hip_stack(on)。arl_hip_stack_status 双侧 READY 后静止约 1 秒，执行 arl_pelvis_hip_test(b)。等待几何时静止，见 STARTED 与对应实验臂后计时。静止 40 秒、自然走停转身 40 秒（直线优先）、静止 20 秒。arl_pelvis_hip_test(stop) → arl_test_cleanup → arl_test_status。NOT_STARTED 或自动停止后直接 cleanup、status。revision=V041780_LANDING_TRACKING_RESERVE_20261124。";
         private readonly IPelvisRunPort _port;
         internal readonly RunSession Session = new RunSession();
         private PhysicsStepContext _lastStep;
@@ -71,7 +71,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
                 _port.Prepare(arm);
                 Session.AwaitReadiness();
                 if (_port.Ready) BeginTrace();
-                string result = "ARL pelvis v0.4.166 | started=" + Session.Started + " | pending=" + Session.Pending +
+                string result = "ARL pelvis v0.4.178 | started=" + Session.Started + " | pending=" + Session.Pending +
                     " | scope=" + _port.Scope + " | runId=" + Session.RunId + " | testArm=" + Session.Arm + " | " + _port.ReadinessSummary() + " | " + Session.Status();
                 Emit("[ARL][PELVIS_TEST_BUNDLE][" + (Session.Started ? "START_ACK" : "PENDING_NATIVE_SOLVES") + "] " + result, false, false);
                 return result;
@@ -97,7 +97,9 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             LandingObservationTiming.Run.Begin(Session.Arm);
             string observation = LandingObservationTiming.Run.Running ? " | landingObservation=" + LandingObservationTiming.ModeName(LandingObservationTiming.Run.Compact) +
                 " | eventHistory=" + LandingObservationTiming.Run.History + " | rightPrecontactArm=" +
-                RightFootPrecontact.ForArm(Session.Arm) + " | leftReleaseProbe=" + LandingObservationTiming.Run.LeftReleaseProbe : "";
+                RightFootPrecontact.ForArm(Session.Arm) + " | pelvisRisePulse=" +
+                (Session.Arm == PelvisDynamicReceiverIsolation.DynamicHipArmB ? "ONE_UNLOADED_SOLVE" : "COMPARE_ONLY") + " | leftReleaseProbe=" + LandingObservationTiming.Run.LeftReleaseProbe +
+                " | bilateralTransitionTrace=" + (LandingObservationTiming.Run.Transitions != null) : "";
             string text = "ARL pelvis [STARTED] | started=True | pending=False | runId=" + Session.RunId + observation +
                 " | scope=" + _port.Scope + " | testArm=" + Session.Arm + " | " + _port.ReadinessSummary() + " | " + Session.Status();
             Emit("[ARL][PELVIS_TEST_BUNDLE][STARTED] " + text, false, false);
@@ -173,11 +175,11 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             Emit("[ARL][PELVIS_TEST_BUNDLE][STOP] " + complete + "\n[SESSION_AFTER_STOP]\n" + Session.Status(), false, automatic);
             try { _port.WriteReports(); }
             catch (Exception e) { Emit("[ARL][REPORT_WRITE_FAILED] " + e.GetType().Name, true, false); }
-            return "ARL pelvis v0.4.166 | stopped=True | " + summary;
+            return "ARL pelvis v0.4.178 | stopped=True | " + summary;
         }
         internal string Status(bool detailed = true)
         {
-            string live = "ARL pelvis v0.4.166 | stateScope=LIVE_STATE | scope=" + _port.Scope + " | pelvisTestActive=" + Session.Active +
+            string live = "ARL pelvis v0.4.178 | stateScope=LIVE_STATE | scope=" + _port.Scope + " | pelvisTestActive=" + Session.Active +
                 " | started=" + Session.Started + " | pending=" + Session.Pending + " | testArm=" + Session.Arm + " | " + Session.Status() +
                 " | plan=" + Plan + " | " + _lastStep.Status();
             if (!detailed) return live + Session.EvidenceSummary();

@@ -72,6 +72,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (!_traceEnabled || !_dynamicParentActive) return;
             _legTurnCurrent.Step = _runtimeStep; _legTurnCurrent.Fixed = _fixedUpdateSequence;
             _legTurnCurrent.Source = _runtimeSource;
+            if (LandingObservationTiming.Run.Transitions != null && _physicalParent.Matches(_runtimeStep))
+            {
+                float height = _physicalParent.SettledPoint(_rawHipConnectedAnchorLocal).y -
+                    _physicalParent.TargetPoint(_rawHipConnectedAnchorLocal).y;
+                _legTurnCurrent.TransitionHipValid = float.IsFinite(height);
+                _legTurnCurrent.TransitionHipHeight = height;
+            }
             _legTurnCurrent.ReceiverNormalResponse = _torso.PelvisReceiver.NormalResponseAt(_runtimeStep);
             _legTurnCurrent.SourcePhase = _torso.Report != null ? _torso.Report.MotionPhase : null;
             _legTurnCurrent.RawWorldWValid = _legTurnRawSourceValid && _legTurnRawSource.Matches(_runtimeSource);
@@ -268,7 +275,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     SoftClamped = _report.KneeSoftOffAxisAccelerationClamped,
                     ParentTransportEnabled = _kneeParentAngularTransport.Enabled,
                     RelativeA = _legTurnCurrent.KneeRelativeA,
-                    ParentA = _kneeParentAngularTransport.Enabled ? _lastHipAppliedAngularAccelerationWorld : Vector3.zero,
+                    ParentA = _legTurnCurrent.KneeAngular.Parent,
                     TotalA = _legTurnCurrent.KneeTotalA,
                     ReferenceSelected = _kneeReference.Selected, Reference = _kneeReference.Current,
                     PlannedSourceRecoverySelected = _kneePlannedFeedforwardSelected,
@@ -284,6 +291,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             float feedbackSigned, float allocatedFeedforwardSigned, float finalFlexionSigned)
         {
             if (!_traceEnabled || !_dynamicParentActive) return;
+            _legTurnCurrent.KneeAngular = new KneeAngularReceipt(_lastHipAppliedAngularAccelerationWorld, _kneeParentAngularTransport.Enabled);
             _legTurnCurrent.KneeTargetRelW = targetRelativeW;
             _legTurnCurrent.KneeRelativeA = relativeA; _legTurnCurrent.KneeTotalA = totalA;
             // Values from the successful original allocator/native command, not a second allocation.

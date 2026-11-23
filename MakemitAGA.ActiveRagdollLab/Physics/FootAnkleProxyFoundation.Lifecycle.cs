@@ -155,6 +155,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
                 _report.Stage = "ADD_FOOT_RIGIDBODY";
                 _body = Il2CppComponentFactory.Add<Rigidbody>(_footObject, "FOOT_ADD_RIGIDBODY");
+                _pulseBodyId = _body.GetInstanceID();
+                _pulseRootId = _targetRoot != null ? _targetRoot.GetInstanceID() : 0;
                 if (!_footVelocitySolver.Initialize(_body, _report, out string solverInitError))
                     throw new InvalidOperationException("FOOT_VELOCITY_SOLVER_INIT_FAILED:" + solverInitError);
                 _body.mass = _profile.FootMass;

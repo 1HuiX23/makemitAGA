@@ -1,6 +1,6 @@
-# MakemitAGA Active Ragdoll Lab 0.4.166 - Left Foot Horizontal Lead
+# MakemitAGA Active Ragdoll Lab 0.4.178 - Landing Tracking Reserve
 # 保存后执行：arl_profile_reload
-# A、B 右脚均采用 163 B。B 在左脚抬起时试算足部水平跟进，并核对连续三拍的高度、踝距、膝距及实际首次落脚。revision=V041660_LEFT_FOOT_HORIZONTAL_LEAD_20261120。正式流程见 arl_help。
+# A、B 右脚均采用 163 B。A 沿用原控制。B 在静止转身且双脚同拍释放后，至多一拍调整骨盆向上请求与双髋预算。两臂的左脚只读候选在水平牵引求解时留出 0.010 mm，刷新目标后按 0.10 mm 验收。停测时比较同一第二拍命令下的两种踝间隙预报。revision=V041780_LANDING_TRACKING_RESERVE_20261124。正式流程见 arl_help。
 # 本文件只保留仍由活动运行时消费的配置；历史实验参数与 A/B 细节请查长期版本记录或旧版本 ZIP。
 
 # --- 目标与 Two-Body 几何 ---

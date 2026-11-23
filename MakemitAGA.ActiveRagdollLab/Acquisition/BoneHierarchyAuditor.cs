@@ -1,3 +1,4 @@
+using System.Globalization;
 using System;
 using System.Collections.Generic;
 using MakemitAGA.ActiveRagdollLab.Configuration;
@@ -168,7 +169,7 @@ namespace MakemitAGA.ActiveRagdollLab.Acquisition
 
         private static string Format(Vector3 value)
         {
-            return "(" + value.x.ToString("G7") + "," + value.y.ToString("G7") + "," + value.z.ToString("G7") + ")";
+            return "(" + value.x.ToString("G7", CultureInfo.InvariantCulture) + "," + value.y.ToString("G7", CultureInfo.InvariantCulture) + "," + value.z.ToString("G7", CultureInfo.InvariantCulture) + ")";
         }
 
         private static string SafeSceneName()

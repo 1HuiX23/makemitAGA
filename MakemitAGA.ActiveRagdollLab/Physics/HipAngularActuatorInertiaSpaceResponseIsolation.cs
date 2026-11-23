@@ -1,3 +1,4 @@
+using System.Globalization;
 using MakemitAGA.ActiveRagdollLab.Model;
 using UnityEngine;
 
@@ -303,7 +304,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         private static string F(float value)
         {
-            return IsFinite(value) ? value.ToString("0.######") : "nan";
+            return IsFinite(value) ? value.ToString("0.######", CultureInfo.InvariantCulture) : "nan";
         }
 
         private static string V(Vector3 value)

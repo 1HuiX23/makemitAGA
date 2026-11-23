@@ -34,7 +34,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal struct Result
         {
             internal Status State;
+            internal LeftLegHeightPreparation.KneeMotion Knee;
             internal Vector3 Hip, UpperKnee, LowerKnee, LowerAnkle;
+            internal Quaternion LowerTurn;
+            internal Vector3 UpperW, LowerW;
             // Each displacement below is in world metres. Translation and rotation
             // sum to the full lower-side ankle displacement (up to floating-point rounding).
             internal Vector3 CoastCom, CommonCom, SpringCom, DamperCom, FeedforwardCom, Turn;
@@ -43,7 +46,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         private struct Advance
         {
-            internal Vector3 Before, After;
+            internal Vector3 Before, After, W;
             internal Quaternion Rotation;
             internal Vector3 Point(Vector3 point) => After + Rotation * (point - Before);
         }
@@ -55,7 +58,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             var w = Vector3.ClampMagnitude((body.W + alpha * dt) * angularDamping, body.MaxW);
             return new Advance {
                 Before = body.Com, After = body.Com + (body.V + a * dt) * (linearDamping * dt),
-                Rotation = FootRelativeReference.Advance(Quaternion.identity, w, dt)
+                W = w, Rotation = FootRelativeReference.Advance(Quaternion.identity, w, dt)
             };
         }
 
@@ -95,6 +98,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             var r = new Result {
                 State = Status.Predicted, Hip = up.Point(anchors.UpperHip), UpperKnee = up.Point(anchors.UpperKnee),
                 LowerKnee = low.Point(anchors.LowerKnee), LowerAnkle = low.Point(ankle),
+                LowerTurn = low.Rotation, UpperW = up.W, LowerW = low.W,
                 CoastCom = lower.V * velocityTime, CommonCom = cmd.CommonA * accelerationTime,
                 SpringCom = cmd.SpringA * (scale * accelerationTime), DamperCom = cmd.DamperA * (scale * accelerationTime),
                 FeedforwardCom = cmd.ParentFeedforwardA * (scale * accelerationTime),

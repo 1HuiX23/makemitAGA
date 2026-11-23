@@ -12,6 +12,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             internal float HipMaxA, ReferenceMaxA, ReferenceMaxW, UpperMaxW, LowerMaxW, FootMaxW;
             internal Vector3 LowerW, FootW, KneeRelativeA, KneeGapV, AnkleGapV;
+            internal KneeAngularReceipt KneeAngular;
         }
         internal struct Forecast
         {
@@ -54,7 +55,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             float dt = p.Dt;
             upperTurn = FootRelativeReference.Advance(Quaternion.identity, Vector3.ClampMagnitude(right.ChildW + c.AllocatedHipAlpha * dt, m.UpperMaxW), dt);
-            var lowerTurn = FootRelativeReference.Advance(Quaternion.identity, Vector3.ClampMagnitude(m.LowerW + (m.KneeRelativeA + c.AllocatedHipAlpha) * dt, m.LowerMaxW), dt);
+            // The late pelvis write can change Upper, after Lower has received its torque.
+            var parent = m.KneeAngular.HipReallocated ? m.KneeAngular.Parent : c.AllocatedHipAlpha;
+            var lowerTurn = FootRelativeReference.Advance(Quaternion.identity, Vector3.ClampMagnitude(m.LowerW + (m.KneeRelativeA + parent) * dt, m.LowerMaxW), dt);
             var com = c.ChildCom + (right.ChildComV + c.Force * (dt / c.ChildMass)) * dt;
             knee = com + upperTurn * (p.UpperKnee - c.ChildCom) + (p.LowerKnee - p.UpperKnee) + m.KneeGapV * dt;
             ankle = knee + lowerTurn * (p.LowerAnkle - p.LowerKnee);

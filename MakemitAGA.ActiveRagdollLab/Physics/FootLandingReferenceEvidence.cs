@@ -17,6 +17,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             internal SourceStepContext Source;
             internal int Fixed;
             internal float SupportTop;
+            internal bool RawSpanValid;
+            internal float RawSpanY;
+            internal Quaternion EntryLower, EntryFootRelative;
             internal Vector3 Raw, Goal, UpperTracked, LowerTracked, HipShifted, Actual;
             internal bool UpstreamValid, NormalApplied, ReceiverParentReference;
             internal Vector3 RawChain, ParentPlaced, ParentRotated, SourceFiltered, Governed;
@@ -27,13 +30,20 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         }
 
         internal static LandingPath Build(PhysicsStepContext step, SourceStepContext source, int localFixed,
-            LegLandingReferenceInput input, Vector3 rawAnkle, Vector3 actualAnkle, Quaternion lower, Vector3 scaledAnkle)
+            LegLandingReferenceInput input, Vector3 rawAnkle, Vector3 actualAnkle, Quaternion lower, Vector3 scaledAnkle, Quaternion rawUpper = default, Quaternion footRelative = default)
         {
             LandingPath p = new LandingPath { Step = step, Source = source, Fixed = localFixed, Reason = "MISSING_OR_STALE_INPUT" };
             if (!input.Matches(step, source, localFixed) || !PelvisParentFrame.Q(lower) ||
                 !PelvisParentFrame.V(rawAnkle) || !PelvisParentFrame.V(actualAnkle) || !PelvisParentFrame.V(scaledAnkle)) return p;
             Vector3 upperSpan = input.UpperHipToKnee, lowerSpan = scaledAnkle - input.LowerKneeAnchor;
             p.Raw = rawAnkle;
+            p.EntryLower = lower;
+            p.EntryFootRelative = footRelative;
+            if (PelvisParentFrame.Q(rawUpper) && PelvisParentFrame.Q(input.RawLower))
+            {
+                p.RawSpanY = (rawUpper * upperSpan + input.RawLower * lowerSpan).y;
+                p.RawSpanValid = float.IsFinite(p.RawSpanY);
+            }
             p.Goal = input.ParentHip + input.UpperGoal * upperSpan + (input.UpperGoal * input.KneeRelativeGoal) * lowerSpan;
             p.UpperTracked = input.ParentHip + input.Upper * upperSpan + (input.Upper * input.KneeRelativeGoal) * lowerSpan;
             p.LowerTracked = input.ParentHip + input.Upper * upperSpan + lower * lowerSpan;
