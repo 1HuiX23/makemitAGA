@@ -119,7 +119,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 nativeGoalCom, nativeGoalV, dt, step, feedback,
                 feedback ? _hipCommand.Acceleration : Vector3.zero,
                 feedback ? _hipAttitudeCommand.TargetSystemAcceleration : Vector3.zero, settledV, support, sampledPelvisY + offset.y);
-            if (LandingObservationTiming.Run.EarlyProbe && _control.Arm == DynamicHipArmB)
+            if (IsDynamicHipArm(_control.Arm) && (LandingObservationTiming.Run.EarlyProbe || LandingObservationTiming.Run.Transitions != null))
             {
                 _landingHeightInput = new ParentHeightProbe.Input
                 {
@@ -127,7 +127,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     Goal=nativeGoalCom, GoalV=nativeGoalV, Feedback=feedback,
                     PreviousRequest=feedback ? _hipCommand.Acceleration : Vector3.zero,
                     PreviousAllocated=feedback ? _hipAttitudeCommand.TargetSystemAcceleration : Vector3.zero,
-                    SettledV=settledV, Support=support, FloorY=sampledPelvisY+offset.y,
+                    SettledV=settledV, Support=support, FloorY=sampledPelvisY+offset.y, SampledPelvisY=sampledPelvisY,
                     CommittedPosition=comPlan.Position, CommittedV=comPlan.Velocity
                 };
             }
@@ -197,6 +197,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         }
         private void ResetReference()
         {
+            _landingHeightInput = default;
             _lastSupportRecovery = default;
             ControlErrorsValid = false;
             _referencePending = false; _referenceA = _referenceAngularA = Vector3.zero; _referenceDt = _referenceStepAlphaCap = 0f;
@@ -549,7 +550,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 if (publishCommon && _comReferenceStep.Matches(step) && _comReferencePlan.ArrivalEnabled)
                     LandingRiseInput = new LandingRiseAllocation.Input { Step = step, Support = _comReferencePlan.SupportInput,
                         RefV = targetComV.y, RefA = feedforwardA.y, PreV = actualV.y, Error = error.y };
-                if (publishCommon && LandingObservationTiming.Run.EarlyProbe && _landingHeightInput.Step.Matches(step))
+                if (publishCommon && _landingHeightInput.Step.Matches(step))
                 {
                     _landingHeightInput.ReceiverReady=true; _landingHeightInput.ActualCom=actualCom;
                     _landingHeightInput.PositionError=error; _landingHeightInput.VelocityError=targetComV-actualV;

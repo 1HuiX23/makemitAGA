@@ -77,7 +77,7 @@ namespace ARL.Contracts
                 }
                 string report = sim.Report();
                 Check.That(report.Contains("/inputEnd=FirstOpportunity/inputs=6") &&
-                    report.Split("TURN_COMBINED_INPUT_V041780/").Length == 7 && report.Split("/readBonesM=").Length == 7 &&
+                    report.Split("TURN_COMBINED_INPUT_V041790/").Length == 7 && report.Split("/readBonesM=").Length == 7 &&
                     report.Contains("start-issue-read=3|8|9") && report.Contains("/entryLocal-floor-confirmed-ground-held-inside=9|6|True|True|True|True"),
                     "all native commands and surveyed endpoints retained through first");
                 Check.That(!report.Contains("/legInputs=LeftBraked") && report.Contains("/rawA-appliedA=") && report.Contains("/nominalM(hip-upperKnee-lowerKnee-lowerAnkle-foot)="),
@@ -85,7 +85,7 @@ namespace ARL.Contracts
                 if (loseFoot)
                     Check.That(report.Contains("/sequenceEnd=MissingFootCommand/stopLocal=4") &&
                         report.Contains("/lastSafeRead=4/allMarginsAtNativeFirst=Unavailable") &&
-                        report.Contains("/retainedBufferedShoe-preAlso-lowerAlso-bothAlso=Unavailable") && report.Split("J178/").Length == 2,
+                        report.Contains("/retainedBufferedShoe-preAlso-lowerAlso-bothAlso=Unavailable") && report.Split("J179/").Length == 2,
                         "raw reporting cannot reseed a terminated trial");
                 else Check.That(report.Contains("/sequenceEnd=WouldEnter/stopLocal=9") &&
                     report.Contains("/lastSafeRead=9/allMarginsAtNativeFirst=True") && report.Contains("/strongSteps-marginPass-readySamples=4|4|4"),
@@ -122,7 +122,7 @@ namespace ARL.Contracts
                     "physical history outlives geometric stop");
                 if (noForecast)
                     Check.That(log.Contains("/sequenceEnd=NoSafeFootForecast/stopLocal=3") && log.Contains("/allMarginsAtNativeFirst=Unavailable") &&
-                        !log.Contains("J178/"), "zero legal foot commands cannot be graded or reseeded");
+                        !log.Contains("J179/"), "zero legal foot commands cannot be graded or reseeded");
                 else Check.That(log.Contains("/sequenceEnd=DepthLatched/stopLocal=9") && log.Contains("/allMarginsAtNativeFirst=False") &&
                     log.Contains("/strongStart=6/trialDepthLatch=6"), "complete but failed ordinary opportunity receives an explicit negative grade");
             }

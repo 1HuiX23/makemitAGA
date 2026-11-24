@@ -29,7 +29,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal static ComPlan Build(Vector3 position, Vector3 velocity, Vector3 goal, Vector3 goalV,
             float dt, bool arrival, bool feedback, Vector3 previousRequest, Vector3 previousAllocated, Vector3 settledV, bool feedbackEnabled, SupportReferenceContext support = default,
             bool supportFloor = false, float supportFloorY = 0f, bool supportNormalPriority = false, bool enhancedNormalFeedback = false,
-            bool supportBraking = false)
+            bool supportBraking = false, float? transitionFloorY = null)
         {
             if (!F(dt) || dt <= 0f || !V(position) || !V(velocity) || !V(goal) || !V(goalV) ||
                 velocity.magnitude > MaxV + 0.001f || (arrival && !V(settledV)) ||
@@ -80,6 +80,16 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 }
                 priorityExtraY = candidateV.y - remainder.y;
                 tangentDeltaV = new Vector3(candidateV.x - remainder.x, 0f, candidateV.z - remainder.z).magnitude;
+            }
+            // The turn comparison consumes only the remaining vector budget. The real support
+            // fields stay empty and the original deficit feedback still runs on the candidate.
+            if (transitionFloorY.HasValue)
+            {
+                if (!arrival || supportFloor || support.StanceMask != 0)
+                    throw new InvalidOperationException("TURN_HEIGHT_REFERENCE_CONTEXT_INVALID");
+                float floor = transitionFloorY.Value;
+                float minimum = SupportNormalBraking.MinimumVelocity(position.y, floor, dt, MaxA);
+                candidateV = SupportNormalReference.RaiseCandidate(position, velocity, candidateV, floor, dt, MaxV, MaxA, minimum);
             }
             // Preserve the original deficit/braking policy AFTER candidate shaping.
             // Any remaining undershoot is evidence, never permission to snap or raise a cap.

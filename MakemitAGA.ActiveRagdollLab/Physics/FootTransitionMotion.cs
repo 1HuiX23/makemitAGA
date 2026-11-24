@@ -80,7 +80,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal bool TryRender(in Sample end, int sequence, out Sample sample)
         {
             sample = sequence > 0 ? _history[sequence%RenderCapacity] : default;
-            return sample.Valid && sample.Visual.Valid && sample.Clock.Epoch == end.Clock.Epoch && sample.Clock.Sequence == sequence &&
+            return end.Valid && end.Clock.Valid && end.Continuity == _continuity && sample.Valid && sample.Visual.Valid && sample.Clock.Epoch == end.Clock.Epoch && sample.Clock.Sequence == sequence &&
                 sample.Root == end.Root && sample.Continuity == end.Continuity;
         }
 
@@ -95,7 +95,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal static Vector3 Planar(Vector3 v) => new Vector3(v.x, 0f, v.z);
         internal void Clear()
         {
-            Current = default; Travel = default; _armed = false; ConsumeBrake();
+            _continuity++; Current = default; Travel = default; _armed = false; ConsumeBrake();
         }
         internal void ConsumeBrake() => BrakeSequence = 0;
         internal void DropBrake()

@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- ARL v0.4.178 uses v163 B right-foot contact in both arms. B retains the v173 single pelvis pulse. Left landing candidates reserve 0.010 mm for horizontal target refresh. The two ankle-gap forecasts are compared at stop on the same frozen commands.
+  <!-- ARL v0.4.183 audits right-foot STANCE re-entry on the 25 mm A baseline; optional B keeps the 35 mm first sample. Both arms retain the v181 B body and v173 single pelvis pulse. The left preview slot ranks buffered continuations in strong landing by their largest planar displacement over the two predicted steps.
        Hip/Knee Fixed and Foot Render planners retain their original continuous R/W/A ownership.
        Startup, shared-step Hip completion and first-cause preservation retain the v125 R4 fixes.
        Shared clocks and session ownership; legacy loaded baseline retained. -->
@@ -14,9 +14,9 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <AssemblyName>MakemitAGA.ActiveRagdollLab</AssemblyName>
     <RootNamespace>MakemitAGA.ActiveRagdollLab</RootNamespace>
-    <Version>0.4.178</Version>
-    <AssemblyVersion>0.4.178</AssemblyVersion>
-    <FileVersion>0.4.178</FileVersion>
+    <Version>0.4.183</Version>
+    <AssemblyVersion>0.4.183</AssemblyVersion>
+    <FileVersion>0.4.183</FileVersion>
     <CodePage>65001</CodePage>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <MiSideRoot Condition="'$(MiSideRoot)' == ''">C:\dpan\jgggggg\steam\steamapps\common\MiSide</MiSideRoot>

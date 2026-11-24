@@ -21,7 +21,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             internal Vector3 ActualCom, PositionError, VelocityError;
             internal float PositionLimit;
             internal SupportReferenceContext Support;
-            internal float FloorY;
+            internal float FloorY, SampledPelvisY;
             internal Vector3 CommittedPosition, CommittedV;
         }
 
@@ -74,7 +74,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             plan = default;
             var result = new Result { Outcome = Status.InputMissing };
             if (!original.Step.Matches(t.Step) || !t.Source.Valid || t.Source.Epoch != t.Step.Epoch ||
-                t.Source.Sequence != t.Step.SourceSequence || original.Arm != PelvisDynamicReceiverIsolation.DynamicHipArmB ||
+                t.Source.Sequence != t.Step.SourceSequence || !PelvisDynamicReceiverIsolation.IsDynamicHipArm(original.Arm) ||
                 !PelvisParentFrame.F(t.Loss) || t.Loss < FootContactGeometryLimits.OrdinaryPenetrationMeters ||
                 !PelvisParentFrame.V(original.CommittedPosition) || !PelvisParentFrame.V(original.CommittedV)) return result;
             bool floor = original.Support.Matches(t.Step);

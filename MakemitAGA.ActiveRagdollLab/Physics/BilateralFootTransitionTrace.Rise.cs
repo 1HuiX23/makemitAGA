@@ -19,7 +19,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         internal void ObserveRise(in PhysicsStepContext step, in Rise.Input input, in HipAnchorPairInput left,
             in HipAnchorPairInput right, in Command actualL, in Command actualR, in PelvisHipAttitudeCommand torso,
-            in PelvisNormalResponseEvidence resolved, bool leftFirst = true, bool pulseApplied = false)
+            in PelvisNormalResponseEvidence resolved, bool leftFirst = true, bool pulseApplied = false, ParentHeightProbe.Input height = default)
         {
             if (!WantsRiseStep(step)) return;
             _lastRiseStep = step;
@@ -32,6 +32,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             var w = _release[0];
             if (!w.Last.Foot.Step.Matches(step) || !w.NativeLandingPath.BeginRise(t,_previous.Right,input,
                 left,right,actualL,actualR,torso,leftFirst,pulseApplied)) return;
+            if (w.Early != null && PelvisDynamicReceiverIsolation.IsDynamicHipArm(height.Arm))
+                w.NativeLandingPath.CompareTurnHeight(w.Origin.Foot.Local,t,_previous.Right,height,left,right,actualL,actualR,leftFirst,pulseApplied);
             _risePending = w;
         }
 
@@ -57,6 +59,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 internal Read State;
                 internal Rise.Input Input;
                 internal Rise.Result Plans;
+                internal TurnHeightContinuation.Result TurnHeight;
+                internal ParentHeightProbe.Input HeightInput;
                 internal float Predicted(in Rise.Plan p) => PreHipV + Step.Dt * p.SocketA;
                 internal bool Earlier(in Rise.Plan p)
                 {

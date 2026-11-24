@@ -12,7 +12,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             if (left == null || right == null || !LandingRiseAllocation.TryTorso(plan.Left,plan.Right,out var target)) return RejectHipCompletion("RISE_PULSE_TORSO_BUDGET");
             var frame = target.Baseline;
-            if (_control.Arm != DynamicHipArmB || !ReadyForRun || !_expectHipCompletion || !BodyStateMatch() ||
+            if (!IsDynamicHipArm(_control.Arm) || !ReadyForRun || !_expectHipCompletion || !BodyStateMatch() ||
                 !LandingRiseInput.Step.Matches(step) || !LandingRiseInput.Valid || LandingRiseInput.Support.Matches(step) ||
                 !LandingRiseInput.WitnessKnown(floor) || !_hipCommand.Matches(step,_pelvis.GetInstanceID()) ||
                 _hipCommand.ChestBodyId != _chest.GetInstanceID() || !_hipAttitudeCommand.Matches(_hipCommand) ||

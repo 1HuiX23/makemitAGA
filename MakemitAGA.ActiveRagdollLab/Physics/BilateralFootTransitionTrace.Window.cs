@@ -57,13 +57,15 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             internal int QuietStreak, LongestQuiet;
             private int _lastQuietSource;
             internal bool LandingFinal, Slowed;
+            internal readonly RightReentry Reentry;
             internal readonly Curve Ankle = new Curve(), Sole = new Curve();
             internal Window(int side, Kind kind, in View point, in View prev, FootTransitionSource.Heading heading,
-                string trigger, int source, FootTransitionSource renders)
+                string trigger, int source, FootTransitionSource renders, bool reentry)
             {
                 Side = side; Type = kind; Origin = point; Before = prev; Trigger = trigger; TriggerSource = source;
                 Heading = heading.Recent(point.Foot.Source.Clock.Time) ? heading : default;
                 if (side == 0 && kind == Kind.PairRelease) NativeLandingPath = new LeftLandingPath();
+                if (reentry) Reentry = new RightReentry(prev);
                 var reference = prev.Foot.Local != 0 ? prev.Foot : point.Foot;
                 Ankle.BaselineKnown = Sole.BaselineKnown = prev.Foot.Local != 0;
                 Ankle.Baseline = Along(reference.Foot-reference.Target);
@@ -93,7 +95,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     if (Braked != null && FirstEligibleLocal == 0 && t.Floor != 0 && t.Entry.Local == t.Local && t.Entry.Floor == t.Floor)
                         FirstEligibleLocal = t.Local;
                 }
+                bool beforeFirst = First.Foot.Local == 0;
                 ObserveLanding(point);
+                Reentry?.Observe(point, beforeFirst);
                 if (Type == Kind.Brake)
                 {
                     ReadRenders(source,t.Source,t.Source.Clock.Sequence);
@@ -165,6 +169,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 .Append(_pairs).Append('|').Append(_cuts).Append('|').Append(_rejected).Append('|').Append(_missingFoot)
                 .Append('|').Append(_faults).Append('|').Append(_sealedPartial)
                 .Append("/left-right-unseenRenderBrakes=").Append(_sources[0].UnseenBrakes).Append('|').Append(_sources[1].UnseenBrakes)
+                .Append("/duplicate-stale-invalidSide=").Append(_duplicates).Append('|').Append(_staleSides).Append('|').Append(_invalidSides)
+                .Append("/conflictingClocks=").Append(_conflicts)
                 .Append("/unmatchedCallbacks=").Append(_unmatchedCallbacks)
                 .Append("/capacityPerSideKind=").Append(MaxPerSideKind);
             for (int side=0; side<2; side++)
@@ -175,6 +181,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 b.Append("/pairedLift-worldTanOnly-relNoSwing-relStance-nearQuiet=");
                 for (int k=0;k<5;k++) b.Append(k==0 ? "" : "|").Append(_lift[side,k]);
             }
+            int capturedReentries = 0;
+            foreach (var w in _windows) if (w.Reentry != null) capturedReentries++;
+            b.Append("\nRIGHT_STANCE_REENTRY_COUNTS_V041830/eligible-recorded-omitted=").Append(_reentrySeen).Append('|')
+                .Append(capturedReentries).Append('|').Append(_reentrySeen-capturedReentries)
+                .Append("/unrecordedRightSingle-pairReleases=").Append(_skipped[1,(int)Kind.SingleRelease]).Append('|').Append(_skipped[1,(int)Kind.PairRelease]);
             AppendHandoffCounts(b);
             foreach (var w in _windows) AppendWindow(b,w);
             return b.ToString();
@@ -240,7 +251,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 w.Braked.AppendContinuous(b, w.First.Foot, w.Landing, w.Resolved.Foot.Local, w.FirstEligibleLocal);
                 w.Combined.AppendCombined(b, w.First.Foot, w.Landing, w.Resolved.Foot.Local, w.FirstEligibleLocal, w.Braked);
                 w.NativeLandingPath.AppendHeightBudget(b, w.Combined, w.FirstEligibleLocal);
+                w.NativeLandingPath.AppendTurnHeight(b, w.Origin.Foot.Local, w.FirstEligibleLocal, w.First.Foot.Local);
             }
+            w.Reentry?.Append(b, w);
             w.NativeLandingPath?.AppendRise(b, w.Origin.Foot.Local, FirstOpportunity(w), w.First.Foot, w.Braked);
             w.NativeLandingPath?.AppendHeights(b, w.Origin.Foot.Local, FirstOpportunity(w), w.Braked != null);
         }

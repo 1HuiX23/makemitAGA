@@ -61,16 +61,18 @@ namespace ARL.Contracts
             Check.That(!timing.Running && session.Session.Pending, "pending geometry excluded");
             port.ReadyValue = true;
             session.OnFixed(RuntimeContracts.Step(1));
-            Check.That(timing.Running && timing.Compact && timing.History && !timing.SwingProbe && !timing.EarlyProbe && port.LastStatus.Contains("landingObservation=COMPACT | eventHistory=True"), "actual resolved arm readback");
+            Check.That(timing.Running && timing.Compact && timing.History && !timing.EarlyProbe && port.LastStatus.Contains("landingObservation=COMPACT | eventHistory=True"), "actual resolved arm readback");
+            Check.That(port.LastStatus.Contains("rightPrecontactNativeFirstMm=35") && port.LastStatus.Contains("pelvisRisePulse=ONE_UNLOADED_SOLVE"), "B starts on the 35 mm right selector");
             using (timing.Measure(LandingObservationTiming.Stage.FixedLoop)) { }
             session.OnFixed(RuntimeContracts.Step(3));
             Check.That(!timing.Running && !timing.Compact && port.Restores == 1 &&
                 session.Session.CompletedSnapshot.Contains("LANDING_COST_V041430/mode=COMPACT") &&
                 session.Session.CompletedSnapshot.Contains("stage=FixedLoop/calls-totalMs-meanMs-maxMs=1|"), "automatic stop freezes the right trace");
             session.Start("a");
-            Check.That(timing.Running && timing.Compact && timing.History && !timing.SwingProbe && !timing.EarlyProbe, "A and B restart the same event history without retired comparison work");
+            Check.That(timing.Running && timing.Compact && timing.History && !timing.EarlyProbe, "A and B restart the same event history without retired comparison work");
+            Check.That(port.LastStatus.Contains("rightPrecontactNativeFirstMm=25") && port.LastStatus.Contains("pelvisRisePulse=ONE_UNLOADED_SOLVE"), "A starts on 181 B physical settings");
             session.Stop("USER_STOP");
-            Check.That(session.Session.CompletedSnapshot.Contains("LANDING_COST_V041430/mode=COMPACT/eventHistory=True/swingKneeProbe=False/earlyLandingProbe=False") &&
+            Check.That(session.Session.CompletedSnapshot.Contains("LANDING_COST_V041430/mode=COMPACT/eventHistory=True/earlyLandingProbe=False") &&
                 session.Session.CompletedSnapshot.Contains("stage=FixedLoop/calls-totalMs-meanMs-maxMs=0|") && port.Restores == 2,
                 "user stop publishes an independent run");
         }

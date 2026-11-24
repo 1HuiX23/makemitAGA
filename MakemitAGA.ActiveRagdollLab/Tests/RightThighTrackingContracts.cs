@@ -30,7 +30,7 @@ namespace ARL.Contracts
         private static Audit.Sample Sample(int n, in RightKneePivot.Frame p)
         {
             var s = SwingKneeContracts.Sample(n, p.Dt, n * p.Dt);
-            s.EarlyFoot = EarlyLandingWindow.Foot.Right; s.SourcePhase = "STEADY"; s.SwingMeasured = false; s.ParentHeightMeasured = true;
+            s.EarlyFoot = EarlyLandingWindow.Foot.Right; s.SourcePhase = "STEADY"; s.ParentHeightMeasured = true;
             s.Min = p.Box; s.FloorCenter = p.FloorCenter; s.FloorHalf = p.FloorHalf; s.AnchorGap = .008f;
             s.KneeHeights = new Vector3(p.GoalKneeY, p.GoalKneeY, p.LowerKnee.y);
             s.AnkleHeights = new Vector3(p.RawAnkleY, p.LowerAnkle.y, p.FootAnkle.y);

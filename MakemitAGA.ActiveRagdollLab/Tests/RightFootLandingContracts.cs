@@ -46,7 +46,7 @@ namespace ARL.Contracts
         internal static Audit.Sample Sample(int n,in F.Pose p)
         {
             var s=SwingKneeContracts.Sample(n,p.Box.Dt,n*p.Box.Dt);
-            s.EarlyFoot=EarlyLandingWindow.Foot.Right; s.ParentHeightMeasured=true; s.RightLandingObserved=true; s.SwingMeasured=false;
+            s.EarlyFoot=EarlyLandingWindow.Foot.Right; s.ParentHeightMeasured=true; s.RightLandingObserved=true;
             s.FloorCenter=p.Box.FloorCenter; s.FloorHalf=p.Box.FloorHalf; s.Min=p.Box.Box; s.TrackingValid=true;
             s.AnkleHeights=new Vector3(.04f,p.Box.LowerAnkle.y,p.Box.FootAnkle.y);
             s.AnchorGap=p.Gap; s.AnkleDeltaY=p.Box.FootAnkle.y-p.Box.LowerAnkle.y; s.ControlMin=p.PresentGoal-s.AnkleDeltaY;

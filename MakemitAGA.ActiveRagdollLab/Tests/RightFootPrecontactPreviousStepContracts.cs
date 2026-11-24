@@ -64,12 +64,12 @@ namespace ARL.Contracts
                  ReviewPose(4960, -.6906092f, -4.948929f, -1.682442f, -59.50994f, 110.1686f), 4954, .003166f, "GoalClear")
             };
             foreach (var (prior, due, releasedNext, impulseStep, impulse, rejection) in cases)
-            foreach (var mode in new[] { Window.Mode.NearGroundHold8mm, Window.Mode.PreviousStepExpiryReview })
+            foreach (var mode in new[] { Window.Mode.NearGroundHold8mm, Window.Mode.PreviousStepExpiryReview, Window.Mode.PreviousStepExpiryReviewFirst35mm })
             {
                 var log = new List<string>();
                 var w = BeforeFirstExpiry(mode, prior, log.Add, impulse, impulseStep);
                 var end = w.Evaluate(due, false, out _);
-                bool grant = mode == Window.Mode.PreviousStepExpiryReview;
+                bool grant = mode != Window.Mode.NearGroundHold8mm;
                 Check.That(end == Window.End.Timeout && w.TryKeepAtBoundary(end) == grant, "cutoff " + due.Local);
                 if (!grant) w.Close(end, due.Local);
                 Check.That(log.Count == 1 && log[0].Contains("/action=" + (grant ? "Extend" : "Timeout") + "/atBaseMatch=" + rejection + "/") &&

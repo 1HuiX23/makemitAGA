@@ -626,6 +626,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             {
                 SampleSourcePoseInternal(true);
                 if (_sampleValid) CompletedSource = source;
+                if (LandingObservationTiming.Run.Running)
+                    LandingObservationTiming.Run.SourceRotation.Observe(source, _sampleValid ? _sampledPelvisRotation : default,
+                        _profile.SourceTurnEventRotationDeltaDegrees);
             }
             finally { _insideRuntimeSource = false; }
         }

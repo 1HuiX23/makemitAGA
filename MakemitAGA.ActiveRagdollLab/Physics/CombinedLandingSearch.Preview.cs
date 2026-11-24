@@ -203,6 +203,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             float dt, float hipY)
         {
             Path winner = default;
+            float? winnerPeakShift = null;
             bool found = false;
             if (!_preview.HasNominee) return;
             for (int i = 0; i < NominationLimit; i++)
@@ -223,14 +224,30 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 }
                 if (seen) continue;
                 int geometry = found ? CompareGeometry(p, winner) : -1;
-                if (geometry > 0 || (geometry == 0 && CompareWitness(p.Horizon, winner.Horizon) >= 0)) continue;
-                found = true; winner = p;
+                if (geometry > 0) continue;
+
+                // After a strong receipt, a large first-step displacement can also lose the
+                // refreshed target. Compare the worse of the two issue-time predictions.
+                float? peakShift = null;
+                if (p.Entry.StrongSamples > 0 && p.Entry.DepthLatch == 0 && p.Horizon.Buffered)
+                    peakShift = Mathf.Max(PlanarShift(nominal, p.Move.Forecast, p.Leg.Base), p.Horizon.PlanarShift);
+
+                if (geometry == 0)
+                {
+                    int order = peakShift.HasValue && winnerPeakShift.HasValue
+                        ? peakShift.Value.CompareTo(winnerPeakShift.Value) : 0;
+                    if (order > 0 || (order == 0 && CompareWitness(p.Horizon, winner.Horizon) >= 0)) continue;
+                }
+                found = true;
+                winner = p;
+                winnerPeakShift = peakShift;
             }
             if (!found || step.Count == Width) return;
             winner.Protected = false;
             winner.PreviewSlot = true;
             winner.Id = ++_nextId;
             step.Paths[step.Count++] = winner;
+            step.PreviewPeakShift = winnerPeakShift;
         }
     }
 }

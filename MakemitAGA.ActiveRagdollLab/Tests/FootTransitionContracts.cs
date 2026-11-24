@@ -9,7 +9,7 @@ using Phase = MakemitAGA.ActiveRagdollLab.Physics.FootLandingOpportunityAudit.Ph
 
 namespace ARL.Contracts
 {
-    internal static class FootTransitionContracts
+    internal static partial class FootTransitionContracts
     {
         private const float Dt = .02f;
         private static readonly Vector3 Axis = Vector3.forward;
@@ -17,6 +17,7 @@ namespace ARL.Contracts
         private static void Near(Vector3 a, Vector3 b, string msg) => Check.Near((a-b).magnitude,0f,.0001f,msg);
         internal static void Run()
         {
+            RunRightReentryContracts();
             Check.Run("168 frozen gait bounds, simultaneous causes and 167 confirmation samples", Gait);
             Check.Run("168 adjacent Render rigid transport, rotation and rejected derivatives", SourceMotion);
             Check.Run("168 material-point velocity and all eight box vertices", SoleBox);
@@ -317,7 +318,7 @@ namespace ARL.Contracts
                 s.Frame(0,0,0,(ref Trace.Tick a,ref Trace.Tick b)=>Release(ref a));
                 s.Frame(0,0,0,(ref Trace.Tick a,ref Trace.Tick b)=>{a.Was=false;a.Ordinary=true;});
             }
-            s.Trace.Submit(0,default);var log=s.Report();
+            s.Trace.Submit(0,Receipt(s.Solve+1,s.Solve+1,s.Render,false));var log=s.Report();
             Check.That(Records(log,"FOOT_TRANSITION_EVENT_V041680").Length==Trace.MaxPerSideKind,"bounded rows");
             Check.That(Val(Records(log,"FOOT_TRANSITION_COUNTS_V041680")[0],"seen-skipped(pair,single,brake)")=="0|0,51|3,0|0","dropped counted");
             Check.That(Val(Records(log,"FOOT_TRANSITION_V041680")[0],"pairs-cuts-rejected-missing-faults-sealedPartial").EndsWith("|1"),"partial sealed");

@@ -337,7 +337,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             else if (!traceEnabled && _traceEnabled)
                 EndTrace();
 
-            Quaternion inverseLowerRotation = Quaternion.Inverse(_lowerBody.rotation);
+            Quaternion lowerWorldRotation = _lowerBody.rotation;
+            Quaternion inverseLowerRotation = Quaternion.Inverse(lowerWorldRotation);
             Quaternion footWorldRotation = _body.rotation;
             Quaternion currentRelative = inverseLowerRotation * footWorldRotation;
             Vector3 lowerAnchorWorld = _lowerBody.transform.TransformPoint(_lowerAnkleAnchorLocal);
@@ -536,6 +537,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 bool opportunityWasActive = FormalStanceContactActive;
                 bool leftReleaseProbe = _traceEnabled && LandingObservationTiming.Run.LeftReleaseProbe && _report.Side == "LEFT";
                 var transitionTrace = _traceEnabled ? LandingObservationTiming.Run.Transitions : null;
+                // Active formal steps bypass ordinary entry geometry. Hold the selected control orientation
+                // at the same PRE_N boundary for the right release trace, including its preceding support step.
+                Quaternion releaseControl = default;
+                if (transitionTrace != null && opportunityWasActive && TransitionSide == 1)
+                    releaseControl = lowerWorldRotation * ControlRelativeRotation;
                 int priorSupport = opportunityWasActive ? _contactShadow.AuthorizedColliderId : 0;
                 _formalBeforePulse = opportunityWasActive;
                 _pulsePriorFloor = priorSupport;
@@ -578,7 +584,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                         if (_stanceContactLifecycle.FirstMissThisStep)
                             ObserveLandingOpportunity(step, fixedSequence, sampleAge, anchorError, currentRelative,
                                 lowerAnchorWorld, footAnchorWorld, legTurnEvidence, opportunityWasActive, swingKnee, footWorldRotation, entryContext);
-                        if (LandingObservationTiming.Run.SwingProbe) _swingWindow.Cut();
                         if (LandingObservationTiming.Run.EarlyProbe) { _earlyWindow.Cut(); _rightThigh?.Cut(); _rightFootForecast?.Cut(RightFootForecastWindow.Interruption.Fault); _rightFootLanding?.Cut(RightFootLandingWindow.End.Fault); }
                         _landingOpportunity.Fault();
                     }
@@ -782,7 +787,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                         leftFrame, legTurnEvidence);
                 if (transitionTrace != null)
                     CaptureTransitionStep(transitionTrace, step, fixedSequence, fresh, heldDepth, sampleAge, opportunityWasActive,
-                        priorSupport, footAnchorWorld, lowerAnchorWorld, footPointVelocity, footWorldRotation, legTurnEvidence);
+                        priorSupport, footAnchorWorld, lowerAnchorWorld, footPointVelocity, footWorldRotation, legTurnEvidence, entryContext, releaseControl);
                 // V041210 exports existing strong/geometry evidence at the SAME completion boundary.
                 // Preparing a reference earlier does not enable a collider or qualify a load.
                 bool supportWitness = expectedDynamic && _stanceContactLifecycle.Enabled && _stanceContactLifecycle.Finite &&
@@ -840,7 +845,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _landingOpportunity.Reset();
             _leftRelease = null;
             _parentHeight = null; _rightAnkle = null; _rightThigh = null; _rightFootForecast = null; _rightFootLanding = null;
-            _swingWindow.Reset(); _earlyWindow.Reset(); _swingObserved = _earlyObserved = false;
+            _earlyWindow.Reset(); _earlyObserved = false;
             _report.LandingOpportunitySummary = "TRACE_ACTIVE_SUMMARY_AT_STOP";
 
             _stanceLowerGroundAuthority.ResetTrace(_report);
@@ -870,7 +875,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _gameNativeGaitPhase.EndTrace(_report);
             _stanceContactLifecycle.EndTrace(_report);
             _landingOpportunity.Seal();
-            _report.LandingOpportunitySummary = _landingOpportunity.Summary() + _stanceContactLifecycle.Precontact.Summary() + (_earlyObserved ? _earlyWindow.Summary() + _swingWindow.Summary(early: true) : _swingObserved ? _swingWindow.Summary() : "");
+            _report.LandingOpportunitySummary = _landingOpportunity.Summary() + _stanceContactLifecycle.Precontact.Summary() + (_earlyObserved ? _earlyWindow.Summary() : "");
 
             if (_leftRelease != null)
             {
@@ -1252,6 +1257,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private bool FormalCallbackActive => FormalStanceContactActive && !_stanceContactLifecycle.AwaitingFormalCallback && _report.ContactShadowCurrentContactActive;
         private bool FormalStanceContactActive => _contactShadow.Finite && _contactShadow.Active && !_stanceContactLifecycle.Precontact.Physical;
         internal bool ContactEntryContinuous => _stanceContactLifecycle.ContinuousEntry;
+        internal RightFootPrecontact.Mode PrecontactMode => _stanceContactLifecycle.Precontact.Selected;
         internal bool ContactEntryRecovery => _stanceContactLifecycle.EntryRecovery;
         internal void SelectContactEntryContinuous(bool enabled, bool recovery = false, bool groundReference = false, bool partialGround = false, bool loadAdmission = false, bool footTrajectory = false, bool footKneeProgress = false, RightFootPrecontact.Mode precontact = RightFootPrecontact.Mode.Off)
         {

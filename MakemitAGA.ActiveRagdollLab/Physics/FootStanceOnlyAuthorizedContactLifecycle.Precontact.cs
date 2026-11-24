@@ -29,6 +29,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (Precontact.Selected == RightFootPrecontact.Mode.Off) return true;
             if (shadow.Active && !Precontact.Physical)
             {
+                Precontact.ObserveExistingFormal();
                 Precontact.BreakContinuity();
                 return true;
             }

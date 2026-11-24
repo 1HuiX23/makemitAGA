@@ -154,17 +154,18 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         private static void ReleaseWrites()
         {
-            foreach (bool b in new[]{false,true})
+            foreach (var arm in new[] { DynamicHipArmA, DynamicHipArmB, "LEGACY" })
             foreach (bool trace in new[]{true,false})
             foreach (bool leftFirst in new[]{true,false})
             foreach (bool retain in new[]{true,false})
             {
                 PulseFixture(retain,leftFirst,trace,out var p,out var l,out var r,out var next);
                 var step=next.Left.Step; var native=l.Report.Current;
-                p._control.Arm=b?DynamicHipArmB:DynamicHipArmA;
-                ARL.Contracts.Check.That(p.ApplyLandingPulse(step,6,l,r,leftFirst,next)==b,"only formal B writes");
-                var lc=b?next.Left:native;
-                var rc=b?next.Right:r.Report.Current;
+                p._control.Arm = arm;
+                bool selected = arm != "LEGACY";
+                ARL.Contracts.Check.That(p.ApplyLandingPulse(step,6,l,r,leftFirst,next)==selected,"both formal arms use the verified pulse");
+                var lc=selected?next.Left:native;
+                var rc=selected?next.Right:r.Report.Current;
                 var target=p._hipAttitudeCommand;
                 NearVector(l.TestUpper.ForceSum,lc.Force,"left point force");
                 NearVector(r.TestUpper.ForceSum,rc.Force,"right point force");
@@ -174,7 +175,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 NearVector(p._chest.ForceSum,p._chest.mass*target.CommonAcceleration,"chest total force");
                 NearVector(p._pelvis.TorqueSum,lc.ParentTorque+rc.ParentTorque+target.AppliedTorque,"pelvis total torque");
                 ARL.Contracts.Check.That(target.Matches(p._hipCommand) && target.Baseline.SameAs(lc.ParentInput),"next-step feedback uses final request and allocation");
-                if (b) ARL.Contracts.Check.That(!p.ApplyLandingPulse(step,6,l,r,leftFirst,next),"duplicate pulse rejected before finalizing");
+                if (selected) ARL.Contracts.Check.That(!p.ApplyLandingPulse(step,6,l,r,leftFirst,next),"duplicate pulse rejected before finalizing");
                 l.FinishFootDecision(step); r.FinishFootDecision(step); p.FinishFootDecision(step);
                 l.FinishFootDecision(step); r.FinishFootDecision(step); p.FinishFootDecision(step);
                 ARL.Contracts.Check.That(p.Report.HipReactionRecords==(trace?1:0) && l.Report.Writes==(trace?1:0) && r.Report.Writes==(trace?1:0),"one evidence row per owner");

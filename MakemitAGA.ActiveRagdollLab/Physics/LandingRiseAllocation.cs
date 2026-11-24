@@ -110,10 +110,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         }
 
         // Preserve primary/secondary order even when the anatomical left leg is secondary.
-        private static bool PlanPair(HipAnchorPairInput l, HipAnchorPairInput r, bool leftFirst, out Command lc, out Command rc) =>
+        internal static bool PlanPair(HipAnchorPairInput l, HipAnchorPairInput r, bool leftFirst, out Command lc, out Command rc) =>
             leftFirst ? HipBilateralForceSolver.TryPlan(l,r,out lc,out rc) : HipBilateralForceSolver.TryPlan(r,l,out rc,out lc);
 
-        private static bool Solve(PelvisHipCommandFrame frame, HipAnchorPairInput l, HipAnchorPairInput r, bool leftFirst, out Plan plan)
+        internal static bool Solve(PelvisHipCommandFrame frame, HipAnchorPairInput l, HipAnchorPairInput r, bool leftFirst, out Plan plan)
             => Solve(frame, l, r, leftFirst, out plan, out _);
 
         internal enum Choice { None, Request, Retention }
@@ -201,7 +201,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 Extra = l.UpwardExtraAcceleration, SocketA = socketA.y, System = torso.TargetSystemAcceleration, RightForce = r.Force };
         }
 
-        private static bool Reproduces(in Command a, in Command b) =>
+        internal static bool Reproduces(in Command a, in Command b) =>
             Same(a.Force,b.Force) && Same(a.UpperActuatorTorque,b.UpperActuatorTorque) && Same(a.CommonAcceleration,b.CommonAcceleration) &&
             Same(a.BilateralAngularReaction,b.BilateralAngularReaction) && Near(a.MotionScale,b.MotionScale) &&
             Near(a.UpperAngularScale,b.UpperAngularScale) && Near(a.UpwardExtraAcceleration,b.UpwardExtraAcceleration);

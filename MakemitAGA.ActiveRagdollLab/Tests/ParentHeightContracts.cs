@@ -107,7 +107,12 @@ namespace ARL.Contracts
             l = Pose(t.Box); l.Ankle.x = t.Half.x; Check.That(Probe.Compare(t, input, l, r, out _).Outcome == Probe.Status.Footprint, "edge");
             input.Step.Epoch++; Check.That(!Probe.Compare(t, input, l, r, out _).Planned, "foreign receiver clock");
             input = Input(s.Step); input.Arm = PelvisDynamicReceiverIsolation.DynamicHipArmA;
-            Check.That(!Probe.Compare(t, input, l, r, out _).Planned, "no A receipt consumed");
+            var peer = Pose(.0002f); peer.Active = peer.Authorized = true;
+            var same = Probe.Compare(t, input, Pose(s.Min), peer, out _);
+            Check.That(same.Planned && same.Outcome == good.Outcome && same.Delta.Equals(good.Delta) &&
+                same.RightGapGrowth == good.RightGapGrowth, "both arms retain the 181 B parent-height probe");
+            input.Arm = "LEGACY";
+            Check.That(!Probe.Compare(t, input, Pose(s.Min), peer, out _).Planned, "unselected scope rejected");
         }
 
         private static void Allocation()

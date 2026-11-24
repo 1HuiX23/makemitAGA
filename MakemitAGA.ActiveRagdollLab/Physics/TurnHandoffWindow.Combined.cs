@@ -33,7 +33,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     if (p.FirstPreExcess == 0 && p.FirstLowerExcess == 0) both++;
                 }
             }
-            b.Append("\nTURN_COMBINED_V041780/start-first-resolved=").Append(Start).Append('|').Append(first.Local).Append('|').Append(resolved)
+            b.Append("\nTURN_COMBINED_V041790/start-first-resolved=").Append(Start).Append('|').Append(first.Local).Append('|').Append(resolved)
                 .Append("/native=").Append(nativeOutcome ?? "Open").Append("/nativeFirstEligible-depthLatch=").Append(firstEligible).Append('|').Append(first.NativeDepthLatch)
                 .Append("/sequenceEnd=").Append(outcome).Append("/stopLocal=").Append(_combined.Outcome == null ? _lastVisit : _combined.EndLocal)
                 .Append("/inputEnd=").Append(End ?? "Open").Append("/inputs=").Append(_rows.Count)
@@ -56,7 +56,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 var step = r.Combined;
                 var prior = rowIndex > 0 ? _rows[rowIndex - 1].Combined : null;
                 var next = rowIndex + 1 < _rows.Count ? _rows[rowIndex + 1] : null;
-                b.Append("\nTURN_COMBINED_INPUT_V041780/start-issue-read=").Append(Start).Append('|').Append(r.From).Append('|').Append(r.To)
+                b.Append("\nTURN_COMBINED_INPUT_V041790/start-issue-read=").Append(Start).Append('|').Append(r.From).Append('|').Append(r.To)
                     .Append("/dt=").Append(Exact(r.Dt)).Append("/source-next=").Append(r.Source).Append('|').Append(r.NextSource)
                     .Append("/parent-legOptions-predicted-kept-safeReads=").Append(step.Parents).Append('|').Append(step.LegOptions).Append('|')
                     .Append(step.Forecasts).Append('|').Append(step.Count).Append('|').Append(step.SafeReads)
@@ -86,7 +86,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 {
                     ref var p = ref step.Paths[i];
                     var a = p.Leg.Offset;
-                    b.Append("\nJ178/issue-path-parent=").Append(r.From).Append('|').Append(p.Id).Append('|').Append(p.Parent)
+                    b.Append("\nJ179/issue-path-parent=").Append(r.From).Append('|').Append(p.Id).Append('|').Append(p.Parent)
                         .Append("/protected=").Append(p.Protected).Append("/hip-kneeRad-rate=").Append(Exact(a.Hip)).Append('|').Append(Exact(a.Knee))
                         .Append('|').Append(Exact(a.HipRate)).Append('|').Append(Exact(a.KneeRate))
                         .Append("/footOffsetM=").Append(V(p.Move.Body.Position)).Append("/footDeltaVMps=").Append(V(p.Move.Body.Velocity))
@@ -104,6 +104,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     b.Append("/firstPreExcess-firstLowerExcess-peakLowerLossMm=").Append(p.FirstPreExcess).Append('|')
                         .Append(p.FirstLowerExcess).Append('|').Append(Mm(p.PeakLowerLoss));
                     b.Append("/previewSlot=").Append(p.PreviewSlot).Append("/planarAdjustment=").Append(p.Move.PlanarAdjusted);
+                    if (p.PreviewSlot && step.PreviewPeakShift.HasValue)
+                        b.Append("/previewPeakShiftMm=").Append(Mm(step.PreviewPeakShift.Value));
                     var h = p.Horizon;
                     b.Append("/nextForecast=").Append(!h.Evaluated ? "Unexamined" : !h.Feasible ? "NoCommand" : h.Buffered ? "Buffered" : "Safe");
                     if (h.Feasible)
@@ -139,10 +141,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                         b.Append("/strongSteps-marginPass-latch=").Append(p.Entry.StrongSamples).Append('|').Append(p.MarginSamples).Append('|').Append(p.Entry.DepthLatch);
                 }
             }
-            b.Append("\nTURN_LANDING_PREVIEW_V041780/start=").Append(Start)
+            b.Append("\nTURN_LANDING_PREVIEW_V041790/start=").Append(Start)
                 .Append("/paired-predictedBuffered-actualGeometry-actualTracking-actualBoth=").Append(paired).Append('|')
                 .Append(predictedBuffered).Append('|').Append(measuredGeometry).Append('|').Append(measuredTracking).Append('|').Append(measuredBoth);
-            b.Append("\nTURN_ANKLE_GAP_V041780/start=").Append(Start)
+            b.Append("\nTURN_ANKLE_GAP_V041790/start=").Append(Start)
                 .Append("/feasible-paired-unpaired-bufferedPairs=").Append(feasible).Append('|').Append(allErrors.Count)
                 .Append('|').Append(feasible - allErrors.Count).Append('|').Append(bufferedErrors.Count)
                 .Append("/maeOrder=linearSole|linearGap|heldSole|heldGap/allMaeMm=");

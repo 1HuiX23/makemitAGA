@@ -158,7 +158,7 @@ namespace ARL.Contracts
         private static Audit.Sample Sample(int i)
         {
             var s = SwingKneeContracts.Sample(i, 1f / 60f, i / 60f);
-            s.SwingMeasured = false;
+           
             s.ParentHeightMeasured = true;
             s.EarlyFoot = EarlyLandingWindow.Foot.Right;
             s.SourcePhase = "STEADY";

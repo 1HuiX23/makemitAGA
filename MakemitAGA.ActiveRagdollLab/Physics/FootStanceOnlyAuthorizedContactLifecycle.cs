@@ -144,6 +144,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             FootSupportSurfaceIsolation supportSurface = null,
             EntryContext entryContext = default, FootStanceContactFrictionIsolation friction = null)
         {
+            Precontact.BeginEntryAudit(fixedSequence, traceEnabled, _entryMissCounted);
             bool pending = false;
             bool ok = StepCore(traceEnabled, fixedSequence, fixedDeltaTime, gaitState, strongStanceSample, identityCurrentQualified,
                 identityColliderId, identityColliderPath, currentGroundCollider, shadow, footCollider, sourceRoot, report,
@@ -154,6 +155,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             else if (shadow == null || !shadow.Active) AwaitingFormalCallback = false;
             if (!ok && Precontact.Tracking)
                 ClosePrecontact(RightFootPrecontact.End.Fault, fixedSequence, shadow, report);
+            Precontact.CompleteEntryAudit(ok, OrdinaryEnabledThisStep, RecoveryEnabledThisStep, FirstMissThisStep,
+                FirstMissDepthFixed, _entryWindowMissed, PrecontactEventOrigin,
+                shadow != null && shadow.Active && !Precontact.Physical);
             if (report != null) report.PrecontactColliderActive = Precontact.Physical;
             return ok;
         }

@@ -6,9 +6,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     internal sealed partial class FootAnkleProxyFoundation
     {
         private readonly FootLandingOpportunityAudit _landingOpportunity = new FootLandingOpportunityAudit();
-        private readonly SwingLandingWindow _swingWindow = new SwingLandingWindow();
         private readonly EarlyLandingWindow _earlyWindow = new EarlyLandingWindow();
-        private bool _swingObserved, _earlyObserved;
+        private bool _earlyObserved;
         private static FootLandingOpportunityAudit.Phase LandingPhase(string gait) =>
             gait == FootGameNativeLocomotionPhaseObserver.StateStance ? FootLandingOpportunityAudit.Phase.Stance :
             gait == FootGameNativeLocomotionPhaseObserver.StateToStance ? FootLandingOpportunityAudit.Phase.Approach :
@@ -26,12 +25,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             {
                 string gait = _gameNativeGaitPhase.State;
                 var phase = LandingPhase(gait);
-                if (timing.SwingProbe) _swingObserved = true;
                 if (timing.EarlyProbe) _earlyObserved = true;
                 if (wasActive && timing.Compact)
                 {
                     // Active steps need only the original clock and gait edge for the next inactive step.
-                    if (timing.SwingProbe) _swingWindow.Cut();
                     if (timing.EarlyProbe) { _earlyWindow.Cut(); _rightAnkle?.Cut(); _rightThigh?.Cut(); _rightFootForecast?.Cut(RightFootForecastWindow.Interruption.ActiveAtEntry); _rightFootLanding?.Cut(RightFootLandingWindow.End.Active); }
                     _landingOpportunity.ObserveActive(step, _report.RuntimeSourceContext, localFixed,
                         phase, _gameNativeGaitPhase.CurrentStrongStanceSample, FormalStanceContactActive);
@@ -81,27 +78,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     RawHipY = rawY, ReferenceHipY = referenceY, ActualHipY = actualY
                 };
                 RightKneePivot.Frame pivot = default;
-                if (timing.SwingProbe)
-                {
-                    sample.SwingMeasured = true;
-                    try
-                    {
-                        sample.SwingSignal = _swingWindow.Observe(sample);
-                        if (sample.SwingSignal == SwingLandingWindow.Signal.Diverging)
-                        {
-                            using var probeTime = timing.Measure(LandingObservationTiming.Stage.SwingKneeProbe);
-                            sample.SwingCandidate = CompareSwingKnee(sample, leg, swingKnee, lowerAnkle, footAnkle, actualRelative, controlRelative);
-                            _swingWindow.Record(sample.SwingCandidate.Reason);
-                        }
-                    }
-                    catch
-                    {
-                        _swingWindow.Fault();
-                        if (sample.SwingSignal == SwingLandingWindow.Signal.Diverging)
-                        { sample.SwingCandidate.Reason = SwingKneeCandidate.Status.Fault; _swingWindow.Record(sample.SwingCandidate.Reason); }
-                    }
-                }
-                else if (timing.EarlyProbe)
+                if (timing.EarlyProbe)
                 {
                     sample.ParentHeightMeasured = true;
                     sample.EarlyFoot = EarlyLandingWindow.Side(_report.Side);
@@ -127,7 +104,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                         if (EarlyLandingWindow.LeftTrial(sample.EarlySignal))
                         {
                             using var probeTime = timing.Measure(LandingObservationTiming.Stage.EarlyKneeProbe);
-                            sample.SwingCandidate = CompareSwingKnee(sample, leg, swingKnee, lowerAnkle, footAnkle, actualRelative, controlRelative, early: true);
+                            sample.SwingCandidate = CompareEarlyKnee(sample, leg, swingKnee, lowerAnkle, footAnkle, actualRelative, controlRelative);
                             _earlyWindow.Record(sample.SwingCandidate.Reason);
                         }
                     }
@@ -142,7 +119,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 }
                 _landingOpportunity.Observe(sample, timing.History, pivot);
             }
-            catch { if (timing.SwingProbe) _swingWindow.Fault(); if (timing.EarlyProbe) { _earlyWindow.Fault(); _rightAnkle?.Cut(); _rightThigh?.Cut(); _rightFootForecast?.Cut(RightFootForecastWindow.Interruption.Fault); _rightFootLanding?.Cut(RightFootLandingWindow.End.Fault); } _landingOpportunity.Fault(); } // Optional diagnostics never interrupt or grant control.
+            catch { if (timing.EarlyProbe) { _earlyWindow.Fault(); _rightAnkle?.Cut(); _rightThigh?.Cut(); _rightFootForecast?.Cut(RightFootForecastWindow.Interruption.Fault); _rightFootLanding?.Cut(RightFootLandingWindow.End.Fault); } _landingOpportunity.Fault(); } // Optional diagnostics never interrupt or grant control.
         }
 
         private KneeGroundTarget.Geometry SwingGeometry(in FootLandingOpportunityAudit.Sample sample,
@@ -159,44 +136,33 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             };
         }
 
-        private SwingKneeCandidate.Result CompareSwingKnee(in FootLandingOpportunityAudit.Sample sample, in LegTurnStepEvidence leg,
-            SwingKneeCandidate.Controller controller, Vector3 lowerAnkle, Vector3 footAnkle, Quaternion actualFoot, Quaternion selectedFoot, bool early = false)
+        private SwingKneeCandidate.Result CompareEarlyKnee(in FootLandingOpportunityAudit.Sample sample, in LegTurnStepEvidence leg,
+            SwingKneeCandidate.Controller controller, Vector3 lowerAnkle, Vector3 footAnkle, Quaternion actualFoot, Quaternion selectedFoot)
         {
             var k = controller.Read();
             var h = leg.HipNormalReference;
             var receipt = new SwingKneeCandidate.Result { Reason = SwingKneeCandidate.Status.Unavailable };
-            if (early)
-            {
-                receipt.HipModes = leg.Modes; receipt.RecoveryBits = leg.HipFeedforwardStateBits;
-                receipt.Handoff = leg.HipNormalRecoveryHandoffActive || leg.HipNormalRecoveryHandoffStarted;
-                receipt.HipReason = h.Matches(sample.Step) ? h.Reason : null;
-                receipt.KneeFeedforward = leg.KneeFeedforwardValid ? leg.KneeFeedforwardReason : null;
-            }
+            receipt.HipModes = leg.Modes; receipt.RecoveryBits = leg.HipFeedforwardStateBits;
+            receipt.Handoff = leg.HipNormalRecoveryHandoffActive || leg.HipNormalRecoveryHandoffStarted;
+            receipt.HipReason = h.Matches(sample.Step) ? h.Reason : null;
+            receipt.KneeFeedforward = leg.KneeFeedforwardValid ? leg.KneeFeedforwardReason : null;
             if (!leg.Matches(sample.Step,sample.Fixed) || !leg.Source.Matches(sample.Source) || !leg.KneeHeightsValid ||
                 !leg.LandingInput.Parent.Matches(sample.Step,sample.Source) || !k.Matches(sample.Step,sample.Source) ||
                 !_relativeReference.Active || !_relativeReference.Current.Source.Matches(sample.Source))
             { receipt.Gate = "MISSING_LEG_KNEE_PARENT_OR_FOOT"; return receipt; }
-            bool handoff = leg.HipNormalRecoveryHandoffActive || leg.HipNormalRecoveryHandoffStarted;
             var parent = leg.LandingInput.Parent;
-            Vector3 hip = parent.ReferencePoint;
-            Quaternion upperGoal = leg.HipTargetR, measuredUpper = leg.UpperR;
-            if (early)
-            {
-                var path = leg.HipGoalPath;
-                var basis = SwingKneeCandidate.EarlyHip(path,h,sample.Step,sample.Source,sample.Fixed,leg.Modes,handoff);
-                if (basis == SwingKneeCandidate.HipPlacement.Missing || !_relativeReference.Finite)
-                { receipt.Gate = "MISSING_COMMITTED_PATH_OR_FOOT"; return receipt; }
-                if (basis == SwingKneeCandidate.HipPlacement.Unsupported)
-                { receipt.Reason = SwingKneeCandidate.Status.Protected; receipt.Gate = "STALE_OR_UNSUPPORTED_HIP"; return receipt; }
-                // The protected controller issued its own world R/W. Place that rotation at the
-                // settled mechanical parent anchor and retain the real PRE_N knee and ankle gap.
-                bool settled = basis == SwingKneeCandidate.HipPlacement.SettledParent;
-                receipt.HipBasis = settled ? "SETTLED_PARENT" : "RECEIVER_REFERENCE";
-                hip = settled ? parent.ActualPoint : parent.ReferencePoint;
-                upperGoal = path.Final; measuredUpper = path.PhysicalUpper;
-            }
-            else if (!SwingKneeCandidate.OrdinaryHip(h,sample.Step,handoff))
-            { receipt.Reason = SwingKneeCandidate.Status.Protected; return receipt; }
+            var path = leg.HipGoalPath;
+            var basis = SwingKneeCandidate.EarlyHip(path,h,sample.Step,sample.Source,sample.Fixed,leg.Modes,receipt.Handoff);
+            if (basis == SwingKneeCandidate.HipPlacement.Missing || !_relativeReference.Finite)
+            { receipt.Gate = "MISSING_COMMITTED_PATH_OR_FOOT"; return receipt; }
+            if (basis == SwingKneeCandidate.HipPlacement.Unsupported)
+            { receipt.Reason = SwingKneeCandidate.Status.Protected; receipt.Gate = "STALE_OR_UNSUPPORTED_HIP"; return receipt; }
+            // The protected controller issued its own world R/W. Place that rotation at the
+            // settled mechanical parent anchor and retain the real PRE_N knee and ankle gap.
+            bool settled = basis == SwingKneeCandidate.HipPlacement.SettledParent;
+            receipt.HipBasis = settled ? "SETTLED_PARENT" : "RECEIVER_REFERENCE";
+            var hip = settled ? parent.ActualPoint : parent.ReferencePoint;
+            var upperGoal = path.Final; var measuredUpper = path.PhysicalUpper;
             var lower = _lowerBody.rotation;
             var scale = _collider.transform.lossyScale;
             if (!IsFinite(scale) || scale.x<=0f || scale.y<=0f || scale.z<=0f)
@@ -205,13 +171,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             var pose = new SwingKneeCandidate.Pose { Reference=g, PhysicalKnee=leg.PhysicalLowerKnee, AnkleGap=footAnkle-lowerAnkle,
                 Axis=controller.Axis, AllowExtension=controller.AllowExtension, HipW=leg.HipTargetW, PhysicalUpper=measuredUpper,
                 PhysicalLower=lower, PhysicalFootRelative=actualFoot, SelectedFoot=selectedFoot, ObservedBox=sample.Min, LowerAnkleY=lowerAnkle.y };
-            var result = SwingKneeCandidate.Evaluate(pose,k,sample.Step,sample.Source,measureRoom: early);
-            if (early)
-            {
-                result.HipBasis = receipt.HipBasis; result.HipReason = receipt.HipReason; result.HipModes = receipt.HipModes;
-                result.RecoveryBits = receipt.RecoveryBits; result.Handoff = receipt.Handoff; result.KneeFeedforward = receipt.KneeFeedforward;
-            }
-            _swingWindow.KeepPose(sample.Fixed,sample.SupportId,pose,k,result);
+            var result = SwingKneeCandidate.Evaluate(pose,k,sample.Step,sample.Source,measureRoom: true);
+            result.HipBasis = receipt.HipBasis; result.HipReason = receipt.HipReason; result.HipModes = receipt.HipModes;
+            result.RecoveryBits = receipt.RecoveryBits; result.Handoff = receipt.Handoff; result.KneeFeedforward = receipt.KneeFeedforward;
             return result;
         }
     }

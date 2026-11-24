@@ -55,7 +55,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         private void CaptureTransitionStep(BilateralFootTransitionTrace trace, in PhysicsStepContext step, int local,
             bool fresh, int held, float age, bool was, int priorFloor, Vector3 foot, Vector3 lower, Vector3 velocity,
-            Quaternion rotation, in LegTurnStepEvidence leg)
+            Quaternion rotation, in LegTurnStepEvidence leg, in FootStanceOnlyAuthorizedContactLifecycle.EntryContext entry,
+            Quaternion releaseControl)
         {
             using var cost = LandingObservationTiming.Run.Measure(LandingObservationTiming.Stage.FootTransitionPair);
             try
@@ -111,6 +112,28 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     EntryReferenceValid=references, SourceMin=geometry.SourceMinClearance, ControlMin=geometry.ControlMinClearance,
                     HipValid=hip, HipHeight=hip ? leg.TransitionHipHeight : 0f
                 };
+                if (side == 1)
+                {
+                    // For a qualified entry reuse the eight-corner native receipt. Weak STANCE and
+                    // the release itself can lack that receipt. Project the same held source and selected
+                    // control onto the current selected plane, marking the provenance separately from identity.
+                    if (references)
+                    {
+                        t.RightEntryMin = geometry.MinClearance;
+                        t.RightReference = BilateralFootTransitionTrace.Reference.Entry;
+                    }
+                    else if (was || (entry.FixedSequence == local && entry.ReferencesValid))
+                    {
+                        // Keep just the same-solve inputs on active and weak-stance steps. Only an
+                        // observed release window projects them, including the immediately preceding step.
+                        t.RightPose = new Trace.SelectedPose { Source = _sampledFootRotation,
+                            Control = was ? releaseControl : entry.ControlRotation, Center = center, Half = half,
+                            PlaneTop = floorCenter.y + floorHalf.y };
+                        t.RightReference = Trace.Reference.SelectedPlane;
+                    }
+                    t.QualifiedIdentity = _report.ContactIdentityCurrentQualified &&
+                        _report.ContactIdentityCurrentColliderInstanceId == t.Floor;
+                }
                 if (side == 0 && trace.WantsLeftHeight && legId && leg.Matches(step, local))
                     t.Height = LandingHeightBreakdown.Capture(t, leg.LandingInput, geometry.LandingPath, leg.ReceiverNormalResponse,
                         geometry.LandingGoal, _sampledFootRotation,

@@ -54,8 +54,8 @@ namespace ARL.Contracts
             {
                 timing.Begin(arm);
                 Check.That(timing.LeftReleaseProbe == PelvisDynamicReceiverIsolation.IsDynamicHipArm(arm), "both formal arms observe the left release");
-                Check.That(RightFootPrecontact.ForArm(arm) == (timing.Running ? RightFootPrecontact.Mode.PreviousStepExpiryReview :
-                    RightFootPrecontact.Mode.Off), "163 B right baseline");
+                Check.That(RightFootPrecontact.ForArm(arm) == (arm == PelvisDynamicReceiverIsolation.DynamicHipArmB ? RightFootPrecontact.Mode.PreviousStepExpiryReviewFirst35mm :
+                    timing.Running ? RightFootPrecontact.Mode.PreviousStepExpiryReview : RightFootPrecontact.Mode.Off), "right physical entry by arm");
                 timing.Seal(); Check.That(!timing.LeftReleaseProbe, "sealed");
             }
             Check.That(F.UnloadedFoot(false,false,false,false,0,false), "native off receipt has scheduledFixed zero");

@@ -70,7 +70,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _expiryMatch = MatchExpiry(s, out _current.PredictionOnlyAtBase, out _current.WideForecastAtBase);
             _previousAtBase = previous;
             // Evaluate has already checked adjacent clocks, the same floor, gait and hard limits.
-            // Both arms record the opportunity. Only B can spend the first extra solve on it.
+            // Both current arms use the v163 B previous-step extension.
             _current.PreviousStepCandidate = UsesNearGroundHold(Selected) &&
                 (_expiryMatch is ExpiryMatch.GoalClear or ExpiryMatch.NotDescending) &&
                 _current.LastUnloadedLocal == previous.Local && s.Min >= 0f && s.Min <= PreviousStepReviewHeightMeters &&
@@ -82,7 +82,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         }
 
         private bool CanExtendAtBase => _expiryMatch == ExpiryMatch.Eligible ||
-            (Selected == Mode.PreviousStepExpiryReview && _current.PreviousStepCandidate);
+            (UsesPreviousStepReview(Selected) && _current.PreviousStepCandidate);
 
         // Called only after the ordinary/recovery/miss owner decides the current step.
         internal bool TryExtendAtExpiry(End reason)

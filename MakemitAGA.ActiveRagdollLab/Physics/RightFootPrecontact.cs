@@ -9,7 +9,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     // The selector owns a temporary collider window. Strong stance and load admission keep their own clocks.
     internal sealed partial class RightFootPrecontact
     {
-        internal enum Mode { Off, FallingForecastRise5mm, NearGroundHold8mm, PreviousStepExpiryReview }
+        internal enum Mode { Off, FallingForecastRise5mm, NearGroundHold8mm, PreviousStepExpiryReview, PreviousStepExpiryReviewFirst35mm }
         internal enum End { None, Handoff, Lift, Rising, Floor, Clock, Stale, Depth, Gap, Timeout, Miss, Stop, Fault, TraceEnded, ExtensionLimit, GoalLost, NearGroundExit }
         internal const float MaxSeconds = .150f;
         private const int DetailLimit = 64;
@@ -17,6 +17,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         // This allowance applies only to the lower edge of an already extended near-ground window.
         private const float NearGroundZeroToleranceMeters = .000001f;
         private const float NearGroundMaxMeters = .008f;
+        private const float FirstHeight35 = .035f;
         private const float MinHeight = .001f;
         private const float MaxHeight = FootContactGeometryLimits.RecoveryMaxGapMeters;
 
@@ -34,8 +35,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             internal bool Geometry => ExactFloor && Support != 0 && float.IsFinite(Min) && float.IsFinite(Predicted) &&
                 float.IsFinite(CornerV) && float.IsFinite(AnkleY) && float.IsFinite(Gap) && Gap >= 0f;
             internal bool Fresh => float.IsFinite(Age) && Age >= 0f && Age <= FootContactGeometryLimits.RecoveryMaxSourceAgeSeconds;
-            internal bool Approach => Clock && Geometry && Fresh && PhaseKnown && !Lift &&
-                Min >= MinHeight && Min <= MaxHeight && CornerV < 0f;
+            internal bool Approach => ApproachWithin(MaxHeight);
+            internal bool ApproachWithin(float maximum) => Clock && Geometry && Fresh && PhaseKnown && !Lift &&
+                Min >= MinHeight && Min <= maximum && CornerV < 0f;
         }
 
         private struct Episode
@@ -45,7 +47,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             internal int ExpiryLocal, ExtraSolves, RisingLocal, NearHoldFirstRise;
             internal float ExtraSeconds;
             internal bool Extended, RisingPending, PredictionOnlyAtBase, WideForecastAtBase, WideForecastAtRise, PreviousStepCandidate;
-            internal float Seconds, StartMin, StartPred, StartGap, Low, Rise, PeakGap, FirstJ, FirstKick, NonzeroJ, NonzeroKick, PeakJ, PeakKick;
+            internal float FirstMin, Seconds, StartMin, StartPred, StartGap, Low, Rise, PeakGap, FirstJ, FirstKick, NonzeroJ, NonzeroKick, PeakJ, PeakKick;
             internal End Reason;
         }
 
@@ -65,6 +67,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal bool Physical => Tracking && Selected != Mode.Off;
         internal int LinkedOrigin { get; private set; }
         private Sample _last;
+        private float _requestFirstMin = float.NaN;
         private Episode _current;
         private Vector3 _windowFloorCenter, _windowFloorHalf;
         private readonly Episode[] _details = new Episode[DetailLimit];
@@ -74,10 +77,21 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private double _time, _linkedAt;
         private bool _locked, _positionRising;
 
-        internal static Mode ForArm(string arm) =>
-            PelvisDynamicReceiverIsolation.IsDynamicHipArm(arm) ? Mode.PreviousStepExpiryReview : Mode.Off;
+        internal static Mode ForArm(string arm) => arm switch
+        {
+            PelvisDynamicReceiverIsolation.DynamicHipArmA => Mode.PreviousStepExpiryReview,
+            PelvisDynamicReceiverIsolation.DynamicHipArmB => Mode.PreviousStepExpiryReviewFirst35mm,
+            _ => Mode.Off
+        };
 
-        private static bool UsesNearGroundHold(Mode mode) => mode is Mode.NearGroundHold8mm or Mode.PreviousStepExpiryReview;
+        private static float FirstMaximum(Mode mode) => mode == Mode.PreviousStepExpiryReviewFirst35mm ? FirstHeight35 : MaxHeight;
+        internal static int FirstMaximumMm(Mode mode) => IsPhysicalMode(mode) ? (int)MathF.Round(FirstMaximum(mode) * 1000f) : 0;
+        private static bool UsesPreviousStepReview(Mode mode) => mode is Mode.PreviousStepExpiryReview or Mode.PreviousStepExpiryReviewFirst35mm;
+        private static bool UsesNearGroundHold(Mode mode) => mode == Mode.NearGroundHold8mm || UsesPreviousStepReview(mode);
+
+        private enum EntryBand { Unknown, Common25, Added35 }
+        private static EntryBand Band(float first) => first >= MinHeight && first <= FirstHeight35
+            ? (first <= MaxHeight ? EntryBand.Common25 : EntryBand.Added35) : EntryBand.Unknown;
         private static bool IsPhysicalMode(Mode mode) => UsesNearGroundHold(mode) || mode == Mode.FallingForecastRise5mm;
 
         // The older first-rise mode is retained for recorded contract replays only.
@@ -87,6 +101,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal void Select(Mode mode) { Reset(); Selected = IsPhysicalMode(mode) ? mode : Mode.Off; }
         private void Reset()
         {
+            _entryAudit = null;
             FinishRisingReview("Reset", 0);
             FinishFollow("Reset");
             ResetExpiryCounters();
@@ -94,6 +109,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             Tracking = _locked = false;
             _current = default;
             _last = default;
+            _requestFirstMin = float.NaN;
             _evaluated = _exact = _approach = _pairs = 0;
             _carriedIn = _started = _saved = _solves = _checked = _violations = _callbacks = _withCallback = 0;
             ClearLink(); _time = 0d;
@@ -104,6 +120,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private int _carriedIn;
         internal void ResetTrace()
         {
+            _entryAudit = UsesPreviousStepReview(Selected) ? new EntryAudit(Selected) : null;
             ResetExpiryCounters();
             if (Tracking && _current.Extended) _cutoffs = _matches = _extensions = 1;
             if (_impactLive)
@@ -158,7 +175,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
         private void ClearLink() { LinkedOrigin = _linkedSupport = 0; _linkedAt = 0d; }
         internal void AfterFormalEvent() { ClearLink(); _locked = true; }
-        internal void BreakContinuity() { FinishFollow("ContinuityEnded"); _last = default; _locked = false; ClearLink(); }
+        internal void BreakContinuity() { FinishFollow("ContinuityEnded"); _last = default; _requestFirstMin = float.NaN; _locked = false; ClearLink(); }
 
         private static bool Adjacent(in Sample a, in Sample b) =>
             a.Clock && b.Clock && a.Step.Epoch == b.Step.Epoch && a.Step.Sequence + 1 == b.Step.Sequence &&
@@ -170,7 +187,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             a.Support == b.Support && a.FloorCenter.Equals(b.FloorCenter) && a.FloorHalf.Equals(b.FloorHalf);
 
         internal static bool Candidate(in Sample previous, in Sample current) =>
-            previous.Approach && current.Approach && Adjacent(previous, current) && SameFloor(previous, current) &&
+            Candidate(previous, current, MaxHeight, Adjacent(previous, current) && SameFloor(previous, current));
+
+        private static bool Candidate(in Sample previous, in Sample current, float firstMaximum, bool same) =>
+            same && previous.ApproachWithin(firstMaximum) && current.Approach &&
             current.Min < previous.Min && current.AnkleY < previous.AnkleY &&
             current.Gap <= FootContactGeometryLimits.RecoveryMaxAnchorGapMeters &&
             current.Predicted >= -FootContactGeometryLimits.OrdinaryPenetrationMeters;
@@ -179,6 +199,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal End Evaluate(in Sample s, bool missInProgress, out bool wantsOpen)
         {
             wantsOpen = false;
+            _requestFirstMin = float.NaN;
             var previous = _last;
             _last = s;
             _evaluated++;
@@ -195,6 +216,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
 
             if (Tracking)
             {
+                _entryAudit?.Observe(s, same, newSwing, tracking: true, request: false);
                 if (!adjacent) return End.Clock;
                 if (!same || !s.Geometry) return End.Floor;
                 ObserveHeight(s);
@@ -224,8 +246,13 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 _locked = false;
                 ClearLink();
             }
-            wantsOpen = !_locked && !missInProgress && !newSwing && s.Step.Dt <= MaxSeconds && Candidate(previous, s);
-            if (wantsOpen) _pairs++;
+            wantsOpen = !_locked && !missInProgress && !newSwing && s.Step.Dt <= MaxSeconds && Candidate(previous, s, FirstMaximum(Selected), same);
+            _entryAudit?.Observe(s, same, newSwing, tracking: false, request: wantsOpen);
+            if (wantsOpen)
+            {
+                _pairs++;
+                _requestFirstMin = previous.Min;
+            }
             return End.None;
         }
 
@@ -236,10 +263,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             _windowFloorCenter = s.FloorCenter;
             _windowFloorHalf = s.FloorHalf;
             _current = new Episode { Epoch = s.Step.Epoch, Shared = s.Step.Sequence, Source = s.Source.Sequence,
-                Origin = s.Local, Last = s.Local, Support = s.Support, StartMin = s.Min, StartPred = s.Predicted,
+                Origin = s.Local, Last = s.Local, Support = s.Support, FirstMin = _requestFirstMin, StartMin = s.Min, StartPred = s.Predicted,
                 StartGap = s.Gap, Low = s.Min, PeakGap = s.Gap, FirstJ = float.NaN, FirstKick = float.NaN,
                 NonzeroJ = float.NaN, NonzeroKick = float.NaN, PeakJ = float.NaN, PeakKick = float.NaN };
             Tracking = _locked = true;
+            _entryAudit?.Opened(s.Local, Band(_current.FirstMin));
             _started++; LinkedOrigin = s.Local; _linkedSupport = s.Support; _linkedAt = _time;
         }
 
@@ -307,6 +335,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             else if (reason == End.Rising && Selected == Mode.FallingForecastRise5mm && _last.Min > RisingReviewMeters &&
                 EligibleRisingReview())
                 WriteRisingReview("ControlRelease", local, local, _last.Predicted < _last.Min);
+            _entryAudit?.Closed(_current.Origin, reason, local);
             CloseExpiry(reason, local);
             _current.Reason = reason;
             if (local > 0) _current.Last = local;
@@ -350,6 +379,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     .Append("/callbacks-missingImpulse-missingW=").Append(e.Callbacks).Append('|').Append(e.MissingImpulse).Append('|').Append(e.MissingW)
                     .Append("/verifiedUnloaded-violations=").Append(e.VerifiedUnloaded).Append('|').Append(e.LoadViolations)
                     .Append("/baseExpiryLocal-extraSolves-extraMs=").Append(e.ExpiryLocal).Append('|').Append(e.ExtraSolves).Append('|').Append(N(e.ExtraSeconds*1000f))
+                    .Append("/firstMinMm=").Append(Milli(e.FirstMin)).Append("/entryBand=").Append(Band(e.FirstMin))
                     .Append("/risingReviewLocal-pending=").Append(e.RisingLocal).Append('|').Append(e.RisingPending);
                 if (UsesNearGroundHold(Selected))
                     b.Append("/nearHoldFirstRiseLocal=").Append(e.NearHoldFirstRise).Append("/previousStepCandidate=").Append(e.PreviousStepCandidate);
@@ -365,8 +395,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     .Append(f.First).Append('|').Append(N(f.FirstJ)).Append('|').Append(N(f.FirstKick))
                     .Append("/firstNonzeroLocal-signedNormalNs-deltaWRadSec=").Append(f.FirstNonzero).Append('|').Append(N(f.NonzeroJ)).Append('|').Append(N(f.NonzeroKick));
             }
+            _entryAudit?.Append(b);
             return b.ToString();
         }
+        private static string Milli(float value) => float.IsFinite(value)
+            ? (value * 1000f).ToString("R", CultureInfo.InvariantCulture) : "NA";
         private static string N(float x) => float.IsFinite(x) ? x.ToString("G7", CultureInfo.InvariantCulture) : "NA";
     }
 }

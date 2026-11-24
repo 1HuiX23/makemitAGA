@@ -24,7 +24,7 @@ namespace ARL.Contracts
         {
             var s = SwingKneeContracts.Sample(n,dt,n*dt);
             s.Gait = phase; s.SourcePhase = "STEADY"; s.Min = -.001f; s.RawMin = -.007f;
-            s.AnkleHeights = new Vector3(.125f,.120f,.121f); s.SwingMeasured = false;
+            s.AnkleHeights = new Vector3(.125f,.120f,.121f);
             return s;
         }
 
@@ -144,7 +144,10 @@ namespace ARL.Contracts
                 s.FirstMiss=miss && i==10; s.DepthLatchFixed=miss?8:0;
                 s.NowActive=s.OrdinaryEnabled=!miss&&i==10;
                 s.EarlySignal=w.Observe(s,side); s.EarlyOrigin=w.Origin;
-                if(EarlyLandingWindow.LeftTrial(s.EarlySignal))s.SwingCandidate.Reason=SwingKneeCandidate.Status.NoRoom;
+                if (EarlyLandingWindow.LeftTrial(s.EarlySignal))
+                    s.SwingCandidate = new SwingKneeCandidate.Result {
+                        Reason=SwingKneeCandidate.Status.NoRoom, HipBasis="SETTLED_PARENT", HipReason="PROTECTED_BYPASS",
+                        HipModes=3, RecoveryBits=4, Handoff=true, KneeFeedforward="CAPTURED_FF" };
                 history.Add(s,i*.02d,Audit.Screen(s));
                 if(i==10){history.Capture(s,miss); if(miss)history.EndMiss(LandingEventHistory.MissEnd.Recovered);}
             }
@@ -158,6 +161,8 @@ namespace ARL.Contracts
             Check.That(left.Contains("/leftStarts-trials-favorable=1|4|0/") && left.Contains("/firstLeadMs(leftOrigin-rightLow-rightNearLow)=120|NA|NA"),"four left trials belong to one event");
             Check.That(right.Contains("/anchor=STRONG_EXACT_START/depthLocal=8/strongStartLocal=6/strongEdge=Swing|STEADY|Approach|STEADY/anchorCaptured=True/anchorLocal=6") &&
                 right.Contains("/rightLow-nearLow=3|2/firstLeadMs(leftOrigin-rightLow-rightNearLow)=NA|60|60"),"right anchor precedes depth");
+            Check.That(left.Contains("/hipBasis=SETTLED_PARENT/hipNormal=PROTECTED_BYPASS/hipModes-recoveryBits-handoff=3|4|True/kneeFF=CAPTURED_FF"),
+                "optional history projects the original knee receipt from the matching ring slot");
             Check.That(Event(Foot.Right,false,1).Contains("side=Right/kind=Ordinary/outcome=Enabled"),"ordinary control included");
             Check.That(Event(Foot.Right,true,6).Contains("strongStartLocal=NA/anchorCaptured=False"),"missing preceding sample is censored");
             Check.That(Event(Foot.Left,true,9).Contains("/anchorCaptured=False"),"latch outside half-second evidence is unknown");

@@ -11,6 +11,7 @@ namespace ARL.Contracts
         internal static void Run()
         {
             Check.Run("Precontact selects formal right A/B only", Selectors);
+            RunEntryAuditContracts();
             RunExpiryContracts();
             RunRisingContracts();
             RunPreviousStepExpiryContracts();
@@ -38,10 +39,12 @@ namespace ARL.Contracts
             var window = new Window(); window.Select(invalid);
             Check.That(window.Selected == Window.Mode.Off && Window.ForFoot(invalid, "RIGHT") == Window.Mode.Off, "unregistered selector");
             foreach (string side in new[] {"LEFT", null, "UNKNOWN"})
-                foreach (bool b in new[] {true,false}) Check.That(Window.ForFoot(b ? Window.Mode.PreviousStepExpiryReview : Window.Mode.NearGroundHold8mm,side)==Window.Mode.Off,"peer foot");
+                foreach (var mode in new[] {Window.Mode.NearGroundHold8mm, Window.Mode.PreviousStepExpiryReview, Window.Mode.PreviousStepExpiryReviewFirst35mm})
+                    Check.That(Window.ForFoot(mode,side)==Window.Mode.Off,"peer foot");
             Check.That(Window.ForFoot(Window.Mode.FallingForecastRise5mm,"RIGHT")==Window.Mode.Off, "retired physical arm is replay-only");
             Check.That(Window.ForFoot(Window.Mode.Off,"RIGHT")==Window.Mode.Off && Window.ForFoot(Window.Mode.NearGroundHold8mm,"RIGHT")==Window.Mode.NearGroundHold8mm &&
-                Window.ForFoot(Window.Mode.PreviousStepExpiryReview,"RIGHT")==Window.Mode.PreviousStepExpiryReview,"formal arms");
+                Window.ForFoot(Window.Mode.PreviousStepExpiryReview,"RIGHT")==Window.Mode.PreviousStepExpiryReview &&
+                Window.ForFoot(Window.Mode.PreviousStepExpiryReviewFirst35mm,"RIGHT")==Window.Mode.PreviousStepExpiryReviewFirst35mm,"formal arms");
         }
         private static void Candidate()
         {

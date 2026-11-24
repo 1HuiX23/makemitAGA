@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using UnityEngine;
 using Leg = MakemitAGA.ActiveRagdollLab.Physics.TurnHandoffTrajectory;
 using Search = MakemitAGA.ActiveRagdollLab.Physics.CombinedLandingSearch;
 
@@ -18,23 +19,49 @@ namespace ARL.Contracts
         }
 
         private readonly Dictionary<(int Issue, int Path), Sample> _samples = new();
+        private readonly Dictionary<(int Issue, int Path), float> _previewPeakMm = new();
+
+        // Compute all three displacements independently from world-space points.
+        private static float PeakShift(in Leg.Pose pose, in Leg.Measure trial, in Leg.Measure native)
+        {
+            float DistanceXZ(Vector3 a, Vector3 b) => new Vector3(a.x - b.x, 0f, a.z - b.z).magnitude;
+            var sole = pose.Center - Vector3.up * pose.Half.y;
+            float soleShift = DistanceXZ(trial.Foot + trial.ShoeRotation * sole, native.Foot + native.ShoeRotation * sole);
+            return Math.Max(soleShift, Math.Max(DistanceXZ(trial.Lower, native.Lower), DistanceXZ(trial.Foot, native.Foot)));
+        }
 
         internal void Issue(int issue, TurnLandingContracts.RecordedSolve s, Search.Step step, Search.Step prior)
         {
-            if (!step.HaveHorizon) return;
+            if (!step.HaveHorizon)
+            {
+                Check.That(!step.PreviewPeakShift.HasValue, "no two-step ranking without an issued horizon");
+                return;
+            }
             Check.That(Search.TryHorizon(prior.PhysicalPose, s.Pose, s.Budget, s.Dt, out var linear), "rebuild the issued horizon");
             var held = linear;
             held.Foot = held.Lower + (s.Pose.Foot - s.Pose.Lower);
+            bool ranked = false;
             foreach (var p in step.Paths.Take(step.Count))
             {
                 var h = p.Horizon;
                 if (!h.Feasible) continue;
+                var second = Leg.Evaluate(linear, h.NextOffset, s.Issue, h.NextShift);
                 _samples.Add((issue, p.Id), new Sample {
-                    Linear = Leg.Evaluate(linear, h.NextOffset, s.Issue, h.NextShift),
+                    Linear = second,
                     Held = Leg.Evaluate(held, h.NextOffset, s.Issue, h.NextShift),
                     Buffered = h.Buffered
                 });
+                if (!p.PreviewSlot || p.Entry.StrongSamples == 0 || p.Entry.DepthLatch != 0 || !h.Buffered) continue;
+                ranked = true;
+                var first = Leg.Evaluate(s.Pose, p.Leg.Offset, s.Issue, p.Move.Body.Position);
+                var firstNative = Leg.Evaluate(s.Pose, default, s.Issue);
+                var secondNative = Leg.Evaluate(linear, default, s.Issue);
+                float peakMm = 1000f * Math.Max(PeakShift(s.Pose, first, firstNative), PeakShift(linear, second, secondNative));
+                Check.That(step.PreviewPeakShift.HasValue, "the retained eligible slot carries its issue-time score");
+                Check.Near(1000f * step.PreviewPeakShift.Value, peakMm, .001f, "worst of six material-point displacements in mm");
+                _previewPeakMm.Add((issue, p.Id), peakMm);
             }
+            Check.That(step.PreviewPeakShift.HasValue == ranked, "the scored slot must be strong, unlatched and buffered");
         }
 
         internal void Read(int issue, Search.Path p, Leg.Pose real, Leg.Aim aim)
@@ -81,12 +108,25 @@ namespace ARL.Contracts
         internal void Verify(string report)
         {
             var lines = report.Split('\n');
+            var ranked = lines.Where(l => l.StartsWith("J179/", StringComparison.Ordinal) && l.Contains("/previewPeakShiftMm="));
+            var remaining = new Dictionary<(int Issue, int Path), float>(_previewPeakMm);
+            foreach (var line in ranked)
+            {
+                var id = Field(line, "issue-path-parent").Split('|');
+                var key = (int.Parse(id[0], CultureInfo.InvariantCulture), int.Parse(id[1], CultureInfo.InvariantCulture));
+                Check.That(Field(line, "previewSlot") == "True" && Field(line, "nextForecast") == "Buffered",
+                    "a reported score identifies the selected buffered preview");
+                Check.That(remaining.Remove(key, out var peakMm), "the score belongs to this issue/path exactly once");
+                Check.Near(float.Parse(Field(line, "previewPeakShiftMm"), CultureInfo.InvariantCulture), peakMm, .001f,
+                    "stop report preserves the score frozen before readback");
+            }
+            Check.That(remaining.Count == 0, "every scored issue has a report receipt");
             var pairs = _samples.Values.Where(s => s.Paired).ToArray();
             var buffered = pairs.Where(s => s.Buffered).ToArray();
-            var summary = lines.Single(l => l.StartsWith("TURN_ANKLE_GAP_V041780/", StringComparison.Ordinal));
+            var summary = lines.Single(l => l.StartsWith("TURN_ANKLE_GAP_V041790/", StringComparison.Ordinal));
             Check.That(Field(summary, "feasible-paired-unpaired-bufferedPairs") ==
                 $"{_samples.Count}|{pairs.Length}|{_samples.Count - pairs.Length}|{buffered.Length}", "all unavailable endpoints stay in the coverage count");
-            var pairedLines = lines.Where(l => l.StartsWith("J178/", StringComparison.Ordinal) && l.Contains("/nextHeldSole-gapMm=")).ToArray();
+            var pairedLines = lines.Where(l => l.StartsWith("J179/", StringComparison.Ordinal) && l.Contains("/nextHeldSole-gapMm=")).ToArray();
             Check.That(pairedLines.Length == pairs.Length, "only verified physical pairs produce a held forecast receipt");
             foreach (string line in pairedLines)
             {

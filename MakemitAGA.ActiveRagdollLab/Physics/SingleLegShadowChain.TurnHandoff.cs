@@ -16,7 +16,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 right._hipAnchorPair.TryGetCommittedInput(step, out var r);
                 trace.ObserveRise(step, _torso.LandingRiseInput, l, r,
                     _hipAnchorPair.Report.Current, right._hipAnchorPair.Report.Current, _torso.HipAttitudeCommand,
-                    _legTurnCurrent.ReceiverNormalResponse, leftFirst, pulseApplied);
+                    _legTurnCurrent.ReceiverNormalResponse, leftFirst, pulseApplied, _torso.LandingHeightInput);
             }
             catch { trace.NoteRiseFault(step); }
         }

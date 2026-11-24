@@ -4,11 +4,11 @@ using UnityEngine;
 
 namespace MakemitAGA.ActiveRagdollLab.Physics
 {
-    // Both arms retain v163 B contact. Only B may change the pelvis allocation for one unloaded solve after a paired turn release.
+    // Both arms retain the v181 B pelvis and hip policy. Only the right precontact first-sample ceiling varies.
     internal sealed partial class PelvisDynamicReceiverIsolation
     {
-        internal const string DynamicHipArmA = "A_V041780_NATIVE_RISE";
-        internal const string DynamicHipArmB = "B_V041780_LANDING_TRACKING_RESERVE";
+        internal const string DynamicHipArmA = "A_V041830_RIGHT_REENTRY_FIRST25";
+        internal const string DynamicHipArmB = "B_V041830_RIGHT_REENTRY_FIRST35";
         internal static bool UsesSupportBraking(string arm) => IsDynamicHipArm(arm);
         internal static bool UsesSupportNormalRecovery(string arm) => IsDynamicHipArm(arm);
         internal static bool UsesHipLandingPreparation(string arm) => false; // Both formal arms use the V142 A physical baseline.

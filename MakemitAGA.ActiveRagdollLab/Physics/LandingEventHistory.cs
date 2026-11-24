@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
+using MakemitAGA.ActiveRagdollLab.Runtime;
 using Sample = MakemitAGA.ActiveRagdollLab.Physics.FootLandingOpportunityAudit.Sample;
 using Rejection = MakemitAGA.ActiveRagdollLab.Physics.FootLandingOpportunityAudit.Rejection;
 
@@ -22,29 +23,31 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             internal double Time;
             internal int Local, Source, Flags, Rejections;
             internal bool PreviousEvent, RightLandingObserved;
-            internal RightFootLandingWindow.Readback RightLandingRead;
-            internal SwingLandingWindow.Signal Swing;
             internal EarlyLandingWindow.Signal Early;
             internal bool HeightRequested;
             internal RightThighWindow.Signal RightThigh;
             internal int RightWarningOrigin;
             internal int Origin;
-            internal SwingKneeCandidate.Result KneeProbe;
             internal FootLandingOpportunityAudit.Phase Phase;
             internal string SourcePhase;
+            internal int Epoch, Support;
+            internal SourceRotationCoverage.Kind Rotation;
             internal float Min, Raw, Control, Predicted, Velocity, Age, Gap;
             internal float HipRaw, HipReference, HipActual, KneeRaw, KneeGoal, KneeActual;
             internal float AnkleRaw, AnkleLower, AnkleFoot;
 
             internal Point(in Sample s, double time, Rejection rejects)
             {
+                Epoch = s.Step.Epoch; Support = s.SupportId;
+                Rotation = LandingObservationTiming.Run.Running ?
+                    LandingObservationTiming.Run.SourceRotation.AtOpportunity(s.Source,s.Step,s.SourceAge) : SourceRotationCoverage.Kind.Unknown;
                 Time = time; Local = s.Fixed; Source = s.Source.Sequence; Phase = s.Gait; SourcePhase = s.SourcePhase;
                 Flags = (s.StrongLanding ? 1 : 0) | (s.Identity ? 2 : 0) | (s.FivePoint ? 4 : 0) |
                     (s.FullFootprint ? 8 : 0) | (s.Adopted ? 16 : 0) | (s.SelectedBoxFallback ? 32 : 0);
                 Rejections = (int)rejects;
                 PreviousEvent = s.FirstMiss || s.MissInProgress || s.OrdinaryEnabled || s.RecoveryEnabled;
-                RightLandingObserved=s.RightLandingObserved; RightLandingRead=s.RightLandingRead;
-                Swing = s.SwingSignal; KneeProbe = s.SwingCandidate; Early = s.EarlySignal; Origin = s.EarlyOrigin;
+                RightLandingObserved=s.RightLandingObserved;
+                Early = s.EarlySignal; Origin = s.EarlyOrigin;
                 HeightRequested=s.ParentHeightRequested; RightWarningOrigin=s.RightWarningOrigin; RightThigh=s.RightThigh;
                 float floor = s.FloorCenter.y + s.FloorHalf.y;
                 Min = s.HeightValid ? s.Min : float.NaN;
@@ -78,21 +81,33 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             }
         }
 
+        // These historical probe payloads are large and have no consumer in either formal arm.
+        // Keep them out of the half-second physical history, including every saved event copy.
+        private struct EarlyDetail
+        {
+            internal SwingKneeCandidate.Result Knee;
+            internal RightFootLandingWindow.Readback Landing;
+        }
+
         private sealed class Record
         {
             internal Trigger Kind;
             internal MissEnd? End;
             internal int Epoch, Shared, Support;
-            internal bool Full, Limited, SwingMeasured, HeightMeasured;
+            internal bool Full, Limited, HeightMeasured;
             internal int DepthLatchFixed, PrecontactOrigin;
             internal string FootSide;
+            internal SourceRotationCoverage.Kind SourceRotation, BoundaryRotation;
+            internal int BoundaryLocal;
             internal EarlyLandingWindow.Foot EarlyFoot;
             internal Point[] Points;
+            internal EarlyDetail[] EarlyRows;
             internal RightKneePivot.Frame[] Pivot;
         }
 
         private readonly Point[] _ring = new Point[RingCapacity];
         private RightKneePivot.Frame[] _pivotRing;
+        private EarlyDetail[] _earlyRing;
         private readonly List<Record> _records = new List<Record>();
         private readonly int[] _totals = new int[2], _saved = new int[2], _full = new int[2], _limited = new int[2];
         private int _head, _count;
@@ -103,7 +118,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal void Reset()
         {
             ClearWindow();
-            _records.Clear(); _openDetail = null; _enabled = false; _pivotRing = null;
+            _records.Clear(); _openDetail = null; _enabled = false; _pivotRing = null; _earlyRing = null;
             Array.Clear(_totals); Array.Clear(_saved); Array.Clear(_full); Array.Clear(_limited);
         }
 
@@ -129,6 +144,12 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             }
             int slot = (_head + _count) % RingCapacity;
             _ring[slot] = new Point(s, time, rejects);
+            if (s.EarlyFoot != EarlyLandingWindow.Foot.Unknown)
+            {
+                _earlyRing ??= new EarlyDetail[RingCapacity];
+                _earlyRing[slot] = new EarlyDetail { Knee = s.SwingCandidate, Landing = s.RightLandingRead };
+            }
+            else if (_earlyRing != null) _earlyRing[slot] = default;
             if (pivot.State != RightKneePivot.Capture.Disabled)
                 _pivotRing ??= new RightKneePivot.Frame[RingCapacity];
             if (_pivotRing != null) _pivotRing[slot] = pivot;
@@ -148,11 +169,35 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             if (full) _full[index]++;
             if (_saved[index] >= DetailPerKind) return;
             var record = new Record { Kind = kind, Epoch = s.Step.Epoch, Shared = s.Step.Sequence,
-                Support = s.SupportId, Full = full, Limited = limited, SwingMeasured = s.SwingMeasured,
+                Support = s.SupportId, Full = full, Limited = limited,
                 DepthLatchFixed = s.DepthLatchFixed, PrecontactOrigin = s.PrecontactOrigin, FootSide = s.FootSide, EarlyFoot = s.EarlyFoot, HeightMeasured = s.ParentHeightMeasured, Points = new Point[_count] };
             int first = Math.Min(_count, RingCapacity - _head);
             Array.Copy(_ring, _head, record.Points, 0, first);
             Array.Copy(_ring, 0, record.Points, first, _count - first);
+            // Freeze evidence at both clocks. A later source jump cannot explain a depth
+            // latch that already rejected the same landing on an earlier solve.
+            var lastPoint = record.Points[_count - 1];
+            bool current = lastPoint.Local == s.Fixed && lastPoint.Epoch == s.Step.Epoch &&
+                lastPoint.Source == s.Source.Sequence && lastPoint.Support == s.SupportId && s.SupportId != 0;
+            record.SourceRotation = current ? lastPoint.Rotation : SourceRotationCoverage.Kind.Unknown;
+            record.BoundaryLocal = miss && s.DepthLatchFixed > 0 ? s.DepthLatchFixed : s.Fixed;
+            if (record.BoundaryLocal == s.Fixed) record.BoundaryRotation = record.SourceRotation;
+            else
+            {
+                for (int n = _count - 2; n >= 0; --n)
+                {
+                    ref var point = ref record.Points[n];
+                    if (point.Local < record.BoundaryLocal) break;
+                    if (point.Local == record.BoundaryLocal && point.Epoch == record.Epoch && point.Support == record.Support)
+                    { record.BoundaryRotation = point.Rotation; break; }
+                }
+            }
+            if (_earlyRing != null && record.EarlyFoot != EarlyLandingWindow.Foot.Unknown)
+            {
+                record.EarlyRows = new EarlyDetail[_count];
+                Array.Copy(_earlyRing, _head, record.EarlyRows, 0, first);
+                Array.Copy(_earlyRing, 0, record.EarlyRows, first, _count - first);
+            }
             if (_pivotRing != null && record.EarlyFoot == EarlyLandingWindow.Foot.Right)
             {
                 record.Pivot = new RightKneePivot.Frame[_count];
@@ -196,45 +241,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     .Append("/support=").Append(r.Support).Append("/samples=").Append(r.Points.Length)
                     .Append("/coverage=").Append(r.Limited ? "CAPACITY" : r.Full ? "FULL" : "LEFT_CENSORED");
                 if (r.FootSide != null) b.Append("/side=").Append(r.FootSide).Append("/rightPrecontactOriginLocal=").Append(r.PrecontactOrigin);
+                b.Append("/sourceRotation250ms=").Append(r.SourceRotation).Append("/sourceMotion=").Append(last.SourcePhase ?? "Unknown")
+                    .Append("/rotationBoundaryLocal=").Append(r.BoundaryLocal).Append("/rotationAtBoundary=").Append(r.BoundaryRotation);
                 foreach (var point in r.Points) point.Append(b, last.Time);
-                if (r.SwingMeasured) AppendSwing(b, r);
-                if (r.EarlyFoot != EarlyLandingWindow.Foot.Unknown) AppendEarly(b, r);
-            }
-        }
-        // The real latch may predate confirmation. For ordinary entries use the start of the last
-        // continuous strong + exact-ID interval. The lead is unknowable if its anchor is outside the ring.
-        private static void AppendSwing(StringBuilder b, Record r)
-        {
-            var points = r.Points;
-            int end = points.Length-1;
-            int anchor = r.Kind == Trigger.FirstMiss ? FindLocal(points,r.DepthLatchFixed) : StrongStart(points,end);
-            b.Append("\nSWING_EVENT_V041450/kind=").Append(r.Kind).Append("/outcome=")
-                .Append(r.Kind == Trigger.Ordinary ? "Enabled" : r.End?.ToString() ?? "Open")
-                .Append("/eventLocal=").Append(points[end].Local).Append("/anchor=")
-                .Append(r.Kind == Trigger.FirstMiss ? "DEPTH_LATCH" : "STRONG_EXACT_START")
-                .Append("/latchLocal=").Append(r.Kind == Trigger.FirstMiss ? r.DepthLatchFixed : 0);
-            if (anchor < 0 || (r.Kind == Trigger.Ordinary && anchor == 0))
-            { b.Append("/anchorCaptured=False/beforeCounts=NA"); return; }
-            int start = CycleStart(points,anchor);
-            int low=0, trend=0, divergence=0, favorable=0;
-            for (int i=start; i<anchor; i++)
-            {
-                if (points[i].Swing >= SwingLandingWindow.Signal.Low) low++;
-                if (points[i].Swing >= SwingLandingWindow.Signal.Worsening) trend++;
-                if (points[i].Swing == SwingLandingWindow.Signal.Diverging) divergence++;
-                if (points[i].KneeProbe.Reason == SwingKneeCandidate.Status.Favorable) favorable++;
-            }
-            b.Append("/anchorCaptured=True/anchorLocal=").Append(points[anchor].Local)
-                .Append("/availableBeforeMs=").Append(Number((points[anchor].Time-points[start].Time)*1000d))
-                .Append("/beforeSteps(low-trend-diverging-favorable)=").Append(low).Append('|').Append(trend)
-                .Append('|').Append(divergence).Append('|').Append(favorable);
-            for (int i=start; i<anchor; i++)
-            {
-                var pt=points[i];
-                if (pt.Swing != SwingLandingWindow.Signal.Diverging) continue;
-                b.Append("\nSWING_KNEE_V041450/local=").Append(pt.Local).Append("/source=").Append(pt.Source)
-                    .Append("/leadToAnchorMs=").Append(Number((points[anchor].Time-pt.Time)*1000d))
-                    .Append("/result=").Append(pt.KneeProbe.Detail());
+                if (r.EarlyRows != null) AppendEarly(b, r);
             }
         }
         private static int FindLocal(Point[] points, int local)
@@ -301,7 +311,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     sig == EarlyLandingWindow.Signal.LeftContinue || sig >= EarlyLandingWindow.Signal.RightSteady) eligible++;
                 if (sig == EarlyLandingWindow.Signal.LeftStart) { origins++; if (firstOrigin < 0) firstOrigin=i; }
                 if (EarlyLandingWindow.LeftTrial(sig))
-                { trials++; if (pt.KneeProbe.Reason == SwingKneeCandidate.Status.Favorable) good++; }
+                { trials++; if (r.EarlyRows[i].Knee.Reason == SwingKneeCandidate.Status.Favorable) good++; }
                 if (EarlyLandingWindow.RightLow(sig)) { broad++; if (firstBroad < 0) firstBroad=i; }
                 if (sig == EarlyLandingWindow.Signal.RightNearLow) { near++; if (firstNear < 0) firstNear=i; }
             }
@@ -321,7 +331,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                     .Append("/leadMs=").Append(Lead(points,anchor,i)).Append("/rawBox-physicalBox-lowerMinusSourceAnkleMm=");
                 b.Append(Number(1000d * pt.Raw)).Append('|').Append(Number(1000d * pt.Min)).Append('|')
                     .Append(Number(1000d * (pt.AnkleLower-pt.AnkleRaw)));
-                if (EarlyLandingWindow.LeftTrial(pt.Early)) b.Append("/result=").Append(pt.KneeProbe.EarlyDetail());
+                if (EarlyLandingWindow.LeftTrial(pt.Early)) b.Append("/result=").Append(r.EarlyRows[i].Knee.EarlyDetail());
             }
             if (r.HeightMeasured) AppendPreparationEvent(b,r,anchor,start);
             if (!left && points[end].RightLandingObserved) AppendRightFootLanding(b,r,anchor);
@@ -449,7 +459,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             // but no command from the edge itself or the previous cycle can enter.
             for(int i=start+1;i<=anchor;i++)
             {
-                var n=p[i].RightLandingRead;
+                var n=r.EarlyRows[i].Landing;
                 if (n.From<=0 || n.From!=p[i-1].Local || n.From+1!=p[i].Local) continue;
                 read++;
                 if (n.State==RightFootLandingForecast.Status.ProtectInBand) protectedSteps++;

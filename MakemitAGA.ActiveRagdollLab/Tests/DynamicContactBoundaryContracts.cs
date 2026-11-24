@@ -19,6 +19,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal DynamicContactBoundaryIssue DynamicContactIssue = DynamicContactBoundaryIssue.None;
         internal bool ContactEntryContinuous, ContactEntryRecovery, StanceLoadAdmissionSelected;
         internal bool GroundReferenceEnabled, GroundReferenceApplied, GroundReferencePartial, FootGroundTrajectorySelected, FootKneeProgressSelected;
+        internal RightFootPrecontact.Mode PrecontactMode;
         internal object FootContactShadowCollider = new object();
 
         internal static SingleLegShadowChain ContactBoundaryFixture(bool b, PelvisRunScope scope)
@@ -37,6 +38,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal void SetBoundaryScope(PelvisRunScope scope) { _dynamicScope = scope; }
 
         internal static readonly Action<SingleLegShadowChain>[] ContactBoundarySelectionFaults = {
+            l => l.PrecontactMode = l.PrecontactMode == RightFootPrecontact.Mode.Off ?
+                RightFootPrecontact.Mode.PreviousStepExpiryReview : RightFootPrecontact.Mode.Off,
             l => l.ContactEntryContinuous = false,
             l => l.ContactEntryRecovery = false,
             l => l.StanceLoadAdmissionSelected = false,
@@ -60,6 +63,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
     internal sealed partial class BilateralLegCoordinator
     {
         private SingleLegShadowChain _primary, _secondary;
+        private string PrimarySide = "LEFT", SecondarySide = "RIGHT";
         private bool IsBuilt = true, _bilateralEnabled = true, _contactShadowSelfPairReadback = true;
         private object _contactShadowSelfPairPrimary, _contactShadowSelfPairSecondary;
         private readonly SupportObservation _supportSurface = new SupportObservation();
@@ -85,6 +89,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             };
             pair._torso.PelvisReceiverControl.Arm = b
                 ? PelvisDynamicReceiverIsolation.DynamicHipArmB : PelvisDynamicReceiverIsolation.DynamicHipArmA;
+            if (PelvisRunScopes.HasHipCoupling(scope))
+                pair._secondary.PrecontactMode = RightFootPrecontact.ForArm(pair._torso.PelvisReceiverControl.Arm);
             pair._contactShadowSelfPairPrimary = pair._primary.FootContactShadowCollider;
             pair._contactShadowSelfPairSecondary = pair._secondary.FootContactShadowCollider;
             return pair;
@@ -94,6 +100,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         {
             Check.Run("A final contact readback accepts real shared Knee selection", () => SharedJointInput(false));
             Check.Run("B final contact readback accepts real shared Knee selection", () => SharedJointInput(true));
+            Check.Run("right precontact readback follows leg identity and actual selected ceiling", PrecontactSelection);
             Check.Run("both legs retain every contact selection guard in both arms", SelectionFaults);
             Check.Run("bilateral readback retains foundation, scope, support and identity guards", BoundaryFaults);
             Check.Run("bilateral readback propagates child failure and preserves first cause", ChildFaults);
@@ -117,6 +124,26 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             Check.That(!pair.DynamicContactMatchesScope(PelvisRunScope.DynamicLegUpperSelfWeightContact) &&
                 !pair.DynamicContactMatchesScope(PelvisRunScope.DynamicLegFreeSpace),
                 "a valid Hip receipt does not authorize another scope");
+        }
+
+        private static void PrecontactSelection()
+        {
+            foreach (bool b in new[] { false, true })
+            {
+                var pair = BoundaryFixture(b);
+                var expected = pair._secondary.PrecontactMode;
+                pair.PrimarySide = "right"; pair.SecondarySide = "left";
+                pair._primary.PrecontactMode = expected; pair._secondary.PrecontactMode = RightFootPrecontact.Mode.Off;
+                Check.That(pair.DynamicContactReady, "right primary gets the selected physical entry");
+                pair.SecondarySide = "UNKNOWN";
+                Check.That(!pair.DynamicContactReady, "the peer must be identified as left");
+                pair.SecondarySide = "left";
+                pair._primary.PrecontactMode = b ? RightFootPrecontact.Mode.PreviousStepExpiryReview :
+                    RightFootPrecontact.Mode.PreviousStepExpiryReviewFirst35mm;
+                Check.That(!pair.DynamicContactReady, "wrong first height fails setup");
+                pair._primary.PrecontactMode = pair._secondary.PrecontactMode = RightFootPrecontact.Mode.Off;
+                Check.That(!pair.DynamicContactReady, "missing native right admission fails setup");
+            }
         }
 
         private static void SelectionFaults()

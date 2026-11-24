@@ -32,7 +32,8 @@ namespace UnityEngine
         public static Vector3 operator -(Vector3 v) => new Vector3(-v.x, -v.y, -v.z);
         public static bool operator ==(Vector3 a, Vector3 b) => (a - b).sqrMagnitude < 1e-10f;
         public static bool operator !=(Vector3 a, Vector3 b) => !(a == b);
-        public override bool Equals(object value) => value is Vector3 v && x.Equals(v.x) && y.Equals(v.y) && z.Equals(v.z);
+        public bool Equals(Vector3 other) => x.Equals(other.x) && y.Equals(other.y) && z.Equals(other.z);
+        public override bool Equals(object value) => value is Vector3 v && Equals(v);
         public override int GetHashCode() => HashCode.Combine(x, y, z);
         public static Vector3 operator +(Vector3 a, Vector3 b) => new Vector3(a.x + b.x, a.y + b.y, a.z + b.z);
         public static Vector3 operator -(Vector3 a, Vector3 b) => new Vector3(a.x - b.x, a.y - b.y, a.z - b.z);

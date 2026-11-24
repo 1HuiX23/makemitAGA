@@ -17,6 +17,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             ? _footFoundation.PreviousReferenceSupport : default;
         internal bool ContactEntryContinuous => _footFoundation != null && _footFoundation.ContactEntryContinuous;
         internal bool StanceLoadAdmissionSelected => _footFoundation != null && _footFoundation.StanceLoadAdmissionSelected;
+        internal RightFootPrecontact.Mode PrecontactMode => _footFoundation?.PrecontactMode ?? RightFootPrecontact.Mode.Off;
         internal bool ContactEntryRecovery => _footFoundation != null && _footFoundation.ContactEntryRecovery;
         internal bool GroundReferenceEnabled => _footFoundation != null && _footFoundation.GroundReferenceEnabled;
         internal bool GroundReferenceApplied => _footFoundation != null && _footFoundation.GroundReferenceApplied;

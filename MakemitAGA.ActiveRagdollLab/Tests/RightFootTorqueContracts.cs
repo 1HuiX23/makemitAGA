@@ -119,7 +119,7 @@ namespace ARL.Contracts
                 var p=Pose();var history=new LandingEventHistory();
                 for(int i=1;i<=7;i++)
                 {
-                    var s=Sample(i,p,onset && i==2);s.SwingMeasured=false;
+                    var s=Sample(i,p,onset && i==2);
                     s.ControlMin=target-s.AnkleDeltaY; s.SourceAge=fresh?.1f:.1027832f;
                     if(i>=5){s.Gait=Audit.Phase.Approach;s.Strong=true;}
                     if(i==7){s.OrdinaryEnabled=outcome=="Enabled";s.FirstMiss=!s.OrdinaryEnabled;s.DepthLatchFixed=5;}

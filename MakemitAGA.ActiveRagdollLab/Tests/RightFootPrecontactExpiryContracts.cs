@@ -24,9 +24,9 @@ namespace ARL.Contracts
         private static void ExpiryArms()
         {
             Check.That(Window.ForArm(PelvisDynamicReceiverIsolation.DynamicHipArmA) == Window.Mode.PreviousStepExpiryReview &&
-                Window.ForArm(PelvisDynamicReceiverIsolation.DynamicHipArmB) == Window.Mode.PreviousStepExpiryReview &&
+                Window.ForArm(PelvisDynamicReceiverIsolation.DynamicHipArmB) == Window.Mode.PreviousStepExpiryReviewFirst35mm &&
                 Window.ForArm(null) == Window.Mode.Off && Window.ForArm("UNKNOWN") == Window.Mode.Off, "production selector");
-            foreach (var mode in new[] { Window.Mode.NearGroundHold8mm, Window.Mode.PreviousStepExpiryReview })
+            foreach (var mode in new[] { Window.Mode.NearGroundHold8mm, Window.Mode.PreviousStepExpiryReview, Window.Mode.PreviousStepExpiryReviewFirst35mm })
                 Check.That(Open(mode).Physical && Window.ForFoot(mode, "LEFT") == Window.Mode.Off, "right physical arm");
         }
 

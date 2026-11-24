@@ -199,7 +199,7 @@ namespace ARL.Contracts
             using (t.Measure(LandingObservationTiming.Stage.FixedLoop, false)) { }
             var s = new SourceStepContext { Epoch = 5, Sequence = 1, Dt = .01f, Time = 1f };
             t.Source(s, true); s.Sequence++; s.Time += .125f; t.Source(s, true);
-            t.FixedBoundary(false); t.FixedBoundary(true);
+            t.FixedBoundary(false); t.FixedBoundary(true); t.Source(s,true); // duplicate cannot restore both-throughout
             s.Sequence++; s.Time += .25f; t.Source(s, true);
             s.Sequence += 2; s.Time += 1f; t.Source(s, true);
             s.Sequence++; s.Time += .5f; t.Source(s, false);

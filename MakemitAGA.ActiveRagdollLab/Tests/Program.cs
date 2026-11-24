@@ -53,6 +53,7 @@ namespace ARL.Contracts
             CombinedLandingContracts.Run();
             LandingTrackingContracts.Run();
             LandingPreviewContracts.Run();
+            TurnHeightContracts.Run();
             Maintenance170Contracts.Run();
             CoordinatorContracts.Run();
             FoundationContracts.Run();

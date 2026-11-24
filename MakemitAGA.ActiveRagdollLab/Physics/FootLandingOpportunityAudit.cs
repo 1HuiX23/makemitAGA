@@ -31,11 +31,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             internal string FootSide;
             internal bool FirstMiss, MissInProgress, OrdinaryEnabled, RecoveryEnabled;
             internal int DepthLatchFixed;
-            internal bool SwingMeasured;
             internal EarlyLandingWindow.Foot EarlyFoot;
             internal EarlyLandingWindow.Signal EarlySignal;
             internal int EarlyOrigin;
-            internal SwingLandingWindow.Signal SwingSignal;
             internal SwingKneeCandidate.Result SwingCandidate;
             internal bool GeometryValid, MotionValid, TrackingValid, ParentValid;
             internal bool FullFootprint, SelectedBoxFallback;

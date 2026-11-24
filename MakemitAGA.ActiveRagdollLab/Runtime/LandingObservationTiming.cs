@@ -15,7 +15,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             FixedLoop, FixedTorso, FixedLegs, SourceLoop, SourceTorso, SourceLegs,
             LegFullCapture, LegParentCapture, FootPathBuild, LifecycleActive, LifecycleInactive,
             ObserverActive, ObserverInactive, EntryText,
-            LegPrepare, HipPair, KneePd, FootFixed, FootProbe, BilateralEvidence, SwingKneeProbe, EarlyKneeProbe, ParentHeightProbe, RightAnkleProbe, RightKneePivotSnapshot, RightThighTracking, RightFootForecast, RightFootLanding, LeftFootRelease, LeftShinForecast, LeftFootLead, LeftLegPreparation, FootTransitionSource, FootTransitionPair, TurnHandoff, LandingRise, CombinedLanding
+            LegPrepare, HipPair, KneePd, FootFixed, FootProbe, BilateralEvidence, EarlyKneeProbe, ParentHeightProbe, RightAnkleProbe, RightKneePivotSnapshot, RightThighTracking, RightFootForecast, RightFootLanding, LeftFootRelease, LeftShinForecast, LeftFootLead, LeftLegPreparation, FootTransitionSource, FootTransitionPair, TurnHandoff, LandingRise, CombinedLanding
         }
 
         internal readonly struct Measurement : IDisposable
@@ -87,20 +87,21 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
         private FrameIntervals _all, _both, _other;
         private SourceStepContext _previous;
         private int _generation, _sourceBreaks;
-        private bool _bothThroughout, _wasCompact, _withHistory, _withSwingProbe, _withEarlyProbe;
+        private bool _bothThroughout, _wasCompact, _withHistory, _withEarlyProbe;
         internal bool Running { get; private set; }
         internal bool Compact { get; private set; }
         internal bool History => Running && _withHistory;
+        internal readonly SourceRotationCoverage SourceRotation = new SourceRotationCoverage();
         internal bool EarlyProbe => Running && _withEarlyProbe;
         internal bool LeftReleaseProbe => Running && _withLeftRelease;
         private bool _withLeftRelease;
         private BilateralFootTransitionTrace _transitions;
         internal BilateralFootTransitionTrace Transitions => Running ? _transitions : null;
-        internal bool SwingProbe => Running && _withSwingProbe;
         internal static string ModeName(bool compact) => compact ? "COMPACT" : "FULL";
 
         internal void Begin(string arm)
         {
+            SourceRotation.Reset();
             _generation++;
             Running = PelvisDynamicReceiverIsolation.IsDynamicHipArm(arm);
             Compact = _wasCompact = Running;
@@ -108,7 +109,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
             _withLeftRelease = Running;
             _transitions = _withLeftRelease ? new BilateralFootTransitionTrace() : null;
             // Both v154 arms retain the same event windows and the same observation cost.
-            _withSwingProbe = _withEarlyProbe = false;
+            _withEarlyProbe = false;
             Array.Clear(_times, 0, _times.Length);
             Array.Clear(_bothTimes, 0, _bothTimes.Length);
             _all = _both = _other = default;
@@ -128,6 +129,9 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
         internal void Source(SourceStepContext source, bool bothActive)
         {
             if (!Running) return;
+            // A repeated delivery has no elapsed interval and must not erase a single-support
+            // boundary already observed between the two distinct render samples.
+            if (_previous.Matches(source)) { _bothThroughout &= bothActive; return; }
             if (_previous.Valid && source.Valid && _previous.Epoch == source.Epoch &&
                 source.Sequence == _previous.Sequence + 1 && source.Time >= _previous.Time)
             {
@@ -153,7 +157,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
         internal string Summary()
         {
             var sb = new StringBuilder("\nLANDING_COST_V041430/mode=").Append(ModeName(_wasCompact))
-                .Append("/eventHistory=").Append(_withHistory).Append("/swingKneeProbe=").Append(_withSwingProbe).Append("/earlyLandingProbe=").Append(_withEarlyProbe)
+                .Append("/eventHistory=").Append(_withHistory).Append("/earlyLandingProbe=").Append(_withEarlyProbe)
                 .Append("/leftReleaseProbe=").Append(_withLeftRelease)
                 .Append("/parentHeightProbe=").Append(_withEarlyProbe).Append("/rightAnkleProbe=").Append(_withEarlyProbe)
                 .Append("/rightKneePivot=").Append(_withEarlyProbe)
@@ -171,6 +175,7 @@ namespace MakemitAGA.ActiveRagdollLab.Runtime
                 .Append("/all=").Append(_all.Text()).Append("/bothActiveThroughout=").Append(_both.Text())
                 .Append("/other=").Append(_other.Text());
             if (_transitions != null) sb.Append(_transitions.Summary());
+            SourceRotation.Append(sb);
             return sb.ToString();
         }
         private static string Mean(double sum, long count) => count == 0 ? "NA" : N(sum / count);

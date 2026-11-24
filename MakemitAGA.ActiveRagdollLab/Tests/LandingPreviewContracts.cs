@@ -29,7 +29,7 @@ namespace ARL.Contracts
             Check.Run("177 next pose carries measured pelvis transport and rigid segment rates", HorizonGeometry);
             Check.Run("177 forecast receipts require consecutive physical clocks and a measured first command", WitnessClocks);
             Check.Run("178 ankle model comparisons share the exact buffered geometry boundaries", BufferedBounds);
-            Check.Run("178 twelve strict logged releases, refreshed targets and paired second-step forecasts", Recorded);
+            Check.Run("179 seventeen strict releases, preview rank and paired second-step forecasts", Recorded);
         }
 
         private static Leg.Pose ReadPose(string[] row, Leg.Pose p)
@@ -184,25 +184,29 @@ namespace ARL.Contracts
         private static void Recorded()
         {
             int oldShoes = 0, oldLower = 0, newShoes = 0, newLower = 0, releases = 0;
-            foreach (int version in new[] { 175, 176, 177 })
+            foreach (int version in new[] { 175, 176, 177, 178 })
             {
                 using var file = new StreamReader(typeof(LandingPreviewContracts).Assembly.GetManifestResourceStream("ARL.Contracts.LandingTracking" + version));
                 file.ReadLine();
                 var rows = new List<string[]>();
                 string line;
                 while ((line = file.ReadLine()) != null) rows.Add(line.Split('\t'));
-                Check.That(rows.Count == (version switch { 175 => 50, 176 => 51, _ => 55 }), "every logged command has a measured endpoint");
+                Check.That(rows.Count == (version switch { 175 => 50, 176 => 51, 177 => 55, _ => 64 }), "every logged command has a measured endpoint");
                 foreach (var release in rows.GroupBy(row => I(row[0])))
                 {
-                    var old = Replay(release.ToArray(), false);
-                    var current = Replay(release.ToArray(), true);
-                    oldShoes += old.shoe ? 1 : 0; oldLower += old.lower ? 1 : 0;
+                    var steps = release.ToArray();
+                    if (version <= 177)
+                    {
+                        var old = Replay(steps, false);
+                        oldShoes += old.shoe ? 1 : 0; oldLower += old.lower ? 1 : 0;
+                    }
+                    var current = Replay(steps, true);
                     newShoes += current.shoe ? 1 : 0; newLower += current.lower ? 1 : 0;
                     releases++;
                 }
             }
-            Check.That(releases == 12 && oldShoes == 7 && newShoes == 8 && oldLower == 5 && newLower == 8,
-                $"release-level totals: historical control {oldShoes}/{oldLower}, current {newShoes}/{newLower}");
+            Check.That(releases == 17 && oldShoes == 7 && oldLower == 5 && newShoes == 12 && newLower == 12,
+                $"historical no-preview results on 12 releases: {oldShoes}/{oldLower}; current results on 17: {newShoes}/{newLower}");
         }
 
         private static void SetClock(ref Trace.Tick tick, int shared, int source, float dt)
@@ -230,6 +234,7 @@ namespace ARL.Contracts
             var window = new TurnHandoffWindow(start, initial.Issue.Travel, TurnHandoffWindow.Policy.LeftCombined, usePreview: preview);
             Check.That(window.Visit(tick, origin, 22, 23, null), "normal release visit");
             bool sampledLowerRejection = false;
+            int previewParent = 0;
             foreach (var row in rows)
             {
                 var s = TurnLandingContracts.DecodeIssue(row);
@@ -298,6 +303,21 @@ namespace ARL.Contracts
                 }
                 if (!preview && from == 3920) CheckPlanarContinuation(s, cmd, V(row[17]), previous, real, aim, native);
                 search.Read(to, step, real, aim, native, receipt, to == first);
+                if (preview && start == 4121 && to == first - 1)
+                {
+                    var slot = step.Paths.Take(step.Count).Single(p => p.PreviewSlot);
+                    Check.That(step.PreviewPeakShift.HasValue && slot.SafeRead && slot.MarginSamples == 3 &&
+                        slot.FirstLowerExcess == 0, "the issued preview survives the refreshed target before 4132");
+                    previewParent = slot.Id;
+                }
+                if (preview && start == 4121 && to == first)
+                {
+                    var child = step.Paths.Take(step.Count).Single(p => p.SafeRead && p.MarginSamples == 4 && p.FirstLowerExcess == 0);
+                    Check.That(previewParent != 0 && child.Parent == previewParent && child.Entry.DepthLatch == 0 &&
+                        receipt.CanEnter(child.Entry.ReadySamples), "4132 qualifies through the retained parent on the preceding receipt");
+                    Check.Near(child.Move.Settled.Sole * 1000f, -1.749f, .002f, "4132 measured-pose shoe height in mm");
+                    Check.Near(child.Move.Settled.Gap * 1000f, 4.749f, .002f, "4132 measured-pose ankle gap in mm");
+                }
                 if (preview && from == 4903) CheckRefresh(step, previous, real, aim, native, cmd);
                 var nativeDecision = nativeTrail.Observe(receipt, receipt.NativeInside, receipt.NativeSole);
                 tick = ContinuousLandingContracts.Tick(to, real, strong, first, nativeTrail.DepthLatch);
@@ -337,7 +357,7 @@ namespace ARL.Contracts
             var last = search.LastRead;
             var report = new StringBuilder();
             Check.That(tick.Ordinary == (start == 4100) && tick.Miss == (start != 4100),
-                "4100 to 4115 has a real ordinary entry; the other eleven records end at their first miss");
+                "only the physical release at 4100 has an ordinary entry on its first opportunity");
             string nativeOutcome = tick.Ordinary ? "Ordinary" : "FirstMiss";
             window.AppendCombined(report, tick, nativeOutcome, tick.Ordinary ? first : 0, strong, null);
             var log = report.ToString();
@@ -354,10 +374,11 @@ namespace ARL.Contracts
             {
                 Check.That(search.LastReadLocal == first && search.EndLocal == first && last.Entry.StrongSamples == 4 &&
                     nominations > 0 && feasible > 0 && buffered > 0 && paired > 0 && forecastBuffered > 0 &&
-                    log.Contains("/horizonReady=True") && log.Contains("J178/") && log.Contains("/nextRead=Unavailable"),
-                    "the current search reaches the physical first; absent second reads remain ungraded");
-                int margins = start switch { 2540 => 1, 2668 => 1, 3267 => 3, 3910 => 2, _ => 4 };
-                int latch = start switch { 2540 => 2550, 2668 => 2679, 3267 => 3279, 3910 => 3920, _ => 0 };
+                    log.Contains("/horizonReady=True") && log.Contains("J179/") &&
+                    log.Split("/nextRead=Unavailable").Length - 1 == feasible - paired,
+                    $"search reaches the physical first at {first} and reports exactly the unpaired second reads");
+                int margins = start switch { 2471 => 0, 2540 => 1, 2668 => 1, 3267 => 3, 3910 => 2, _ => 4 };
+                int latch = start switch { 2471 => 2483, 2540 => 2550, 2668 => 2679, 3267 => 3279, 3910 => 3920, _ => 0 };
                 Check.That(last.MarginSamples == margins && last.Entry.DepthLatch == latch &&
                     search.Outcome == (latch == 0 ? "WouldEnter" : "DepthLatched") && (shoes > 0) == (latch == 0) && (lower > 0) == (latch == 0),
                     "measured continuous strong-stance margins and independent joint qualification at " + first);

@@ -1,3 +1,4 @@
+using System;
 using MakemitAGA.ActiveRagdollLab.Model;
 using MakemitAGA.ActiveRagdollLab.Runtime;
 
@@ -35,7 +36,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 bool footTrajectory = kneeGroundTarget;
                 bool footKneeProgress = kneeGroundTarget;
                 bool loadAdmission = continuousEntry; // V041200: both arms retain v119 B admission.
-                if (_primary.ContactEntryContinuous != continuousEntry || _secondary.ContactEntryContinuous != continuousEntry ||
+                var precontact = footTrajectory ? RightFootPrecontact.ForArm(_torso.PelvisReceiverControl.Arm) : RightFootPrecontact.Mode.Off;
+                if (!PrecontactMatches(precontact) ||
+                    _primary.ContactEntryContinuous != continuousEntry || _secondary.ContactEntryContinuous != continuousEntry ||
                     _primary.ContactEntryRecovery != recoveryEntry || _secondary.ContactEntryRecovery != recoveryEntry ||
                     _primary.StanceLoadAdmissionSelected != loadAdmission || _secondary.StanceLoadAdmissionSelected != loadAdmission ||
                     _primary.GroundReferenceEnabled != continuousEntry || _secondary.GroundReferenceEnabled != continuousEntry ||
@@ -55,6 +58,18 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 return primary != DynamicContactBoundaryIssue.None ? primary : _secondary.DynamicContactIssue;
             }
         }
+        private bool PrecontactMatches(RightFootPrecontact.Mode expected)
+        {
+            var primary = _primary.PrecontactMode;
+            var secondary = _secondary.PrecontactMode;
+            const RightFootPrecontact.Mode off = RightFootPrecontact.Mode.Off;
+            if (expected == off) return primary == off && secondary == off;
+            if (string.Equals(PrimarySide, "RIGHT", StringComparison.OrdinalIgnoreCase))
+                return primary == expected && secondary == off && string.Equals(SecondarySide, "LEFT", StringComparison.OrdinalIgnoreCase);
+            return primary == off && secondary == expected && string.Equals(PrimarySide, "LEFT", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(SecondarySide, "RIGHT", StringComparison.OrdinalIgnoreCase);
+        }
+
         internal bool DynamicContactReady => DynamicContactIssue == DynamicContactBoundaryIssue.None;
         internal bool DynamicContactMatchesScope(PelvisRunScope scope) => PelvisRunScopes.IsContact(scope) &&
             DynamicContactReady && _primary.DynamicScope == scope && _secondary.DynamicScope == scope;

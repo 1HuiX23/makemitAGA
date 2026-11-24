@@ -1,6 +1,6 @@
-# MakemitAGA Active Ragdoll Lab 0.4.178 - Landing Tracking Reserve
+# MakemitAGA Active Ragdoll Lab 0.4.183 - Right Stance Re-entry
 # 保存后执行：arl_profile_reload
-# A、B 右脚均采用 163 B。A 沿用原控制。B 在静止转身且双脚同拍释放后，至多一拍调整骨盆向上请求与双髋预算。两臂的左脚只读候选在水平牵引求解时留出 0.010 mm，刷新目标后按 0.10 mm 验收。停测时比较同一第二拍命令下的两种踝间隙预报。revision=V041780_LANDING_TRACKING_RESERVE_20261124。正式流程见 arl_help。
+# 两臂沿用 181 B 骨盆、双髋与左脚设置。右脚无载荷预接触首拍上限 A +25 mm、B +35 mm，第二拍均为 +1 至 +25 mm。本轮测 A，记录右脚正式释放后 STANCE 内重新获得支撑的逐拍高度与对侧接触。revision=V041830_RIGHT_STANCE_REENTRY_20261124。正式流程见 arl_help。
 # 本文件只保留仍由活动运行时消费的配置；历史实验参数与 A/B 细节请查长期版本记录或旧版本 ZIP。
 
 # --- 目标与 Two-Body 几何 ---

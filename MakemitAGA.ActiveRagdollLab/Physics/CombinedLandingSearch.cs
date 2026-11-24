@@ -69,6 +69,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             internal int Parents, LegOptions, Forecasts, Count, SafeReads;
             internal bool HaveHorizon;
             internal int JointChecked, Shortlisted, ExtraLegs, NextCommands;
+            internal float? PreviewPeakShift; // Metres, frozen at issue for the retained strong, buffered preview.
         }
 
         private enum Preference { LegHeight, JointRoom, Diversity }

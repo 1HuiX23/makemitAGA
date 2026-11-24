@@ -35,7 +35,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             internal Translation Body;
             internal Vector3 Applied, RequestedShift;
             internal Trial.Measure Forecast, Settled;
-            internal float ClearanceNeed, Cap, Fraction;
+            internal float ClearanceNeed, Fraction;
             internal bool HeightReachable, SafeRead, Pass, PlanarAdjusted;
             internal float WorstMargin => Mathf.Min(Margin(Forecast), Margin(Settled));
             internal bool MarginPass => Pass && WorstMargin >= LandingMargin;
@@ -99,7 +99,6 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             { result.Status = State.StartBounds; return result; }
             float damping = Mathf.Max(0f, 1f - input.Drag * dt), response = dt * dt * damping;
             if (response <= 0f || !float.IsFinite(response)) return result;
-            result.Cap = input.Cap;
             var raw = input.Tether.Raw - old.Position * input.Tether.Kp - old.Velocity * input.Tether.Kd;
             if (!Finite(raw)) return result;
             var feedback = continued ? Vector3.ClampMagnitude(raw, input.Cap) : input.Applied;

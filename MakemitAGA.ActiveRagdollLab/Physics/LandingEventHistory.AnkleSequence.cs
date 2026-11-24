@@ -12,9 +12,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         }
         // The half-second history can start partway through a verified sequence.
         // Only a demonstrated cycle boundary excludes an earlier origin.
-        private static bool SequenceInCycle(Point[] p,int start,int i,out Seq.Readback s)
+        private static bool SequenceInCycle(Record r,int start,int i,out Seq.Readback s)
         {
-            var n=p[i].RightLandingRead; s=n.Preparation;
+            var p=r.Points; var n=r.EarlyRows[i].Landing; s=n.Preparation;
             return s.Depth>0 && n.From==p[i-1].Local && n.From+1==p[i].Local &&
                 s.Origin+s.Depth==p[i].Local && (start==0 || s.Origin>=p[start].Local);
         }
@@ -30,7 +30,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             var totals=new SequenceTotals[Seq.Count]; // Sealed event report only.
             for (int i=start+1;i<=anchor;i++)
             {
-                if (!SequenceInCycle(p,start,i,out var s)) continue;
+                if (!SequenceInCycle(r,start,i,out var s)) continue;
                 if (s.Origin<p[start].Local) oldest++;
                 paired++; if (s.Depth>maxDepth) maxDepth=s.Depth;
                 if (s.Depth>=2) multi++;
@@ -64,7 +64,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             }
             for (int i=start+1;i<=anchor;i++)
             {
-                if (!SequenceInCycle(p,start,i,out var s)) continue;
+                if (!SequenceInCycle(r,start,i,out var s)) continue;
                 var input=s.Command;
                 b.Append("\nRIGHT_ANKLE_SEQUENCE_POINT_V041530/event-anchor-from-to-source-origin-depth=")
                     .Append(p[p.Length-1].Local).Append('|').Append(p[anchor].Local).Append('|').Append(p[i-1].Local).Append('|').Append(p[i].Local)

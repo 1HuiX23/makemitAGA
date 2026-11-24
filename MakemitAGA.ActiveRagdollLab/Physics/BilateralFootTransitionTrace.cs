@@ -17,8 +17,10 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             internal PhysicsStepContext Step;
             internal FootTransitionSource.Sample Source;
             internal int Local, Body, Floor, PriorFloor, EventFloor, Held;
-            internal float Age, BoxMin, HipHeight, SourceMin, ControlMin;
-            internal bool EntryReferenceValid;
+            internal float Age, BoxMin, HipHeight, SourceMin, ControlMin, RightEntryMin;
+            internal bool EntryReferenceValid, QualifiedIdentity;
+            internal Reference RightReference;
+            internal SelectedPose RightPose;
             internal OrdinaryFootEntry.Sample Entry;
             internal int NativeDepthLatch;
             internal LandingHeightBreakdown Height;
@@ -38,7 +40,8 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 (!Was || PriorFloor == Floor) && (!Active || !Precontact) && (!(Active || Precontact || Miss || Ordinary || Recovery) || EventFloor == Floor) &&
                 HipPointPairMobility.V(Target) && HipPointPairMobility.V(Foot) && HipPointPairMobility.V(Lower) &&
                 HipPointPairMobility.V(Velocity) && HipPointPairMobility.V(Sole) && HipPointPairMobility.V(SourceSole) &&
-                HipPointPairMobility.V(CornerVelocity) && float.IsFinite(BoxMin) && Gait.Normal.sqrMagnitude > .9f;
+                HipPointPairMobility.V(CornerVelocity) && float.IsFinite(BoxMin) && HipPointPairMobility.V(Gait.Normal) &&
+                Gait.Normal.sqrMagnitude > .9f && float.IsFinite(Gait.Tangent) && float.IsFinite(Gait.SignedNormal) && float.IsFinite(Gait.Clearance);
         }
         internal struct View
         {
@@ -65,6 +68,9 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         private Pair _previous;
         private Tick _pending;
         private int _pendingSide = -1;
+        private PhysicsStepContext _lastPairStep;
+        private int _duplicates, _staleSides, _invalidSides, _conflicts;
+        private int _reentrySeen;
         private int _pairs, _cuts, _rejected, _missingFoot, _faults, _sealedPartial, _unmatchedCallbacks;
         private readonly bool[] _hits = new bool[2];
         private bool _sealed;
@@ -92,13 +98,32 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         internal void Submit(int side, in Tick tick)
         {
             if (_sealed) return;
-            if (_pendingSide >= 0 && (_pendingSide == side || !_pending.Step.Matches(tick.Step)))
+            if (side != 0 && side != 1) { _invalidSides++; return; }
+            if (!tick.Step.Valid) { _rejected++; _pendingSide = -1; Cut("InvalidClock"); return; }
+            if (SameSlot(tick.Step, _lastPairStep))
             {
-                _missingFoot++; Cut("MissingSide"); _pendingSide = -1;
+                var recorded = side == 0 ? _previous.Left : _previous.Right;
+                if (tick.Step.Matches(_lastPairStep) && SameReceipt(recorded,tick)) _duplicates++;
+                else _conflicts++;
+                return;
+            }
+            if (Older(tick.Step, _lastPairStep) || (_pendingSide >= 0 && Older(tick.Step, _pending.Step)))
+            { _staleSides++; return; }
+            if (_pendingSide >= 0)
+            {
+                if (SameSlot(_pending.Step, tick.Step))
+                {
+                    if (!tick.Step.Matches(_pending.Step) || (_pendingSide == side && !SameReceipt(_pending,tick)))
+                    {
+                        _conflicts++; _lastPairStep = tick.Step; _pendingSide = -1; Cut("ClockConflict"); return;
+                    }
+                    if (_pendingSide == side) { _duplicates++; return; }
+                }
+                else { _missingFoot++; _pendingSide = -1; Cut("MissingSide"); }
             }
             if (_pendingSide == -1) { _pending = tick; _pendingSide = side; return; }
             Pair pair = side == 0 ? new Pair { Left = tick, Right = _pending } : new Pair { Left = _pending, Right = tick };
-            _pendingSide = -1;
+            _pendingSide = -1; _lastPairStep = tick.Step;
             if (!pair.Left.Usable || !pair.Right.Usable || pair.Left.Body == pair.Right.Body ||
                 pair.Left.Floor != pair.Right.Floor || pair.Left.Source.Root != pair.Right.Source.Root ||
                 !pair.Left.Source.Clock.Matches(pair.Right.Source.Clock))
@@ -119,8 +144,20 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             previous.Step.Epoch == current.Step.Epoch && previous.Step.Sequence+1 == current.Step.Sequence &&
             previous.Local+1 == current.Local && previous.Active == current.Was && previous.Body == current.Body && previous.Floor == current.Floor &&
             previous.Source.Root == current.Source.Root && previous.Source.Continuity == current.Source.Continuity &&
-            current.Source.Clock.Sequence >= previous.Source.Clock.Sequence &&
-            current.Step.FixedTime >= previous.Step.FixedTime;
+            (current.Source.Clock.Sequence == previous.Source.Clock.Sequence ? current.Source.Clock.Matches(previous.Source.Clock) :
+                current.Source.Clock.Sequence > previous.Source.Clock.Sequence && current.Source.Clock.Time >= previous.Source.Clock.Time) &&
+            current.Step.FixedTime >= previous.Step.FixedTime && current.Step.UnscaledTime >= previous.Step.UnscaledTime;
+
+        private static bool SameReceipt(in Tick a, in Tick b) =>
+            a.Local == b.Local && a.Body == b.Body && a.Floor == b.Floor && a.Source.Root == b.Source.Root &&
+            a.Source.Clock.Matches(b.Source.Clock) && a.Was == b.Was && a.Active == b.Active && a.Precontact == b.Precontact;
+
+        private static bool SameSlot(in PhysicsStepContext a, in PhysicsStepContext b) =>
+            a.Valid && b.Valid && a.Epoch == b.Epoch && a.Sequence == b.Sequence;
+
+        private static bool Older(in PhysicsStepContext step, in PhysicsStepContext other) =>
+            step.Valid && other.Valid && (step.Epoch < other.Epoch ||
+                step.Epoch == other.Epoch && step.Sequence < other.Sequence);
 
         private void Cut(string reason)
         {
@@ -193,8 +230,11 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
         }
         private Window Open(int side, Kind kind, in View point, in View prev, FootTransitionSource.Heading heading, string trigger, int triggerSource)
         {
+            bool reentry = side == 1 && kind != Kind.Brake && prev.Foot.Active && point.Foot.Released &&
+                point.Foot.Phase == Phase.Stance && !point.Foot.Gait.Stance && point.Foot.ReleaseReason == "RELEASE_ON_STRONG_STANCE_EXIT";
+            if (reentry) _reentrySeen++;
             if (++_found[side,(int)kind] > MaxPerSideKind) { _skipped[side,(int)kind]++; return null; }
-            var w = new Window(side, kind, point, prev, heading, trigger, triggerSource, _sources[side]);
+            var w = new Window(side, kind, point, prev, heading, trigger, triggerSource, _sources[side], reentry);
             _windows.Add(w);
             return w;
         }

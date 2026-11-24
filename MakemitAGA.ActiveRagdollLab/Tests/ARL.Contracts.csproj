@@ -6,7 +6,7 @@
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <IsPackable>false</IsPackable>
-    <Version>0.4.178</Version>
+    <Version>0.4.183</Version>
     <AssemblyName>ARL.Contracts</AssemblyName>
   </PropertyGroup>
   <!-- Link the real implementations, rather than keeping a second copy of their algorithms.
@@ -36,6 +36,10 @@
     <Compile Include="../Physics/LeftFootReleaseTrace.cs" Link="Production/LeftFootReleaseTrace.cs" />
     <Compile Include="../Physics/RightFootLandingForecast.cs" Link="Production/RightFootLandingForecast.cs" />
     <Compile Include="../Physics/LandingEventHistory.AnkleSequence.cs" Link="Production/LandingEventHistory.AnkleSequence.cs" />
+    <EmbeddedResource Include="Fixtures/RightStanceReentry182.tsv" LogicalName="ARL.Contracts.RightStanceReentry182" />
+    <EmbeddedResource Include="Fixtures/RightPrecontactPhysical181.tsv" LogicalName="ARL.Contracts.RightPrecontactPhysical181" />
+    <EmbeddedResource Include="Fixtures/RightPrecontactEntry179180.tsv" LogicalName="ARL.Contracts.RightPrecontactEntry179180" />
+    <Compile Include="../Physics/RightFootPrecontact.EntryAudit.cs" Link="Production/RightFootPrecontact.EntryAudit.cs" />
     <Compile Include="../Physics/RightFootPrecontact.cs" Link="Production/RightFootPrecontact.cs" />
     <Compile Include="../Physics/RightFootPrecontact.Expiry.cs" Link="Production/RightFootPrecontact.Expiry.cs" />
     <Compile Include="../Physics/RightFootPrecontact.Rising.cs" Link="Production/RightFootPrecontact.Rising.cs" />
@@ -50,7 +54,6 @@
     <Compile Include="../Physics/RightAnkleWindow.cs" Link="Production/RightAnkleWindow.cs" />
     <Compile Include="../Physics/ParentHeightProbe.cs" Link="Production/ParentHeightProbe.cs" />
     <Compile Include="../Physics/EarlyLandingWindow.cs" Link="Production/EarlyLandingWindow.cs" />
-    <Compile Include="../Physics/SwingLandingWindow.cs" Link="Production/SwingLandingWindow.cs" />
     <Compile Include="../Physics/SwingKneeCandidate.cs" Link="Production/SwingKneeCandidate.cs" />
     <Compile Include="../Physics/LandingEventHistory.cs" Link="Production/LandingEventHistory.cs" />
     <Compile Include="../Physics/LandingWindowOutcomes.cs" Link="Production/LandingWindowOutcomes.cs" />
@@ -64,7 +67,13 @@
     <Compile Include="../Physics/FootContactGeometryLimits.cs" Link="Production/FootContactGeometryLimits.cs" />
     <Compile Include="../Physics/FootTransitionMotion.cs" Link="Production/FootTransitionMotion.cs" />
     <Compile Include="../Physics/TurnHandoffTrajectory.cs" Link="Production/TurnHandoffTrajectory.cs" />
+    <EmbeddedResource Include="Fixtures/TurnHeightAnchors179.tsv" LogicalName="ARL.Contracts.TurnHeightAnchors179" />
     <EmbeddedResource Include="Fixtures/LandingPulse172.tsv" LogicalName="ARL.Contracts.LandingPulse172" />
+    <Compile Include="../Physics/TurnHeightContinuation.cs" Link="Production/TurnHeightContinuation.cs" />
+    <Compile Include="../Physics/BilateralFootTransitionTrace.TurnHeight.cs" Link="Production/BilateralFootTransitionTrace.TurnHeight.cs" />
+    <Compile Include="../Physics/PelvisAngularReferencePlanner.cs" Link="Production/PelvisAngularReferencePlanner.cs" />
+    <Compile Include="../Physics/PelvisReferenceInertiaBudget.cs" Link="Production/PelvisReferenceInertiaBudget.cs" />
+    <Compile Include="../Runtime/SourceRotationCoverage.cs" Link="Production/SourceRotationCoverage.cs" />
     <Compile Include="../Physics/LandingPulseWindow.cs" Link="Production/LandingPulseWindow.cs" />
     <Compile Include="../Physics/LandingPulseForces.cs" Link="Production/LandingPulseForces.cs" />
     <Compile Include="../Physics/PelvisDynamicReceiverIsolation.LandingPulse.cs" Link="Production/PelvisDynamicReceiverIsolation.LandingPulse.cs" />
@@ -83,6 +92,7 @@
     <EmbeddedResource Include="Fixtures/LandingTracking175.tsv" LogicalName="ARL.Contracts.LandingTracking175" />
     <EmbeddedResource Include="Fixtures/LandingTracking176.tsv" LogicalName="ARL.Contracts.LandingTracking176" />
     <EmbeddedResource Include="Fixtures/LandingTracking177.tsv" LogicalName="ARL.Contracts.LandingTracking177" />
+    <EmbeddedResource Include="Fixtures/LandingTracking178.tsv" LogicalName="ARL.Contracts.LandingTracking178" />
     <EmbeddedResource Include="Fixtures/CombinedLanding174.tsv" LogicalName="ARL.Contracts.CombinedLanding174" />
     <EmbeddedResource Include="Fixtures/ContinuousLanding173.tsv" LogicalName="ARL.Contracts.ContinuousLanding173" />
     <Compile Include="../Physics/LandingFootTraction.cs" Link="Production/LandingFootTraction.cs" />
@@ -94,6 +104,7 @@
     <Compile Include="../Physics/BilateralFootTransitionTrace.Handoff.cs" Link="Production/BilateralFootTransitionTrace.Handoff.cs" />
     <Compile Include="../Physics/BilateralFootTransitionTrace.cs" Link="Production/BilateralFootTransitionTrace.cs" />
     <Compile Include="../Physics/BilateralFootTransitionTrace.Render.cs" Link="Production/BilateralFootTransitionTrace.Render.cs" />
+    <Compile Include="../Physics/BilateralFootTransitionTrace.RightReentry.cs" Link="Production/BilateralFootTransitionTrace.RightReentry.cs" />
     <Compile Include="../Physics/BilateralFootTransitionTrace.Window.cs" Link="Production/BilateralFootTransitionTrace.Window.cs" />
     <Compile Include="../Physics/FootBoxGeometry.cs" Link="Production/FootBoxGeometry.cs" />
     <Compile Include="../Physics/KneeGroundTarget.cs" Link="Production/KneeGroundTarget.cs" />

@@ -16,9 +16,9 @@ namespace MakemitAGA.ActiveRagdollLab
         Plugin.PluginVersion)]
     public sealed class Plugin : BepInEx.Unity.IL2CPP.BasePlugin
     {
-        internal const string PluginVersion = "0.4.178";
+        internal const string PluginVersion = "0.4.183";
         // Both arms share the contact policy. B may issue one bounded pelvis rise command per paired turn release.
-        internal const string SourceRevision = "V041780_LANDING_TRACKING_RESERVE_20261124";
+        internal const string SourceRevision = "V041830_RIGHT_STANCE_REENTRY_20261124";
         internal static ManualLogSource Logger;
         private Harmony _harmony;
         private UnityEngine.Events.UnityAction<Scene, LoadSceneMode> _sceneLoadedHandler;
@@ -45,7 +45,7 @@ namespace MakemitAGA.ActiveRagdollLab
         private void LoadCore()
         {
             Logger.LogInfo("[ARL] Active Ragdoll Lab " + PluginVersion + " loaded | sourceRevision=" + SourceRevision +
-                " | Both arms use the v163 B right-foot contact policy. A keeps the original allocation. B can issue one bounded pelvis rise pulse before the first left landing. See arl_help for the current run.");
+                " | Both arms use the v163 B right-foot contact policy. A keeps the original allocation. B can issue one bounded pelvis rise pulse before the first left landing. B also compares turn height references on the same measured inputs. See arl_help for the current run.");
             try
             {
                 ClassInjector.RegisterTypeInIl2Cpp<RagdollProxyContactTracker>();

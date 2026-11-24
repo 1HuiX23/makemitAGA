@@ -27,7 +27,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
                 left.HipForceOwner.TryGetCommittedInput(step,out var li) && right.HipForceOwner.TryGetCommittedInput(step,out var ri) &&
                 LandingRiseAllocation.TryChoose(step,l.Floor,_torso.LandingRiseInput,li,ri,lc,rc,_torso.HipAttitudeCommand,leftFirst,out var choice))
             {
-                bool use = _torso.PelvisReceiverControl.Arm == PelvisDynamicReceiverIsolation.DynamicHipArmB;
+                bool use = PelvisDynamicReceiverIsolation.IsDynamicHipArm(_torso.PelvisReceiverControl.Arm);
                 if (use && !_torso.ApplyLandingPulse(step,l.Floor,left.HipForceOwner,right.HipForceOwner,leftFirst,choice)) return false;
                 applied=use;
                 _landingPulse.RecordIssue(step,choice,lc.ParentV.y,applied);

@@ -101,6 +101,7 @@ namespace MakemitAGA.ActiveRagdollLab.Physics
             "/kneePlannedFF(primary-secondary)=" + (_primary?.KneePlannedFeedforwardSelected ?? false) + ":" + (_secondary?.KneePlannedFeedforwardSelected ?? false) +
             "/kneeGroundTarget(primary-secondary)=" + (_primary?.KneeGroundTargetSelected ?? false) + ":" + (_secondary?.KneeGroundTargetSelected ?? false) +
             "/footTrajectory(primary-secondary)=" + (_primary?.FootGroundTrajectorySelected ?? false) + ":" + (_secondary?.FootGroundTrajectorySelected ?? false) +
+            "/precontact(primary-secondary)=" + (_primary?.PrecontactMode.ToString() ?? "MISSING") + ":" + (_secondary?.PrecontactMode.ToString() ?? "MISSING") +
             "/footKneeProgress(primary-secondary)=" + (_primary?.FootKneeProgressSelected ?? false) + ":" + (_secondary?.FootKneeProgressSelected ?? false) +
             "/kneeExtension(primary-secondary)=" + (_primary?.KneeGroundExtensionSelected ?? false) + ":" + (_secondary?.KneeGroundExtensionSelected ?? false) +
             "/loadAdmission(primary-secondary)=" + (_primary?.StanceLoadAdmissionSelected ?? false) + ":" + (_secondary?.StanceLoadAdmissionSelected ?? false) +
